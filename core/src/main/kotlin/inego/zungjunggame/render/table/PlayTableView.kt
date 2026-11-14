@@ -7,7 +7,6 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.engine.*
 import inego.zungjunggame.hints.McHintArmSnapshot
-import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.input.InputProfile
 import inego.zungjunggame.platform.SafeArea
 import inego.zungjunggame.render.assets.TileAssets
@@ -1163,8 +1162,6 @@ class PlayTableView(
             )
         }
 
-        drawRulesCredit(batch, screenW, layout.rulesTextH, layout.rulesPadX, layout.rulesPadY, bottomReservePx, layout.chromeScale)
-
         val hoveredHand = humanHandHits.getOrNull(hoveredHandIndex)
         if (hoveredHand != null && !hoverX.isNaN() && !hoverY.isNaN()) {
             val waits = inputs.discardWaits.waitsFor(hoveredHand.tileType)
@@ -1212,9 +1209,9 @@ class PlayTableView(
         val rowGap: Float,
         /**
          * The shared felt-label scale for these dimensions. Seat labels, the center
-         * turn line, the HUD counters, the rules credit and the live-wall count all
-         * paint at this one factor, so none of them can stay desktop-sized while
-         * the seat labels have already shrunk.
+         * turn line, the HUD counters and the live-wall count all paint at this one
+         * factor, so none of them can stay desktop-sized while the seat labels have
+         * already shrunk.
          */
         val chromeScale: Float,
         val edgeInsetLeft: Float,
@@ -1230,13 +1227,9 @@ class PlayTableView(
         val feltCenterY: Float,
         val metrics: PlayerAreaLayout.Metrics,
         val alongEdgePad: Float,
-        val rulesTextH: Float,
-        val rulesPadX: Float,
-        val rulesPadY: Float,
         /**
-         * Bottom band the human seat label must clear: the coach reserve, plus
-         * the rules credit strip in portrait (the credit is out of the inset in
-         * landscape).
+         * Bottom band the human seat label must clear: the tutorial coach reserve.
+         * Zero outside that coach.
          */
         val bottomLabelReserve: Float,
     ) {
@@ -1340,31 +1333,13 @@ class PlayTableView(
             tileGap = tileGap,
             activeScaleBoost = seatLabels.activeScaleBoost,
         )
-        val rulesPadX = if (isAndroid) Fonts.px(12f) else Fonts.px(24f)
-        // The credit is the bottom-most copy on the felt, and the reserved
-        // navigation bar draws a hard edge under it — the same edge a desktop
-        // window has. A hairline of pad reads as cramped against that line, so
-        // the gap is one design line on both platforms: about the credit's own
-        // line height, and the separation the phone needs from the bar.
-        val rulesPadY = Fonts.px(10f)
-        val rulesGap = if (isAndroid) Fonts.px(2f) else Fonts.px(6f)
-        val rulesCreditText = L10n.get(KEY_RULES_CREDIT)
-        val rulesTextH = Fonts.withFaceScale(Fonts.small, chromeScale) {
-            Fonts.textHeight(Fonts.small, rulesCreditText)
-        }
-
-        val floor = bottomReservePx.coerceAtLeast(0f)
-        // Landscape has the width to keep the credit in the corner without
-        // reserving its line under the hand. Portrait does not: the label and
-        // the credit would share a band, so the credit keeps its own strip
-        // below the label's gutter.
-        val landscape = screenW > screenH
-        val bottomLabelReserve =
-            floor + if (landscape) 0f else rulesPadY + rulesTextH + rulesGap
+        // The tutorial coach's Back / Next row is the only bottom band the hand
+        // and the side labels must clear.
+        val bottomReserve = bottomReservePx.coerceAtLeast(0f)
         // The human hand keeps the same gutter as the other edges. Its seat
-        // label fits that gutter; only the portrait credit adds a strip below.
+        // label fits that gutter; only the coach adds a strip below.
         val edgeInsetBottom =
-            max(baseSide, safe.bottom + bottomLabelReserve + handH * 0.5f + minGutter)
+            max(baseSide, safe.bottom + bottomReserve + handH * 0.5f + minGutter)
 
         val maxReachTowardCenter = shortSide * 0.28f
         val firstDiscardRowY = handH * 0.5f + rowGap + discardH * 0.5f
@@ -1412,10 +1387,7 @@ class PlayTableView(
                 drawnGap = drawnGap,
             ),
             alongEdgePad = shortSide * 0.02f,
-            rulesTextH = rulesTextH,
-            rulesPadX = rulesPadX,
-            rulesPadY = rulesPadY,
-            bottomLabelReserve = bottomLabelReserve,
+            bottomLabelReserve = bottomReserve,
         )
     }
 
@@ -1666,10 +1638,6 @@ class PlayTableView(
         }
     }
 
-    companion object {
-        private const val KEY_RULES_CREDIT = "table.rules_credit"
-    }
-
     private fun applySnapIfNeeded(screenW: Float, screenH: Float) {
         val sizeChanged =
             lastLayoutW >= 0f && (screenW != lastLayoutW || screenH != lastLayoutH)
@@ -1737,25 +1705,6 @@ class PlayTableView(
             drawOutlines = drawOutlines,
             filter = filter,
         )
-    }
-
-    private fun drawRulesCredit(
-        batch: SpriteBatch,
-        screenW: Float,
-        rulesTextH: Float,
-        rulesPadX: Float,
-        rulesPadY: Float,
-        bottomReserve: Float = bottomReservePx,
-        scale: Float = 1f,
-    ) {
-        val text = L10n.get(KEY_RULES_CREDIT)
-        Fonts.withFaceScale(Fonts.small, scale) {
-            val textW = Fonts.textWidth(Fonts.small, text)
-            val safe = safeInsetSnapshot()
-            val rulesX = screenW - safe.right - textW - rulesPadX
-            val rulesY = safe.bottom + bottomReserve.coerceAtLeast(0f) + rulesTextH + rulesPadY
-            Fonts.drawText(batch, Fonts.small, text, rulesX, rulesY, Fonts.small.color)
-        }
     }
 
     override fun dispose() {

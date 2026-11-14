@@ -25,6 +25,7 @@ import inego.zungjunggame.platform.PresenceScheduler
 import inego.zungjunggame.platform.UiCursor
 import inego.zungjunggame.features.board.FreePlayPresenter
 import inego.zungjunggame.features.online.OnlineSettlementPresenter
+import inego.zungjunggame.render.RulesCreditLabel
 import inego.zungjunggame.render.TableFelt
 import inego.zungjunggame.render.seats.PlayerLabels
 import inego.zungjunggame.render.table.PlayTableView
@@ -569,18 +570,21 @@ class AppRuntime internal constructor(
     /**
      * The single paint authority for the frame.
      *
-     * The fundamental overlay — the felt and the version stamp in its corner — goes
-     * down first, and is skipped only when a layer on the stack supersedes it
-     * ([Stack.onFelt]): a board, a lesson, the browser or the rating chart paints a
-     * surface of its own. Bottom→top the stack is then drawn through [ComponentHost],
-     * which composes any [inego.zungjunggame.ui.SpaceProvider] with the layers in its
-     * bands; the runtime knows only the paint range.
+     * The fundamental overlay — the felt, the rules credit and the version stamp in
+     * its corner — goes down first, and is skipped only when a layer on the stack
+     * supersedes it ([Stack.onFelt]): a board, a lesson, the browser or the rating
+     * chart paints a surface of its own. Bottom→top the stack is then drawn through
+     * [ComponentHost], which composes any [inego.zungjunggame.ui.SpaceProvider] with
+     * the layers in its bands; the runtime knows only the paint range.
      */
     private fun paint(frames: FrameModel, screenW: Float, screenH: Float) {
         batch.projectionMatrix = camera.combined
         batch.begin()
         try {
-            if (router.stack.onFelt) VersionLabel.render(batch, screenW, screenH)
+            if (router.stack.onFelt) {
+                RulesCreditLabel.render(batch, screenW, screenH)
+                VersionLabel.render(batch, screenW, screenH)
+            }
             componentHost.draw(canvas, frames)
         } finally {
             batch.end()

@@ -107,7 +107,7 @@ Author the localized files directly from the English authoritative source:
 1. **UI Bundle (`assets/i18n/ui_<lang>.properties`):**
    - Translate all string values from `ui.properties`.
    - Keep placeholder tokens (`{0}`, `{1}`, etc.) intact.
-   - Translate `table.rules_credit` for table attribution.
+   - Translate `menu.rules_credit` for the main-menu felt attribution.
 2. **Reference Catalog (`assets/reference/<tag>/`):**
    - **Navigation strings (in `ui_<lang>.properties`):** translate `reference.title`, every `reference.section.<id>.label`, and every `reference.page.<id>.title`. Keys must match the ids in `assets/reference/structure.json` exactly.
    - **`about.md`:** Translate game attribution and license text.

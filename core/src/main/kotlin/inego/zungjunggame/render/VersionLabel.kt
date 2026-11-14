@@ -9,6 +9,7 @@ import inego.zungjunggame.render.ui.OverlayViewport
 
 /**
  * Main-menu felt stamp: [AppVersion.LABEL] in the bottom-right safe corner.
+ * [RulesCreditLabel] stacks its line directly above this stamp.
  *
  * Drawn on the board layer (behind the menu card). Not a hit target.
  */
