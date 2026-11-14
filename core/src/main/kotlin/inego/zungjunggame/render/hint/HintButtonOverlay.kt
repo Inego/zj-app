@@ -101,7 +101,7 @@ class HintButtonOverlay(
         val restBottom: Float,
         val parkX: Float,
         val parkY: Float,
-        val bounds: OverlayViewport.Rect,
+        val bounds: Rect,
         /** Face scale the label is painted at, so its ink matches the laid-out plate. */
         val labelScale: Float,
     )

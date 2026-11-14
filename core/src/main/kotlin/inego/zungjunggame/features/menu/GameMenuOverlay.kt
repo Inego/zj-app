@@ -13,6 +13,7 @@ import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.i18n.LocaleController
 import inego.zungjunggame.input.InputProfile
 import inego.zungjunggame.net.MatchHistoryFormat
+import inego.zungjunggame.render.FeltStamps
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.ui.OverlayBodyScroll
@@ -144,9 +145,15 @@ private fun signInLabelKey(state: MenuSignIn): String = when (state) {
  * (language opens [inego.zungjunggame.features.settings.LanguagePickerOverlay]
  * instead of cycling). Root stays open on empty felt (nothing underneath).
  *
- * On a short viewport (Android landscape) the whole card — title, identity,
- * and rows — scrolls inside [OverlayViewport]'s safe rect. The title never
- * stays sticky; it occupies one compact row (name/rating on the same line).
+ * On a short viewport (Android landscape) the whole card — title, optional
+ * subtitle, identity, and rows — scrolls inside [OverlayViewport]'s safe rect.
+ * The card yields the felt's fixed bottom-right stamp block: it stands centred
+ * while the corner leaves a wing beside or a band below it, slides left only as
+ * far as that wing needs, and gives up height for the band when it is too wide
+ * to leave a wing at all ([OverlayViewport.placeBeside]). The title block never
+ * stays sticky; it occupies compact rows (the title centred in the card, the
+ * optional subtitle right-aligned beneath it, then the account / notices controls
+ * right-aligned on their own row).
  *
  * Menu rows may include an optional leading chrome icon (see [MenuItem.leadingIcon]);
  * the language row uses [UiIcons.globe] plus the active locale endonym.
@@ -463,8 +470,9 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
      * @param showContinue when true, include Continue on the local-game menu (parked or live game)
      * @param showIdentity when false, suppress the identity badge / account dropdown
      *   entirely. A null [signedInLabel] would still draw the signed-out badge (its
-     *   chooser may include the special key even with no Google), so the chrome
-     *   `game_menu` card and the signed-out local play menu pass false instead.
+     *   chooser may include the special key even with no Google), so every child
+     *   menu and the chrome `game_menu` card pass false: the root menu is the one
+     *   sign-in entry.
      * @param signedInLabel alias when signed in; also shows Log out. Null shows the
      *   signed-out badge, whose label and state come from [signIn]
      * @param eloRating current server rating; omitted from the identity line when null
@@ -512,14 +520,27 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         )
 
         val titleFont = Fonts.labelActive
+        val subtitleFont = Fonts.label
         val identityFont = Fonts.label
         val itemFont = Fonts.button
         val title = L10n.get("menu.title")
+        // The local-play card names its context under the title. It covers both
+        // the local menu and the chrome card raised over a running local board,
+        // where the account badge would not mean anything.
+        val subtitle = when (context) {
+            MenuContext.LocalGame -> L10n.get("menu.play_against_bots")
+            else -> null
+        }
         currentSignedInLabel = if (showIdentity) signedInLabel else null
 
         glyphLayout.setText(titleFont, title)
         val titleW = glyphLayout.width
         val titleLineH = titleFont.lineHeight
+        val subtitleW = if (subtitle != null) Fonts.textWidth(subtitleFont, subtitle) else 0f
+        val subtitleLineH = if (subtitle != null) subtitleFont.lineHeight else 0f
+        val subtitleGap = if (subtitle != null) Fonts.px(2f) else 0f
+        val titleBlockH = titleLineH + subtitleGap + subtitleLineH
+        val titleBlockW = max(titleW, subtitleW)
 
         val padX = Fonts.px(28f)
         val padY = Fonts.px(16f)
@@ -528,9 +549,9 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         // drawer, signed out the sign-in chooser. It stays visible even when this
         // build cannot offer Google, because the special-key row may still work.
         val badgeShown = showIdentity
-        // Every painted badge opens something. The chevron says so, and the menu
-        // title's right zone reserves its width so no state reflows the card.
-        val headerInlineGap = if (badgeShown || showNotices) Fonts.px(16f) else 0f
+        // Every painted badge opens something. The chevron says so, and the
+        // control row below the title reserves its width so no state reflows the
+        // card.
         val chevronSize = Fonts.px(14f)
         val chevronGap = Fonts.px(4f)
         val isChevronShown = badgeShown
@@ -566,10 +587,10 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         val badgeTextW = if (badgeShown) Fonts.textWidth(identityFont, badgeText) else 0f
         val badgeContentW = badgeTextW + (if (isChevronShown) chevronGap + chevronSize else 0f)
         val badgeW = if (badgeShown) badgeContentW + badgePadX * 2f else 0f
-        // The header's right zone is sized to the widest thing the badge can say,
-        // while the plate itself hugs its own label: a sign-in reporting progress
-        // must not resize the card or reflow the title, and an idle **Log in**
-        // must not stand on the air reserved for "Logging in…".
+        // The control row is sized to the widest thing the badge can say, while
+        // the plate itself hugs its own label: a sign-in reporting progress must
+        // not resize the card or reflow the title, and an idle **Log in** must
+        // not stand on the air reserved for "Logging in…".
         val widestBadgeTextW = if (!badgeShown || signedInLabel != null) {
             badgeTextW
         } else {
@@ -593,7 +614,9 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         val iconSize = max(Fonts.px(26f), itemFont.lineHeight * 0.95f)
         val iconGap = Fonts.px(10f)
 
-        var contentW = titleW + headerInlineGap + headerRightW
+        // The title block and the account/notices controls are stacked, so the
+        // card only needs the wider of the two, not their sum.
+        var contentW = max(titleBlockW, headerRightW)
         for ((action, label, leadingIcon) in items) {
             glyphLayout.setText(itemFont, label)
             val rowIcon = leadingIcon ?: iconFor(action)
@@ -613,32 +636,44 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         }
         panelW = panelW.coerceAtMost(avail.width)
 
-        val innerW = (panelW - padX * 2f).coerceAtLeast(1f)
-        val headerInline = titleW + headerInlineGap + headerRightW <= innerW
         // A badge that is not drawn must not reserve its height either: the
         // notices button is the only thing left on a build with no sign-in.
         val badgeBoxH = if (badgeShown) badgeH else 0f
-        val headerRowH = when {
-            !badgeShown && !showNotices -> titleLineH
-            headerInline -> max(titleLineH, max(badgeBoxH, noticesBtnSize))
-            else -> titleLineH + Fonts.px(4f) + max(badgeBoxH, noticesBtnSize)
+        // The title always owns the first line; the account/notices controls sit
+        // right-aligned on the next one.
+        val headerRowH = if (!badgeShown && !showNotices) {
+            titleBlockH
+        } else {
+            titleBlockH + Fonts.px(4f) + max(badgeBoxH, noticesBtnSize)
         }
         headerBlockH = headerRowH + titleGap
         val chromeH = padY * 2f
         val n = items.size
         val itemsH = n * itemH + (n - 1).coerceAtLeast(0) * itemGap
         val bodyContentH = headerBlockH + itemsH
-        val fitted = body.fitAndPlace(
+        val fit = OverlayViewport.fitSticky(avail.height, chromeH, bodyContentH)
+        // The stamps have one home in the felt's bottom-right corner. The card
+        // yields to it: centred while the corner leaves a wing beside or a band
+        // below it, slid left only as far as the wing needs, shortened only when
+        // even that cannot clear it.
+        val placed = OverlayViewport.placeBeside(
             avail = avail,
             panelW = panelW,
-            chromeH = chromeH,
-            bodyContentH = bodyContentH,
-            bodyInset = padY,
+            panelH = fit.cardH,
+            obstacle = FeltStamps.rect(screenW, screenH),
+            gap = Fonts.px(FeltStamps.GAP_DP),
+        )
+        panelH = placed.height
+        panelLeft = placed.left
+        panelBottom = placed.bottom
+        body.layout(
+            left = placed.left,
+            bottom = placed.bottom + padY,
+            width = panelW,
+            height = (placed.height - chromeH).coerceAtLeast(0f),
+            contentHeight = bodyContentH,
             scrollY = scrollY,
         )
-        panelH = fitted.cardH
-        panelLeft = fitted.left
-        panelBottom = fitted.bottom
         rowLeft = panelLeft + Fonts.px(12f)
         rowW = body.contentWidth(panelW, Fonts.px(24f), Fonts.px(24f))
 
@@ -661,8 +696,10 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
                 batch = batch,
                 px = px,
                 titleFont = titleFont,
+                subtitleFont = subtitleFont,
                 identityFont = identityFont,
                 title = title,
+                subtitle = subtitle,
                 badgeText = badgeText,
                 signedInLabel = signedInLabel,
                 signIn = signIn,
@@ -671,8 +708,10 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
                 hasUnseenNotices = hasUnseenNotices,
                 headerTop = itemTop,
                 headerRowH = headerRowH,
-                headerInline = headerInline,
                 titleLineH = titleLineH,
+                titleBlockH = titleBlockH,
+                subtitleLineH = subtitleLineH,
+                subtitleGap = subtitleGap,
                 badgeW = badgeW,
                 badgeH = badgeH,
                 badgePadX = badgePadX,
@@ -714,8 +753,10 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         batch: SpriteBatch,
         px: Texture,
         titleFont: BitmapFont,
+        subtitleFont: BitmapFont,
         identityFont: BitmapFont,
         title: String,
+        subtitle: String?,
         badgeText: String,
         signedInLabel: String?,
         signIn: MenuSignIn,
@@ -724,8 +765,10 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         hasUnseenNotices: Boolean,
         headerTop: Float,
         headerRowH: Float,
-        headerInline: Boolean,
         titleLineH: Float,
+        titleBlockH: Float,
+        subtitleLineH: Float,
+        subtitleGap: Float,
         badgeW: Float,
         badgeH: Float,
         badgePadX: Float,
@@ -741,13 +784,28 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         itemFont: BitmapFont,
     ) {
         val headerBottom = headerTop - headerRowH
+        val titleBlockTop = headerTop
         glyphLayout.setText(titleFont, title)
-        val titleY = if (headerInline) {
-            headerBottom + (headerRowH + glyphLayout.height) * 0.5f
-        } else {
-            headerTop - titleLineH + (titleLineH + glyphLayout.height) * 0.5f
+        val titleY = titleBlockTop - titleLineH + (titleLineH + glyphLayout.height) * 0.5f
+        // The title owns the header's first line and centres on the card.
+        val titleLeft = panelLeft + (panelW - glyphLayout.width) * 0.5f
+        titleFont.draw(batch, title, titleLeft, titleY)
+
+        if (subtitle != null) {
+            glyphLayout.setText(subtitleFont, subtitle)
+            val subtitleY = titleBlockTop - titleBlockH +
+                (subtitleLineH + glyphLayout.height) * 0.5f
+            // The subtitle keeps its right edge under the title.
+            val subtitleRight = panelLeft + panelW - padX - body.gutter
+            Fonts.drawText(
+                batch,
+                subtitleFont,
+                subtitle,
+                subtitleRight - glyphLayout.width,
+                subtitleY,
+                AppPalette.inkMuted,
+            )
         }
-        titleFont.draw(batch, title, panelLeft + padX, titleY)
 
         if (!badgeShown) {
             // No badge, no dropdown, and no stale rect for the press machine: the
@@ -773,22 +831,14 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
             return
         }
 
-        val badgeBottom = if (headerInline) {
-            headerBottom + (headerRowH - badgeH) * 0.5f
-        } else {
-            headerBottom
-        }
+        val badgeBottom = headerBottom
 
         val rightEdge = panelLeft + panelW - padX - body.gutter
         val btnLeft = if (showNotices) rightEdge - noticesBtnSize else 0f
         val badgeLeft = if (showNotices) btnLeft - noticesBtnGap - badgeW else rightEdge - badgeW
 
         if (showNotices) {
-            val btnBottom = if (headerInline) {
-                headerBottom + (headerRowH - noticesBtnSize) * 0.5f
-            } else {
-                headerBottom
-            }
+            val btnBottom = headerBottom
             noticesButtonLeft = btnLeft
             noticesButtonBottom = btnBottom
             noticesButtonW = noticesBtnSize

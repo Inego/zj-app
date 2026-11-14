@@ -2,6 +2,7 @@ package inego.zungjunggame.render.ui
 
 import inego.zungjunggame.platform.SafeArea
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.ui.Rect
 import kotlin.math.max
 
 /**
@@ -15,16 +16,6 @@ import kotlin.math.max
 object OverlayViewport {
     /** Design-dp inset inside [SafeArea] on every side. */
     const val MARGIN_DP = 12f
-
-    data class Rect(
-        val left: Float,
-        val bottom: Float,
-        val width: Float,
-        val height: Float,
-    ) {
-        val right: Float get() = left + width
-        val top: Float get() = bottom + height
-    }
 
     /**
      * Fit a card with sticky chrome and a scrollable body into [availableH].
@@ -69,6 +60,54 @@ object OverlayViewport {
         val left = (avail.left + (avail.width - panelW) * 0.5f).coerceIn(avail.left, maxLeft)
         val bottom = (avail.bottom + (avail.height - panelH) * 0.5f).coerceIn(avail.bottom, maxBottom)
         return left to bottom
+    }
+
+    /** A card's rect after [placeBeside]: its left/bottom and the height it settled at. */
+    data class Beside(val left: Float, val bottom: Float, val height: Float)
+
+    /**
+     * Place a [panelW]×[panelH] card in [avail] while keeping [obstacle] — a fixed
+     * block in the rect's bottom-right corner — clear, and return the height the
+     * placement ended at (a shortened card is shorter than [panelH]).
+     *
+     * The preferred placement is centred. The centred card clears the obstacle
+     * either across or down: it keeps a wing to its right at least as wide as the
+     * obstacle, or a band under it at least as tall. When neither holds, the card
+     * slides left by exactly the deficit while its left edge allows; only when even
+     * that cannot clear the obstacle does it give up height, standing centred in
+     * the room above the band.
+     *
+     * [gap] is the clear space kept between the card and the obstacle. The card's
+     * width must fit [avail]; the caller clamps it.
+     */
+    fun placeBeside(
+        avail: Rect,
+        panelW: Float,
+        panelH: Float,
+        obstacle: Rect,
+        gap: Float,
+    ): Beside {
+        val h = panelH.coerceIn(1f, avail.height)
+        val margin = ((avail.width - panelW) * 0.5f).coerceAtLeast(0f)
+        val left = avail.left + margin
+        val bottom = avail.bottom + (avail.height - h) * 0.5f
+        val gapPx = gap.coerceAtLeast(0f)
+        val wing = (avail.right - (left + panelW)).coerceAtLeast(0f)
+        if (wing >= obstacle.width + gapPx || bottom - avail.bottom >= obstacle.height + gapPx) {
+            return Beside(left, bottom, h)
+        }
+        val shift = (obstacle.width + gapPx - wing).coerceAtLeast(0f)
+        if (shift <= margin) {
+            return Beside(left - shift, bottom, h)
+        }
+        val band = (obstacle.height + gapPx).coerceAtMost(avail.height - 1f)
+        val room = (avail.height - band).coerceAtLeast(1f)
+        val shortened = h.coerceAtMost(room)
+        return Beside(
+            left = left,
+            bottom = avail.bottom + band + (room - shortened) * 0.5f,
+            height = shortened,
+        )
     }
 
     fun fitSticky(

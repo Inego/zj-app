@@ -13,6 +13,7 @@ import inego.zungjunggame.engine.HandScoreComponent
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.ui.Rect
 import kotlin.math.max
 import kotlin.math.min
 
@@ -178,7 +179,7 @@ class HandsTableRenderer {
      * Measure [model] into the available viewport [avail] with content [pad].
      * Memoized on the document list, the width and the UI scale.
      */
-    fun frame(model: HandsTableModel, avail: OverlayViewport.Rect, pad: Float): Frame {
+    fun frame(model: HandsTableModel, avail: Rect, pad: Float): Frame {
         val current = cachedFrame
         if (current != null &&
             cachedDocs === model.docs &&
@@ -197,7 +198,7 @@ class HandsTableRenderer {
         return measured
     }
 
-    private fun measure(model: HandsTableModel, avail: OverlayViewport.Rect, pad: Float): Frame {
+    private fun measure(model: HandsTableModel, avail: Rect, pad: Float): Frame {
         val headerFont = Fonts.button
         val cellFont = Fonts.button
         val contentAvailW = (avail.width - pad * 2f).coerceAtLeast(1f)

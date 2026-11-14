@@ -4,7 +4,6 @@ import com.badlogic.gdx.graphics.Camera
 import com.badlogic.gdx.graphics.OrthographicCamera
 import inego.zungjunggame.features.board.BoardAnchors
 import inego.zungjunggame.persist.UiPreferences
-import inego.zungjunggame.render.ui.OverlayViewport
 import inego.zungjunggame.runtime.RouteIds
 import inego.zungjunggame.runtime.appModel
 import inego.zungjunggame.state.StateSlot
@@ -16,6 +15,7 @@ import inego.zungjunggame.ui.Frame
 import inego.zungjunggame.ui.GestureBridge
 import inego.zungjunggame.ui.HitRegions
 import inego.zungjunggame.ui.Layout
+import inego.zungjunggame.ui.Rect
 import inego.zungjunggame.ui.stack.Route
 
 /**
@@ -126,17 +126,17 @@ class ScoreBreakdownComponent(
      * derives the pane for this frame, so the card follows a resize on the
      * frame the board does.
      */
-    private fun cardBounds(frame: Frame): OverlayViewport.Rect? {
+    private fun cardBounds(frame: Frame): Rect? {
         if (frame.space == null) return null
         val c = frame.constraints
         val pane = frame.layouts.of(boardRoute)?.regions?.get(BoardAnchors.PANE)
-            ?: return OverlayViewport.Rect(
+            ?: return Rect(
                 left = 0f,
                 bottom = 0f,
                 width = c.worldWidth.coerceAtLeast(1f),
                 height = c.worldHeight.coerceAtLeast(1f),
             )
-        return OverlayViewport.Rect(
+        return Rect(
             left = pane.left,
             bottom = pane.bottom,
             width = pane.width.coerceAtLeast(1f),

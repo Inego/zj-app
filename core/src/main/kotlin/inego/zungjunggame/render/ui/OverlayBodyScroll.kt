@@ -5,6 +5,7 @@ import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.math.Rectangle
 import com.badlogic.gdx.scenes.scene2d.utils.ScissorStack
+import inego.zungjunggame.ui.Rect
 import kotlin.math.max
 
 /**
@@ -127,7 +128,7 @@ class OverlayBodyScroll {
      * @return the placed card; the body viewport is installed as a side effect.
      */
     fun fitAndPlace(
-        avail: OverlayViewport.Rect,
+        avail: Rect,
         panelW: Float,
         chromeH: Float,
         bodyContentH: Float,

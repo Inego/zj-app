@@ -1,5 +1,6 @@
 package inego.zungjunggame.render.ui
 
+import inego.zungjunggame.ui.Rect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -45,7 +46,7 @@ class OverlayBodyScrollTest {
 
     @Test
     fun fitAndPlaceHugsCentersAndKeepsTheBodyInset() {
-        val avail = OverlayViewport.Rect(left = 0f, bottom = 0f, width = 400f, height = 300f)
+        val avail = Rect(left = 0f, bottom = 0f, width = 400f, height = 300f)
         val body = OverlayBodyScroll()
         val fitted = body.fitAndPlace(
             avail = avail,

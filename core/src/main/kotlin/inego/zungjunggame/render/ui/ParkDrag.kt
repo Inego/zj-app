@@ -1,6 +1,7 @@
 package inego.zungjunggame.render.ui
 
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.ui.Rect
 
 /**
  * Where a *parked block* ends up: the block rests at a known pose and the player
@@ -46,7 +47,7 @@ internal object ParkGeometry {
         blockH: Float,
         parkX: Float,
         parkY: Float,
-        bounds: OverlayViewport.Rect,
+        bounds: Rect,
     ): Placement {
         val left = clampAxis(restLeft + parkX, bounds.left, bounds.right - blockW)
         val bottom = clampAxis(restBottom + parkY, bounds.bottom, bounds.top - blockH)
@@ -112,7 +113,7 @@ internal class ParkDrag(
     private var restBottom: Float = Float.NaN
     private var blockW: Float = 0f
     private var blockH: Float = 0f
-    private var bounds: OverlayViewport.Rect? = null
+    private var bounds: Rect? = null
 
     val slopPx: Float get() = Fonts.px(slopDesignPx)
 
@@ -125,7 +126,7 @@ internal class ParkDrag(
         restBottom: Float,
         blockW: Float,
         blockH: Float,
-        bounds: OverlayViewport.Rect,
+        bounds: Rect,
     ) {
         this.restLeft = restLeft
         this.restBottom = restBottom

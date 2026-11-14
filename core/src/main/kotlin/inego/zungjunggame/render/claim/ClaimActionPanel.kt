@@ -28,6 +28,7 @@ import inego.zungjunggame.render.ui.ParkGeometry
 import inego.zungjunggame.render.ui.ParkRelease
 import inego.zungjunggame.render.ui.UiPlate
 import inego.zungjunggame.session.table.TableViewState
+import inego.zungjunggame.ui.Rect
 import kotlin.math.ceil
 import kotlin.math.hypot
 import kotlin.math.max
@@ -292,7 +293,7 @@ class ClaimActionPanel(
         val restBottom: Float,
         val parkX: Float,
         val parkY: Float,
-        val bounds: OverlayViewport.Rect,
+        val bounds: Rect,
         val tileW: Float,
         val tileGap: Float,
         val padY: Float,

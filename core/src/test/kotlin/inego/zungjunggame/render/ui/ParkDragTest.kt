@@ -1,5 +1,6 @@
 package inego.zungjunggame.render.ui
 
+import inego.zungjunggame.ui.Rect
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -14,7 +15,7 @@ import kotlin.test.assertTrue
  */
 class ParkDragTest {
 
-    private val bounds = OverlayViewport.Rect(left = 10f, bottom = 10f, width = 980f, height = 780f)
+    private val bounds = Rect(left = 10f, bottom = 10f, width = 980f, height = 780f)
 
     private fun parked(
         restLeft: Float = 100f,

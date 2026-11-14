@@ -848,13 +848,10 @@ class AppGraph(
                 showScoreTable = flags.showScoreTable,
                 showForfeit = flags.showForfeit,
                 showContinue = menuKind == SessionKind.FreePlay && freePlayHost.session.active,
-                // The floor is the only sign-in entry: the root menu always keeps
-                // the badge, the local play menu keeps it only for an account it
-                // can manage, and the chrome card over a running board has no
-                // account surface at all.
-                showIdentity = route != menuRoute &&
-                    (route.idOrNull == RouteIds.ROOT_MENU ||
-                        accountController.signedInLabel != null),
+                // The floor is the only sign-in entry: the root menu keeps the
+                // badge, while every child surface and the chrome card over a
+                // running context have no account surface at all.
+                showIdentity = route.idOrNull == RouteIds.ROOT_MENU,
                 signedInLabel = accountController.signedInLabel,
                 eloRating = accountController.eloRating,
                 // The badge reports the Google sign-in flow, because nothing else

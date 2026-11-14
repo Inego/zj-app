@@ -12,6 +12,7 @@ import inego.zungjunggame.render.handend.HandEndAction
 import inego.zungjunggame.render.handend.HandEndActionChrome
 import inego.zungjunggame.render.handend.HandEndPlacedChip
 import inego.zungjunggame.render.ui.OverlayViewport
+import inego.zungjunggame.ui.Rect
 import inego.zungjunggame.render.online.RatingLine
 import inego.zungjunggame.render.tiles.TileEasing
 import inego.zungjunggame.render.ui.CloseButton
@@ -58,7 +59,7 @@ internal data class ScoreBreakdownMeasureInput(
      * the board pane inside that space, not by the window: the pane is already
      * inside the safe area, and the chrome beside it is not the card's area.
      */
-    val bounds: OverlayViewport.Rect? = null,
+    val bounds: Rect? = null,
     val foldProgress: Float,
     val parkX: Float,
     val parkY: Float,

@@ -269,7 +269,7 @@ class ScoreBreakdownOverlay : Disposable, ParkableChrome, GestureSurface<ScoreBr
      * reads it at the same time as the screen size, and the park clamp uses it so
      * the drag stops where the layout placed the block.
      */
-    private var lastBounds: OverlayViewport.Rect? = null
+    private var lastBounds: Rect? = null
 
     /** Press started on the card body (not Scores / Next hand). */
     private var pressOnCard = false
@@ -723,7 +723,7 @@ class ScoreBreakdownOverlay : Disposable, ParkableChrome, GestureSurface<ScoreBr
         scrollY: Float,
         pointerWorldX: Float = Float.NaN,
         pointerWorldY: Float = Float.NaN,
-        bounds: OverlayViewport.Rect? = null,
+        bounds: Rect? = null,
     ) {
         buttonHits.clear()
         patternInfoPageIds.clear()
@@ -837,7 +837,7 @@ class ScoreBreakdownOverlay : Disposable, ParkableChrome, GestureSurface<ScoreBr
      * The rect the park clamps against. A card handed a pane (the tutorial's
      * board) uses it flush; otherwise it is the window's safe area.
      */
-    private fun clampBounds(): OverlayViewport.Rect =
+    private fun clampBounds(): Rect =
         lastBounds ?: OverlayViewport.available(lastScreenW, lastScreenH)
 
     /**

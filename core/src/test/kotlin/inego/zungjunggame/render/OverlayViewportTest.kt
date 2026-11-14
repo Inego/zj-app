@@ -2,6 +2,7 @@ package inego.zungjunggame.render
 
 import inego.zungjunggame.platform.SafeArea
 import inego.zungjunggame.render.ui.OverlayViewport
+import inego.zungjunggame.ui.Rect
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -40,7 +41,7 @@ class OverlayViewportTest {
 
     @Test
     fun placeCenteredPinsWhenPanelFillsAvailable() {
-        val avail = OverlayViewport.Rect(12f, 12f, 2676f, 1200f)
+        val avail = Rect(12f, 12f, 2676f, 1200f)
         val (left, bottom) = OverlayViewport.placeCentered(avail.width, avail.height, avail)
         assertEquals(avail.left, left)
         assertEquals(avail.bottom, bottom)
@@ -91,7 +92,7 @@ class OverlayViewportTest {
 
     @Test
     fun clampSizeNeverExceedsAvailable() {
-        val avail = OverlayViewport.Rect(0f, 0f, 400f, 200f)
+        val avail = Rect(0f, 0f, 400f, 200f)
         val (w, h) = OverlayViewport.clampSize(800f, 900f, avail)
         assertEquals(400f, w)
         assertEquals(200f, h)

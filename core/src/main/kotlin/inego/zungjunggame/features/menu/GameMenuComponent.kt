@@ -26,9 +26,8 @@ data class GameMenuRenderInput(
     val showContinue: Boolean = false,
     /**
      * Whether the card draws the identity badge / account dropdown. False on the
-     * chrome `game_menu` card over a running context, where account surfaces cannot
-     * open, and on the local play menu while signed out: the root menu is the one
-     * sign-in entry (see `RouteIds.GAME_MENU`).
+     * chrome `game_menu` card over a running context and on the local play menu:
+     * the root menu is the one sign-in entry (see `RouteIds.GAME_MENU`).
      */
     val showIdentity: Boolean = true,
     val signedInLabel: String? = null,

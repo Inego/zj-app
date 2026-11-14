@@ -507,7 +507,7 @@ class OnlineHubOverlay(
                 tabH + bodyGap + pad
             // The shared hug-height owner: the card is chrome plus body content,
             // capped to the margin box and centered in it.
-            val available = OverlayViewport.Rect(
+            val available = Rect(
                 left = 0f,
                 bottom = marginY,
                 width = screenW.coerceAtLeast(1f),
