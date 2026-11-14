@@ -1,0 +1,426 @@
+buildscript {
+  repositories {
+    gradlePluginPortal()
+  }
+  dependencies {
+    classpath "io.github.fourlastor:construo:2.1.0"
+  }
+}
+plugins {
+  id "application"
+}
+apply plugin: 'io.github.fourlastor.construo'
+apply plugin: 'org.jetbrains.kotlin.jvm'
+
+
+import io.github.fourlastor.construo.Target
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+// Stage 4: desktop reads the staged runtime tree (startup set + language-pack
+// zips) instead of the authoring `assets/` tree. The zips are plain internal
+// files here; only the active one is opened.
+def stagedRuntimeAssetsDir = project(':core').layout.buildDirectory.dir('staged-runtime')
+sourceSets.main.resources {
+  srcDir stagedRuntimeAssetsDir
+  // Web-only CJK fallback (~8 MB). Desktop run still sees the staged tree on disk;
+  // FontFaceResolver prefers OS fonts (YaHei / PingFang / Noto CJK).
+  exclude 'fonts/NotoSansSC-Regular.otf'
+}
+
+/**
+ * A value from the gitignored `local.properties`, or null.
+ *
+ * Per-machine settings that must not be committed or shipped live here (the
+ * Android SDK path already does). A null return means "not configured", which
+ * is different from an empty string.
+ */
+def localProperty(String name) {
+  def localFile = rootProject.file('local.properties')
+  if (!localFile.exists()) return null
+  def local = new Properties()
+  localFile.withInputStream { local.load(it) }
+  def value = local.getProperty(name)
+  return (value == null || value.trim().isEmpty()) ? null : value.trim()
+}
+
+/**
+ * Baked API base URL, from (in order) an explicit `-PapiBaseUrl=...` on the
+ * command line, then `desktopApiBaseUrl` in the gitignored `local.properties`.
+ * Empty means "local server": ApiConfig.DEFAULT_BASE_URL (127.0.0.1:8080).
+ *
+ * `gradle.properties` also defines `apiBaseUrl`, and that one is **never** read
+ * here — it is the Wasm/dev value, so honouring it would make every desktop
+ * build look baked and the local default could never apply. The local file
+ * needs its own key (`desktopApiBaseUrl`) for the same reason: the shared
+ * `apiBaseUrl` name must not be able to leak a desktop value.
+ *
+ * An explicit but empty `-PapiBaseUrl=` still wins over the local file, so
+ * "point me at localhost" stays expressible without editing `local.properties`.
+ */
+def resolveDesktopApiBaseUrl() {
+  def raw = project.gradle.startParameter.projectProperties['apiBaseUrl']
+  def url = raw == null ? localProperty('desktopApiBaseUrl') : raw.toString().trim()
+  if (url == null || url.isEmpty() || url.startsWith('#')) return ''
+  return url
+}
+
+/**
+ * Desktop OAuth client secret, resolved from (in order) the command line
+ * (`-PgoogleDesktopClientSecret=...`), the gitignored `local.properties`, then
+ * `gradle.properties`. Only the last one is committed and it ships empty, so
+ * the value can stay out of the repository entirely.
+ *
+ * A Google **Desktop app** client is not a public client: without this secret
+ * the token exchange fails with `invalid_request: client_secret is missing`
+ * and desktop sign-in cannot complete (see `DesktopGoogleAuthProvider`).
+ */
+def resolveDesktopClientSecret() {
+  def fromCli = project.gradle.startParameter.projectProperties['googleDesktopClientSecret']
+  if (fromCli != null && !fromCli.toString().trim().isEmpty()) {
+    return fromCli.toString().trim()
+  }
+  def fromLocal = localProperty('googleDesktopClientSecret')
+  if (fromLocal != null) return fromLocal
+  def fromProperties = findProperty('googleDesktopClientSecret')
+  return fromProperties == null ? '' : fromProperties.toString().trim()
+}
+
+// The desktop properties are generated in a plain task instead of by filtering
+// `processResources`. IntelliJ's own incremental builder cannot resolve a
+// filter/matching copy spec and prints
+//   Cannot resolve resource filtering of MatchingCopyAction...
+// on every sync (IDEA-296490). Gradle -- the delegated builder -- runs this task
+// and produces the same classpath resources.
+def desktopTemplatesDir = file('templates')
+def desktopGeneratedResources = layout.buildDirectory.dir('generated/desktop-resources')
+
+tasks.register('generateDesktopResources') {
+  group = 'build'
+  description = 'Bakes the desktop API base URL and Google OAuth client into classpath properties.'
+  def desktopClientId = (findProperty('googleDesktopClientId') ?: '').toString()
+  def desktopClientSecret = resolveDesktopClientSecret()
+  def desktopApiBaseUrl = resolveDesktopApiBaseUrl()
+  // The baked values are inputs so changing one re-generates; otherwise a stale
+  // value would silently persist, invisible to up-to-date checks.
+  inputs.dir(desktopTemplatesDir)
+  inputs.property('desktopClientId', desktopClientId)
+  inputs.property('desktopClientSecret', desktopClientSecret)
+  inputs.property('desktopApiBaseUrl', desktopApiBaseUrl)
+  outputs.dir(desktopGeneratedResources)
+  doLast {
+    def outDir = desktopGeneratedResources.get().asFile
+    outDir.mkdirs()
+    // Replacing tokens is template-driven, so an absent or empty templates/ dir
+    // makes this task a silent no-op: it "succeeds", leaves whatever was in
+    // generated/ from an earlier build, and the client then falls back to
+    // ApiConfig.DEFAULT_BASE_URL. A run against a deployed server looks exactly
+    // like a network outage ("Connection refused: getsockopt" against
+    // 127.0.0.1:8080), which is a miserable thing to diagnose. Fail instead.
+    def required = ['desktop-api.properties', 'desktop-google.properties']
+    def missing = required.findAll { !new File(desktopTemplatesDir, it).isFile() }
+    if (!missing.isEmpty()) {
+      throw new GradleException(
+          "Missing desktop template(s) ${missing.join(', ')} in ${desktopTemplatesDir}. " +
+          'Without them no API base URL or Google OAuth client is baked, and the app ' +
+          'silently talks to http://127.0.0.1:8080. Restore them from HEAD.')
+    }
+    def replacements = [
+      '__API_BASE_URL__'                : desktopApiBaseUrl,
+      '__GOOGLE_DESKTOP_CLIENT_ID__'    : desktopClientId,
+      '__GOOGLE_DESKTOP_CLIENT_SECRET__': desktopClientSecret,
+    ]
+    desktopTemplatesDir.listFiles()?.each { File template ->
+      if (!template.isFile()) return
+      def text = template.getText('UTF-8')
+      replacements.each { String token, String value -> text = text.replace(token, value) }
+      new File(outDir, template.name).setText(text, 'UTF-8')
+    }
+  }
+}
+
+sourceSets.main.resources.srcDir(desktopGeneratedResources)
+
+processResources {
+  // The staged runtime tree is a task output of :core; copy it before packaging.
+  dependsOn ':core:stageRuntimeAssets', 'generateDesktopResources'
+}
+application.mainClass = 'inego.zungjunggame.lwjgl3.Lwjgl3Launcher'
+application.applicationName = appName
+eclipse.project.name = appName + '-lwjgl3'
+java.sourceCompatibility = 21
+java.targetCompatibility = 21
+if (JavaVersion.current().isJava9Compatible()) {
+  compileJava.options.release.set(21)
+}
+kotlin.compilerOptions.jvmTarget.set(JvmTarget.JVM_21)
+
+dependencies {
+  implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
+  implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+  implementation "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
+  implementation project(':core')
+  // Windows Credential Manager / macOS Keychain. Linux uses secret-tool.
+  implementation "net.java.dev.jna:jna:$jnaVersion"
+
+  testImplementation "org.jetbrains.kotlin:kotlin-test-junit:$kotlinVersion"
+  testImplementation "junit:junit:4.13.2"
+
+  // Align transitive LWJGL modules (from gdx-backend-lwjgl3) to $lwjgl3Version
+  // so Java 25+ does not warn about older natives / APIs.
+  implementation enforcedPlatform("org.lwjgl:lwjgl-bom:$lwjgl3Version")
+}
+
+def os = System.properties['os.name'].toLowerCase(Locale.ROOT)
+
+/**
+ * Optional `-PdataDir=<path>` for the run tasks: the same `--data-dir` the
+ * launcher understands, so a second client can run with its own state and
+ * sign-in (e.g. `:lwjgl3:run -PapiBaseUrl=... -PdataDir=C:\tmp\userA`). The
+ * native crash flags below are baked at configuration time, so they must follow
+ * the same folder — relative paths resolve against the run working dir
+ * (`core/build/staged-runtime`), exactly as `DesktopDataDir` resolves them at runtime.
+ */
+def desktopDataDir = project.findProperty('dataDir')?.toString()?.trim()
+def desktopLogDir = desktopDataDir ? new File(desktopDataDir) : new File(System.getProperty('user.home'), '.zj-app')
+if (desktopDataDir && !desktopLogDir.isAbsolute()) {
+  desktopLogDir = new File(stagedRuntimeAssetsDir.get().asFile, desktopDataDir)
+}
+desktopLogDir = desktopLogDir.absoluteFile
+def desktopLogDirPosix = desktopLogDir.absolutePath.replace('\\', '/')
+def hsErrFile = "${desktopLogDirPosix}/hs_err_pid%p.log"
+def heapDumpFile = "${desktopLogDirPosix}/heapdump.hprof"
+def jvmFatalFile = "${desktopLogDirPosix}/jvm-fatal.txt"
+
+ext.desktopCrashJvmArgs = [
+  "--enable-native-access=ALL-UNNAMED",
+  "-XX:ErrorFile=$hsErrFile",
+  "-XX:+ErrorFileToStderr",
+  "-XX:+CreateCoredumpOnCrash",
+  "-XX:+HeapDumpOnOutOfMemoryError",
+  "-XX:HeapDumpPath=$heapDumpFile",
+  "-XX:OnError=echo pid=%p> \"$jvmFatalFile\"",
+]
+
+/**
+ * An immutable copy of the desktop runtime, private to this Gradle invocation.
+ *
+ * A JVM resolves classes lazily: what a running app has already loaded stays as
+ * it was, and everything it reaches later is read off the classpath at that
+ * moment. `:core`'s artifact is named after the commit count, so until the next
+ * commit every build rewrites the very jar a running app resolves against, and
+ * `lwjgl3`'s own classes are a live output directory. Rebuild while the app is
+ * up and the halves stop matching — old bytecode, new class files — and the first
+ * click that reaches a class the rebuild removed dies with
+ * `NoClassDefFoundError` from the middle of an unrelated gesture.
+ *
+ * The run tasks therefore launch from this snapshot and keep the live outputs off
+ * the classpath, so a rebuild can no longer disturb a running app: it keeps the
+ * code it started with, and restarting is what picks up a change. Only the
+ * project's own outputs are copied — the third-party jars come from the Gradle
+ * cache under content-addressed names and are immutable already.
+ */
+def runSnapshotName = "run-${System.currentTimeMillis()}-${System.nanoTime()}"
+def runSnapshotDir = layout.buildDirectory.dir("run-snapshots/$runSnapshotName")
+def dependencyJars = configurations.runtimeClasspath.filter {
+  it.path.startsWith(gradle.gradleUserHomeDir.absolutePath)
+}
+def stageRunSnapshot = tasks.register('stageRunSnapshot', Copy) {
+  group = 'application'
+  description = 'Copies the desktop classes and the core jar into this launch\'s own directory.'
+  from(sourceSets.main.output.classesDirs) { into 'classes' }
+  // The processed resources are a task output: `generateDesktopResources` plus the
+  // staged runtime tree copied in by `processResources`. Reading the directory path
+  // instead would leave Gradle with no dependency on `processResources`, so the
+  // language packs staged by `:core` would never enter the run graph and a previous
+  // build's zip could be opened.
+  from(tasks.named('processResources')) { into 'resources' }
+  from(project(':core').tasks.named('jar')) { into 'lib'; rename { 'core.jar' } }
+  into runSnapshotDir
+  doLast {
+    // One snapshot per launch, never reused; drop the ones older than a day so
+    // build/ does not grow without bound. A file a live app still holds open on
+    // Windows simply refuses to delete and is left alone.
+    def root = runSnapshotDir.get().asFile.parentFile
+    def cutoff = System.currentTimeMillis() - 24L * 60L * 60L * 1000L
+    root.listFiles()?.each { dir ->
+      if (dir.isDirectory() && dir.name.startsWith('run-') && dir.lastModified() < cutoff) {
+        try {
+          dir.deleteDir()
+        } catch (Exception ignored) {
+        }
+      }
+    }
+  }
+}
+def snapshotClasspath = layout.files(
+  runSnapshotDir.map { it.file('classes') },
+  runSnapshotDir.map { it.file('resources') },
+  runSnapshotDir.map { it.file('lib/core.jar') },
+) + dependencyJars
+
+run {
+  dependsOn stageRunSnapshot
+  // `workingDir` is the staged runtime tree, a task output of `:core`. The
+  // dependency is explicit even though `stageRunSnapshot` currently pulls it in
+  // through `processResources`, so a future change there cannot leave the run
+  // reading a stale directory.
+  dependsOn ':core:stageRuntimeAssets'
+  classpath = snapshotClasspath
+  workingDir = stagedRuntimeAssetsDir.get().asFile.path
+// You can uncomment the next line if your IDE claims a build failure even when the app closed properly.
+  //setIgnoreExitValue(true)
+  jvmArgs += desktopCrashJvmArgs
+  if (desktopDataDir) args("--data-dir=${desktopDataDir}".toString())
+  if (os.contains('mac')) jvmArgs += "-XstartOnFirstThread"
+}
+
+test {
+  jvmArgs += "--enable-native-access=ALL-UNNAMED"
+}
+
+jar {
+// sets the name of the .jar file this produces to the name of the game or app, with the version after.
+  archiveFileName.set("${appName}-${projectVersion}.jar")
+// the duplicatesStrategy matters starting in Gradle 7.0; this setting works.
+  duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+  dependsOn configurations.runtimeClasspath
+  from { configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) } }
+// these "exclude" lines remove some unnecessary duplicate files in the output JAR.
+  exclude('META-INF/INDEX.LIST', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA',
+    'fonts/NotoSansSC-Regular.otf')
+  dependencies {
+    exclude('META-INF/INDEX.LIST', 'META-INF/maven/**')
+  }
+// setting the manifest makes the JAR runnable.
+// enabling native access helps avoid a warning when Java 24 or later runs the JAR.
+// setting Multi-Release to true allows LWJGL3 to use different classes on recent Java versions.
+  manifest {
+    attributes 'Main-Class': application.mainClass, 'Enable-Native-Access': 'ALL-UNNAMED', 'Multi-Release': 'true'
+  }
+// this last step may help on some OSes that need extra instruction to make runnable JARs.
+  doLast {
+    file(archiveFile).setExecutable(true, false)
+  }
+}
+
+// Builds a JAR that only includes the files needed to run on macOS, not Windows or Linux.
+// The file size for a Mac-only JAR is about 7MB smaller than a cross-platform JAR.
+tasks.register("jarMac") {
+  dependsOn("jar")
+  group = 'build'
+  jar.archiveFileName.set("${appName}-${projectVersion}-mac.jar")
+  jar.exclude("windows/x86/**", "windows/x64/**", "linux/arm32/**", "linux/arm64/**", "linux/x64/**", "**/*.dll", "**/*.so",
+    'META-INF/INDEX.LIST', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA')
+  dependencies {
+    jar.exclude("windows/x86/**", "windows/x64/**", "linux/arm32/**", "linux/arm64/**", "linux/x64/**",
+      'META-INF/INDEX.LIST', 'META-INF/maven/**')
+  }
+}
+
+// Builds a JAR that only includes the files needed to run on Linux, not Windows or macOS.
+// The file size for a Linux-only JAR is about 5MB smaller than a cross-platform JAR.
+tasks.register("jarLinux") {
+  dependsOn("jar")
+  group = 'build'
+  jar.archiveFileName.set("${appName}-${projectVersion}-linux.jar")
+  jar.exclude("windows/x86/**", "windows/x64/**", "macos/arm64/**", "macos/x64/**", "**/*.dll", "**/*.dylib",
+    'META-INF/INDEX.LIST', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA')
+  dependencies {
+    jar.exclude("windows/x86/**", "windows/x64/**", "macos/arm64/**", "macos/x64/**",
+      'META-INF/INDEX.LIST', 'META-INF/maven/**')
+  }
+}
+
+// Builds a JAR that only includes the files needed to run on Windows, not Linux or macOS.
+// The file size for a Windows-only JAR is about 6MB smaller than a cross-platform JAR.
+tasks.register("jarWin") {
+  dependsOn("jar")
+  group = 'build'
+  jar.archiveFileName.set("${appName}-${projectVersion}-win.jar")
+  jar.exclude("macos/arm64/**", "macos/x64/**", "linux/arm32/**", "linux/arm64/**", "linux/x64/**", "**/*.dylib", "**/*.so",
+    'META-INF/INDEX.LIST', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA')
+  dependencies {
+    jar.exclude("macos/arm64/**", "macos/x64/**", "linux/arm32/**", "linux/arm64/**", "linux/x64/**",
+      'META-INF/INDEX.LIST', 'META-INF/maven/**')
+  }
+}
+
+construo {
+  // name of the executable
+  name.set(appName)
+  // human-readable name, used for example in the `.app` name for macOS
+  humanName.set(appName)
+  jlink {
+    guessModulesFromJar.set(false)
+    // You may need to add more modules, as needed.
+    modules.addAll("java.base", "java.management", "java.desktop", "jdk.unsupported")
+  }
+
+  // Explicit container receiver: IntelliJ otherwise treats unqualified register/create
+  // as TaskContainer methods (Target.* is not a Task).
+  targets.configure { PolymorphicDomainObjectContainer container ->
+    container.create("linuxX64", Target.Linux) {
+      architecture.set(Target.Architecture.X86_64)
+      jdkUrl.set("https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.10%2B7/OpenJDK21U-jdk_x64_linux_hotspot_21.0.10_7.tar.gz")
+      // Linux does not currently have a way to set the icon on the executable
+    }
+    container.create("macM1", Target.MacOs) {
+      architecture.set(Target.Architecture.AARCH64)
+      jdkUrl.set("https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.10%2B7/OpenJDK21U-jdk_aarch64_mac_hotspot_21.0.10_7.tar.gz")
+      // macOS needs an identifier
+      identifier.set("inego.zungjunggame." + appName)
+      // Optional: icon for macOS, as an ICNS file
+      macIcon.set(project.file("icons/logo.icns"))
+    }
+    container.create("macX64", Target.MacOs) {
+      architecture.set(Target.Architecture.X86_64)
+      jdkUrl.set("https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.10%2B7/OpenJDK21U-jdk_x64_mac_hotspot_21.0.10_7.tar.gz")
+      // macOS needs an identifier
+      identifier.set("inego.zungjunggame." + appName)
+      // Optional: icon for macOS, as an ICNS file
+      macIcon.set(project.file("icons/logo.icns"))
+    }
+    container.create("winX64", Target.Windows) {
+      architecture.set(Target.Architecture.X86_64)
+      // Optional: icon for Windows, as a PNG
+      icon.set(project.file("icons/logo.png"))
+      jdkUrl.set("https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.10%2B7/OpenJDK21U-jdk_x64_windows_hotspot_21.0.10_7.zip")
+      // Uncomment the next line to show a console when the game runs, to print messages.
+      //useConsole.set(true)
+    }
+  }
+}
+
+// Equivalent to the jar task; here for compatibility with gdx-setup.
+tasks.register('dist') {
+  dependsOn 'jar'
+}
+
+distributions {
+  main {
+    contents {
+      into('libs') { CopySpec spec ->
+        project.configurations.runtimeClasspath.files.findAll { File file ->
+          file.name != project.tasks.named('jar', Jar).get().outputs.files.singleFile.name
+        }.each { File file ->
+          spec.exclude(file.name)
+        }
+      }
+    }
+  }
+}
+
+startScripts.dependsOn(':lwjgl3:jar')
+startScripts.classpath = project.tasks.jar.outputs.files
+
+// Helps if debugging on Linux with an Nvidia GPU.
+// This means StartupHelper won't try to restart the JVM, which can prevent debugging.
+// This only applies to Gradle tasks, not main methods debugged when launching a main() method directly.
+// As a more general solution, set the environment variable __GL_THREADED_OPTIMIZATIONS to 0 globally, on Linux
+// machines with Nvidia GPUs where you need to debug LWJGL3 apps and games.
+// You can also set __GL_THREADED_OPTIMIZATIONS to 0 in run configurations, which you would need per main() method.
+// StartupHelper will still restart the JVM to set this environment variable when run as a distributable JAR, which is
+// a good thing for end users. They won't need to ever set the debug-specific environment variable.
+tasks.withType(JavaExec.class).configureEach {
+  environment("__GL_THREADED_OPTIMIZATIONS", 0)
+}

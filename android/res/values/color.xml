@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android splash felt. Must match TableFelt: #1F6B47 is 0.12, 0.42, 0.28. -->
+    <color name="felt">#FF1F6B47</color>
+    <!-- Cold-start window / theme background (matches game clear color). -->
+    <color name="background">@color/felt</color>
+    <color name="ic_launcher_background">@color/felt</color>
+</resources>

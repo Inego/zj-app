@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ backup / transfer policy (replaces android:fullBackupContent).
+  Empty sections use the platform defaults: back up / transfer eligible app data.
+-->
+<data-extraction-rules>
+    <cloud-backup />
+    <device-transfer />
+</data-extraction-rules>

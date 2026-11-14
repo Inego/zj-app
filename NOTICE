@@ -1,0 +1,105 @@
+Zung Jung Mahjong — client application
+Copyright (c) 2026 Ianis Batura
+
+This work is licensed under CC BY-NC-SA 3.0 HK. See LICENSE for the full
+licence text.
+
+===============================================================================
+1. Zung Jung Mahjong Scoring System — Alan Kwan
+===============================================================================
+
+Zung Jung Mahjong Scoring System (v3.3) by Alan Kwan, licensed under
+CC BY-NC-SA 3.0 HK. Reference section reproduced under that license. Tutorial,
+client code, and server are original work. Free and non-commercial. Not
+affiliated with or endorsed by Alan Kwan.
+
+The Reference material bundled with this client is:
+
+  assets/reference/<locale>/   every locale directory, without exception
+  docs/rules/official/         the English source scrape
+
+`<locale>` is a BCP 47 tag. This notice covers the whole set, not only the
+locales shipped today: adding a translation directory does not add an
+exception, and does not require editing this file. The locales the app
+currently registers are enumerated in one place,
+`core/src/main/kotlin/inego/zungjunggame/i18n/AppLocale.kt`, and reference
+content for any locale the app does not register is unreachable.
+
+All of that material reproduces the wording of the Zung Jung Mahjong Scoring
+System (v3.3) by Alan Kwan. It is included in unmodified form, with this
+attribution and the licence notice kept intact, as CC BY-NC-SA 3.0 HK requires
+(Section 4(a)–(d)).
+
+  Source:        https://www.zj-mahjong.info/
+  Canonical URI: https://creativecommons.org/licenses/by-nc-sa/3.0/hk/
+
+The scoring engine, tutorial, client code, and the zj-server backend are
+original work by Ianis Batura and are not derived from Alan Kwan's text.
+
+This project claims no rights in the game of mahjong, in the Zung Jung scoring
+system as a set of ideas, or in any pattern name or point value. Copyright
+protects the expression in the Reference text, not the rules and numbers it
+describes.
+
+===============================================================================
+2. Third-party components
+===============================================================================
+
+Tiles — FluffyStuff/riichi-mahjong-tiles
+  Regular mahjong tile graphics, vendored in third_party/riichi-mahjong-tiles/
+  and rasterised into assets/tiles/ for use at runtime.
+  Licence: CC0 1.0 Universal (public domain dedication).
+  https://github.com/FluffyStuff/riichi-mahjong-tiles
+  Full text: third_party/riichi-mahjong-tiles/LICENSE.md
+  Details:   third_party/riichi-mahjong-tiles/ATTRIBUTION.txt
+
+Icons — Lucide
+  Outline SVG icon sources vendored in third_party/lucide-icons/ and rasterised
+  into assets/ui/ (white-on-transparent, for in-game tinting).
+  Lucide as a whole: ISC Licence.
+  Feather-derived icons (x, arrow-left, chevron-left, chevron-right, chevron-up,
+  chevron-down, info): MIT Licence.
+  globe is Lucide-original (ISC only).
+  https://lucide.dev/
+  Full text: third_party/lucide-icons/LICENSE
+  Details:   third_party/lucide-icons/ATTRIBUTION.txt
+
+Fonts
+  Roboto — Apache Licence 2.0.
+    https://fonts.google.com/specimen/Roboto
+    Full text: assets/fonts/LICENSE.txt
+  Noto Sans SC — SIL Open Font Licence 1.1.
+    https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    Full text: assets/fonts/NotoSansSC-OFL.txt
+
+gdx-teavm — xpenatan
+  The following classes under teavm/src/main/java/ are modified copies of
+  gdx-teavm 1.6.2 classes, kept in the upstream package so they shadow the
+  dependency's versions in the Web build:
+    com/github/xpenatan/gdx/teavm/backends/web/WebApplication.java
+    com/github/xpenatan/gdx/teavm/backends/web/WebInput.java
+    com/github/xpenatan/gdx/teavm/backends/web/WebNet.java
+    com/github/xpenatan/gdx/teavm/backends/web/assetloader/AssetDownloadImpl.java
+    com/github/xpenatan/gdx/teavm/backends/web/dom/impl/WebWindow.java
+  Licence: Apache License 2.0.
+  https://github.com/xpenatan/gdx-teavm
+  Full text: third_party/gdx-teavm/LICENSE
+  Details:   third_party/gdx-teavm/ATTRIBUTION.txt
+
+===============================================================================
+3. Sound effects
+===============================================================================
+
+The 22 WAV files in assets/audio/ were generated procedurally for this project
+(filtered noise and damped resonances for tile and claim cues; synthesized tones
+for the win, draw, and timer stings). They contain no third-party samples and
+are original work covered by this project's licence. The generator is not part
+of this repository; its provenance is kept with the private zj-server work.
+
+===============================================================================
+4. Note on the server
+===============================================================================
+
+The zj-server backend is a separate work. It is not included in this
+repository, it is not licensed under CC BY-NC-SA 3.0 HK, and it is proprietary.
+This client interoperates with it; that does not make the two works one work.

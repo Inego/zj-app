@@ -1,0 +1,26 @@
+Lucide Icons (outline)
+https://lucide.dev/
+https://github.com/lucide-icons/lucide
+
+Icons vendored in this directory (SVG sources) and rasterized to assets/ui/:
+  x            → assets/ui/close.png
+  arrow-left   → assets/ui/back.png
+  chevron-left → assets/ui/chevron_left.png
+  chevron-right→ assets/ui/chevron_right.png
+  chevron-up   → assets/ui/chevron_up.png
+  chevron-down → assets/ui/chevron_down.png
+  info         → assets/ui/info.png
+  globe        → assets/ui/globe.png
+  bell         → assets/ui/bell.png
+  menu         → assets/ui/menu.png
+
+PNGs are white-on-transparent exports of the outline SVGs for in-game tinting.
+
+License: see LICENSE in this directory.
+
+These icons (x, arrow-left, chevron-left, chevron-right, chevron-up,
+chevron-down, info, bell) are derived from the Feather project and are under the
+MIT License (see LICENSE). Lucide as a whole is under the ISC License.
+
+`globe` and `menu` are Lucide-original (ISC only; not on the Feather-derived
+list).

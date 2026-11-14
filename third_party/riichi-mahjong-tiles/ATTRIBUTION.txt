@@ -1,0 +1,8 @@
+Regular mahjong tile graphics from FluffyStuff/riichi-mahjong-tiles
+https://github.com/FluffyStuff/riichi-mahjong-tiles
+
+License: CC0 (public domain) — see LICENSE.md
+
+Layout:
+  Regular/*.svg     — original vector sources
+  assets/tiles/*.png — pre-rasterized exports used at runtime by libGDX

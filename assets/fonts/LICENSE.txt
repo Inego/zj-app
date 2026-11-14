@@ -1,0 +1,35 @@
+Roboto-Regular.ttf, Roboto-Bold.ttf, Roboto-Italic.ttf, and Roboto-BoldItalic.ttf
+are Roboto by Google, licensed under the Apache License 2.0.
+https://github.com/googlefonts/roboto
+
+NotoSansSC-Regular.otf is Noto Sans SC (region-specific Subset OTF, Regular)
+from Google / Adobe Source Han Sans, SIL Open Font License 1.1.
+https://github.com/notofonts/noto-cjk
+Full OFL text: NotoSansSC-OFL.txt
+
+---
+
+Font strategy (primary + fallback, chrome and Reference share it)
+
+Primary face by ScriptProfile (from UI locale):
+  - LatinCyrillic (en, fr, ru, …) → bundled Roboto (tight Latin/Cyrillic metrics)
+  - Hans (zh-CN) / Hant (zh-HK) / Jpan (ja) → system CJK, else bundled Noto Sans SC
+
+Fallback face for missing glyphs (so mixed-script text never tofu):
+  - When primary is Roboto → CJK (Han in English pattern names, seat winds, etc.)
+  - When primary is CJK → Roboto for rare Latin gaps
+
+Chrome (menus, seats, scores) and Reference rich text use the same primary
+family and the same fallback; size roles differ, script policy does not.
+
+Resolution order for CJK:
+  1. OS system fonts on Desktop / Android / iOS (Windows YaHei / JhengHei /
+     Yu Gothic, Android Noto / DroidSansFallback, macOS PingFang, Linux Noto
+     CJK, …). WebGL cannot read these.
+  2. Bundled NotoSansSC-Regular.otf (Hans; also used as Hant/Jpan last resort
+     via the candidate lists). TeaVM ships this file; Android APK and Desktop
+     JAR exclude it (~8 MB) because those platforms already have system CJK.
+  3. No face → log; Latin primary still works; Han is omitted
+
+Glyphs are incremental (rasterized when first used). The full reference catalog
+is never pre-warmed at process start. Fallback is loaded lazily on first need.

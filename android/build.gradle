@@ -1,0 +1,414 @@
+
+buildscript {
+  repositories {
+    mavenCentral()
+    google()
+  }
+}
+// AGP 9 has built-in Kotlin; do not apply kotlin-android (conflicts with built-in Kotlin).
+apply plugin: 'com.android.application'
+
+/**
+ * Baked API base URL from an explicit `-PapiBaseUrl=...` on the command line.
+ * Empty means "local dev": the :android:install* tasks write LAN hosts into
+ * dev-api-url.txt instead. `gradle.properties` also defines `apiBaseUrl` (the
+ * Wasm/dev value), so only the command-line property is honoured here.
+ */
+def resolveBakedApiBaseUrl() {
+  def raw = project.gradle.startParameter.projectProperties['apiBaseUrl']
+  if (raw == null) return ''
+  def url = raw.toString().trim()
+  if (url.isEmpty() || url.startsWith('#')) return ''
+  return url
+}
+
+/**
+ * Release signing material, read from the gitignored `local.properties` so the
+ * keystore path and passwords are never committed. Returns null when the four
+ * keys are absent; a release APK task then fails in `taskGraph.whenReady`
+ * (below) instead of silently emitting an unsigned APK. Debug builds do not
+ * touch any of this.
+ *
+ * Keys: zjReleaseStoreFile, zjReleaseStorePassword, zjReleaseKeyAlias,
+ * zjReleaseKeyPassword. In a Java `.properties` file write the path with
+ * forward slashes (`C:/Users/.../zj-release.jks`) or escape each backslash.
+ */
+def resolveReleaseSigning() {
+  def localFile = rootProject.file('local.properties')
+  if (!localFile.exists()) return null
+  def local = new Properties()
+  localFile.withInputStream { local.load(it) }
+  def required = ['zjReleaseStoreFile', 'zjReleaseStorePassword', 'zjReleaseKeyAlias', 'zjReleaseKeyPassword']
+  def values = required.collectEntries { [(it): local.getProperty(it)?.trim()] }
+  if (values.values().every { it == null || it.isEmpty() }) return null
+  def missing = values.findAll { k, v -> v == null || v.isEmpty() }.keySet()
+  if (!missing.isEmpty()) {
+    throw new GradleException("local.properties is missing release signing key(s): ${missing.join(', ')}")
+  }
+  return [storeFile: values.zjReleaseStoreFile, storePassword: values.zjReleaseStorePassword,
+          keyAlias: values.zjReleaseKeyAlias, keyPassword: values.zjReleaseKeyPassword]
+}
+
+/**
+ * Addresses a phone can never reach a server on: the IPv4 loopback /8, the IPv6
+ * loopback, `localhost`, the emulator's alias for the host machine, and the
+ * wildcard bind address. `0.0.0.0` is a *listen* address, not a destination —
+ * connecting to it hits localhost on Linux and nothing on Android, so baking it
+ * is the same silent failure as baking 127.0.0.1.
+ *
+ * `\[[:0]*1\]` is the IPv6 loopback in every spelling (`::1`, `0000::1`,
+ * `0:0:0:0:0:0:0:1`): its digits are only colons and zeros followed by a 1. A
+ * real IPv6 host (`[2001:db8::1]`) contains other hex digits and is left alone.
+ */
+static def isLoopbackApiBaseUrl(String url) {
+  url ==~ /(?i)^https?:\/\/(0\.0\.0\.0|127(?:\.\d{1,3}){3}|\[[:0]*1\]|localhost|10\.0\.2\.2)(:\d+)?(\/.*)?$/
+}
+
+/**
+ * Tasks whose output is an APK, an AAB, or an installed package. `packageDebug`
+ * is the APK packager, but `packageDebugResources` / `packageDebugAssets` are
+ * intermediate steps within it, so they are not matches on their own.
+ */
+static def isApkTaskName(String name) {
+  if (name.startsWith('assemble') || name.startsWith('bundle') || name.startsWith('install')) return true
+  return name.startsWith('package') && !name.contains('Resources') && !name.contains('Assets')
+}
+
+static def assertNotLoopbackApiBaseUrl(String url, String taskPath) {
+  if (isLoopbackApiBaseUrl(url)) {
+    throw new GradleException(
+        "-PapiBaseUrl=${url} points at the local machine and would be baked into ${taskPath}; " +
+        'omit -PapiBaseUrl for local dev (install tasks write LAN hosts to dev-api-url.txt).')
+  }
+}
+
+def bakedApiBaseUrl = resolveBakedApiBaseUrl()
+def releaseSigning = resolveReleaseSigning()
+
+// Stage 4: Android packs the staged runtime tree (startup set + language-pack
+// zips) instead of the authoring `assets/` tree. The zips are plain assets here;
+// only the active one is opened.
+def stagedRuntimeAssetsDir = project(':core').layout.buildDirectory.dir('staged-runtime').get().asFile
+
+/**
+ * Refuse a local-only bake, but only when an APK is actually in the task graph.
+ *
+ * `BuildConfig.API_BASE_URL` outranks `dev-api-url.txt`, so baking 127.0.0.1
+ * ships an APK that talks to the build machine. Checking this at configuration
+ * time was too broad: Gradle configures every project for every build, so
+ * `:lwjgl3:run -PapiBaseUrl=http://127.0.0.1:8080` — a legitimate desktop dev
+ * run — failed here instead. Deferred to `whenReady` so the build stops before
+ * any task runs, and scoped to the tasks whose output is an APK. (Not
+ * configuration-cache compatible; this build does not enable it.)
+ */
+gradle.taskGraph.whenReady { graph ->
+  def apkTasks = graph.allTasks.findAll { it.project == project && isApkTaskName(it.name) }
+  if (!apkTasks.isEmpty()) {
+    // Name the task a caller would recognise (`assemble*` / `install*`) rather
+    // than whichever entry Set iteration happened to return first.
+    def named = apkTasks.find { it.name.startsWith('assemble') || it.name.startsWith('install') }
+    assertNotLoopbackApiBaseUrl(bakedApiBaseUrl, (named ?: apkTasks.first()).path)
+    // A release APK without a signing config is silent (`...-unsigned.apk`).
+    // Refuse instead: consumers add the zjRelease* keys to local.properties.
+    if (releaseSigning == null && apkTasks.any { it.name.contains('Release') }) {
+      throw new GradleException(
+          'Release signing is not configured: add zjReleaseStoreFile, zjReleaseStorePassword, ' +
+          'zjReleaseKeyAlias and zjReleaseKeyPassword to the gitignored local.properties.')
+    }
+  }
+}
+
+android {
+  namespace = "inego.zungjunggame"
+  compileSdk 37
+  sourceSets {
+    main {
+      manifest.srcFile 'AndroidManifest.xml'
+      java.setSrcDirs(['src/main/java', 'src/main/kotlin'])
+      kotlin.setSrcDirs(['src/main/java', 'src/main/kotlin'])
+      aidl.setSrcDirs(['src/main/java', 'src/main/kotlin'])
+      res.setSrcDirs(['res'])
+      assets.setSrcDirs([stagedRuntimeAssetsDir.absolutePath])
+      jniLibs.setSrcDirs(['libs'])
+    }
+    debug {
+      res.srcDirs += ['src/debug/res']
+    }
+  }
+  packaging {
+    // minSdk 28 makes AGP default dex to UNCOMPRESSED (stored). This is a
+    // website-downloaded sideload APK, where download size dominates the
+    // install-time extraction cost, so compress it: ~1.3 MB smaller.
+    dex {
+      useLegacyPackaging = true
+    }
+    // x86/x86_64 natives are emulator-only; this is a sideloaded phone APK.
+    // copyAndroidNatives still extracts them, but they are dropped here.
+    jniLibs {
+      excludes += ['lib/x86/**', 'lib/x86_64/**']
+    }
+    resources {
+      excludes += ['META-INF/robovm/ios/robovm.xml', 'META-INF/DEPENDENCIES.txt', 'META-INF/DEPENDENCIES',
+                   'META-INF/dependencies.txt', '**/*.gwt.xml']
+      pickFirsts += ['META-INF/LICENSE.txt', 'META-INF/LICENSE', 'META-INF/license.txt', 'META-INF/LGPL2.1',
+                     'META-INF/NOTICE.txt', 'META-INF/NOTICE', 'META-INF/notice.txt']
+    }
+  }
+  defaultConfig {
+    applicationId 'inego.zungjunggame'
+    minSdkVersion 28
+    targetSdkVersion 37
+    // major.minor from gradle.properties; build = git commit count (root build.gradle).
+    versionCode rootProject.zjVersionCode
+    versionName rootProject.zjVersionName
+    // Web / server client ID: ID-token audience for Credential Manager.
+    def googleServerClientId = (findProperty('googleWebClientId') ?: '').toString()
+        .replace('\\', '\\\\').replace('"', '\\"')
+    buildConfigField 'String', 'GOOGLE_SERVER_CLIENT_ID', "\"${googleServerClientId}\""
+    // Production/test server address, e.g. -PapiBaseUrl=https://play.zungjung.org.
+    // Empty keeps the dev-URL file / loopback behaviour.
+    def escapedApiBaseUrl = bakedApiBaseUrl.replace('\\', '\\\\').replace('"', '\\"')
+    buildConfigField 'String', 'API_BASE_URL', "\"${escapedApiBaseUrl}\""
+  }
+  buildFeatures {
+    buildConfig = true
+  }
+  androidResources {
+    // Web-only CJK fallback (~8 MB). Android prefers /system/fonts.
+    // `AndroidSourceDirectorySet.exclude` is a no-op for assets (verified 2026-09-15),
+    // so the face is dropped with aapt2's --ignore-assets instead. The default
+    // pattern is restated because this property replaces it. The staged directory
+    // (core/build/staged-runtime) is what filters the loose markdown/properties.
+    ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~:!NotoSansSC-Regular.otf'
+  }
+  compileOptions {
+    // jvmTarget for built-in Kotlin defaults to targetCompatibility
+    sourceCompatibility JavaVersion.VERSION_11
+    targetCompatibility JavaVersion.VERSION_11
+    coreLibraryDesugaringEnabled = true
+  }
+  if (releaseSigning != null) {
+    signingConfigs {
+      release {
+        storeFile file(releaseSigning.storeFile)
+        storePassword releaseSigning.storePassword
+        keyAlias releaseSigning.keyAlias
+        keyPassword releaseSigning.keyPassword
+      }
+    }
+  }
+  buildTypes {
+    release {
+      minifyEnabled true
+      shrinkResources = true
+      proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), 'proguard-rules.pro'
+      if (releaseSigning != null) {
+        signingConfig signingConfigs.release
+      }
+    }
+  }
+}
+
+repositories {
+  // needed for AAPT2, may be needed for other tools
+  google()
+}
+
+configurations { natives }
+
+dependencies {
+  coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+  // Keep system splash until game bootstrap draws the first UI frame.
+  implementation 'androidx.core:core-splashscreen:1.2.0'
+  // googleid 1.2.0 pulls credentials 1.6.0-beta01; pin the 1.6.0 stable line.
+  implementation 'androidx.credentials:credentials:1.6.0'
+  implementation 'androidx.credentials:credentials-play-services-auth:1.6.0'
+  implementation 'com.google.android.libraries.identity.googleid:googleid:1.2.1'
+  implementation 'com.squareup.okhttp3:okhttp:5.5.0'
+  implementation "com.badlogicgames.gdx:gdx-backend-android:$gdxVersion"
+  implementation project(':core')
+
+  natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-arm64-v8a"
+  natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-armeabi-v7a"
+  natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86"
+  natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86_64"
+
+  // FreeType is used by core for UI fonts; extract .so natives into libs/
+  natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-arm64-v8a"
+  natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-armeabi-v7a"
+  natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-x86"
+  natives "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-x86_64"
+
+}
+
+// Called every time gradle gets executed, takes the native dependencies of
+// the natives configuration, and extracts them to the proper libs/ folders
+// so they get packed with the APK.
+tasks.register('copyAndroidNatives') {
+  doFirst {
+    file("libs/armeabi-v7a/").mkdirs()
+    file("libs/arm64-v8a/").mkdirs()
+    file("libs/x86_64/").mkdirs()
+    file("libs/x86/").mkdirs()
+
+    configurations.natives.copy().files.each { jar ->
+      def outputDir = null
+      if(jar.name.endsWith("natives-armeabi-v7a.jar")) outputDir = file("libs/armeabi-v7a")
+      if(jar.name.endsWith("natives-arm64-v8a.jar")) outputDir = file("libs/arm64-v8a")
+      if(jar.name.endsWith("natives-x86_64.jar")) outputDir = file("libs/x86_64")
+      if(jar.name.endsWith("natives-x86.jar")) outputDir = file("libs/x86")
+      if(outputDir != null) {
+        copy {
+          from zipTree(jar)
+          into outputDir
+          include "*.so"
+        }
+      }
+    }
+  }
+}
+
+tasks.matching { it.name.contains("merge") && it.name.contains("JniLibFolders") }.configureEach { packageTask ->
+  packageTask.dependsOn 'copyAndroidNatives'
+}
+
+// The asset source dir is a staged task output; make the asset merge (and the
+// build's entry point) produce it before AGP reads the directory.
+tasks.matching { it.name == 'preBuild' || (it.name.startsWith('merge') && it.name.endsWith('Assets')) }
+    .configureEach { dependsOn ':core:stageRuntimeAssets' }
+
+def androidSdkDir() {
+  def localProperties = project.file("../local.properties")
+  if (localProperties.exists()) {
+    Properties properties = new Properties()
+    localProperties.withInputStream { instr ->
+      properties.load(instr)
+    }
+    def sdkDir = properties.getProperty('sdk.dir')
+    if (sdkDir) {
+      return sdkDir
+    }
+  }
+  return "$System.env.ANDROID_SDK_ROOT"
+}
+
+def adbExecutable() {
+  return androidSdkDir() + "/platform-tools/adb"
+}
+
+static def collectHostLanIpv4() {
+  def out = []
+  NetworkInterface.networkInterfaces.each { ni ->
+    try {
+      if (!ni.up || ni.loopback) return
+    } catch (Exception ignored) {
+      return
+    }
+    ni.inetAddresses.each { addr ->
+      if (!(addr instanceof Inet4Address)) return
+      if (addr.loopbackAddress || addr.linkLocalAddress) return
+      def ip = addr.hostAddress
+      if (ip == null || ip.startsWith('169.254.')) return
+      out << ip
+    }
+  }
+  return out.unique()
+}
+
+def deviceLanIpv4(adb) {
+  def stdout = new ByteArrayOutputStream()
+  def stderr = new ByteArrayOutputStream()
+  def result = exec {
+    commandLine adb, 'shell', 'ip', '-4', '-o', 'addr', 'show'
+    standardOutput = stdout
+    errorOutput = stderr
+    ignoreExitValue true
+  }
+  if (result.exitValue != 0) return null
+  def wlan = null
+  def other = null
+  stdout.toString().eachLine { line ->
+    def m = line =~ /inet (\d+\.\d+\.\d+\.\d+)/
+    if (!m.find()) return
+    def ip = m.group(1)
+    if (ip.startsWith('127.') || ip.startsWith('169.254.')) return
+    if (line.contains('wlan')) {
+      wlan = ip
+    } else if (other == null) {
+      other = ip
+    }
+  }
+  return wlan ?: other
+}
+
+static def samePrefix24(a, b) {
+  def ap = a.split('\\.')
+  def bp = b.split('\\.')
+  if (ap.length != 4 || bp.length != 4) return false
+  return ap[0] == bp[0] && ap[1] == bp[1] && ap[2] == bp[2]
+}
+
+// Physical phone on WiFi: write host LAN URLs into app files so ApiConfig
+// talks to zj-server (BIND=0.0.0.0:8080) instead of device loopback.
+// Skipped when the build baked `-PapiBaseUrl=...`, which outranks this file.
+tasks.register('writeDevApiUrl') {
+  doLast {
+    if (!resolveBakedApiBaseUrl().isEmpty()) {
+      logger.lifecycle('writeDevApiUrl: skipped (API base URL is baked into the build)')
+      return
+    }
+    def adb = adbExecutable()
+    def hosts = collectHostLanIpv4()
+    if (hosts.isEmpty()) {
+      logger.warn('writeDevApiUrl: no host LAN IPv4; phone will keep loopback (127.0.0.1:8080)')
+      return
+    }
+    def deviceIp = null
+    try {
+      deviceIp = deviceLanIpv4(adb)
+    } catch (Exception e) {
+      logger.warn("writeDevApiUrl: could not read device IP (${e.message})")
+    }
+    def preferred = null
+    if (deviceIp != null) {
+      preferred = hosts.find { samePrefix24(it, deviceIp) }
+    }
+    def ordered = []
+    if (preferred != null) ordered << preferred
+    hosts.each { if (it != preferred) ordered << it }
+    def lines = ordered.collect { "http://${it}:8080" }
+    def printfArgs = lines.collect { "'${it}'" }.join(' ')
+    // Pipe on the device: host-side redirects break under `adb shell` quoting.
+    def shell = "printf '%s\\n' ${printfArgs} | run-as inego.zungjunggame tee files/dev-api-url.txt"
+    try {
+      def stdout = new ByteArrayOutputStream()
+      def stderr = new ByteArrayOutputStream()
+      def result = exec {
+        commandLine adb, 'shell', shell
+        standardOutput = stdout
+        errorOutput = stderr
+        ignoreExitValue true
+      }
+      if (result.exitValue == 0) {
+        logger.lifecycle("dev-api-url: ${lines.join(', ')} (deviceIp=${deviceIp ?: 'unknown'})")
+      } else {
+        logger.warn("writeDevApiUrl failed (exit=${result.exitValue}): ${stderr}")
+        logger.warn('Phone cannot reach host zj-server over LAN until this file is written.')
+      }
+    } catch (Exception e) {
+      logger.warn("writeDevApiUrl skipped: ${e.message}")
+    }
+  }
+}
+
+tasks.matching { it.name.startsWith('install') }.configureEach { installTask ->
+  installTask.finalizedBy 'writeDevApiUrl'
+}
+
+tasks.register('run', Exec) {
+  dependsOn 'writeDevApiUrl'
+  def adb = adbExecutable()
+  commandLine "$adb", 'shell', 'am', 'start', '-n', 'inego.zungjunggame/inego.zungjunggame.android.AndroidLauncher'
+}
+
+eclipse.project.name = appName + "-android"

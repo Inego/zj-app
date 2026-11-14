@@ -1,0 +1,12 @@
+# Keys intentionally shipped in English only — they have no translation yet.
+#
+# One key per line. Blank lines and lines starting with '#' are ignored.
+#
+# A key listed here is exempt from the "every shipped locale must declare every
+# key" guard in BundleCoverageTest: those locales fall back to
+# assets/i18n/ui.properties via I18NBundle. The BundleCoverageTest guards read
+# this file, so an omitted key that is NOT listed here still fails the suite.
+#
+# Add a new key here when you add an English string that is not translated yet.
+# Remove it once every shipped locale declares it; a fully translated entry
+# left behind fails the stale-entry guard.

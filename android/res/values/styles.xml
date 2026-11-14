@@ -1,0 +1,25 @@
+<resources>
+    <!--
+      Cold-start theme (manifest). AndroidX SplashScreen shows the icon on felt,
+      then switches to [GdxTheme] via postSplashScreenTheme once the condition clears.
+    -->
+    <style name="GdxSplashTheme" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/felt</item>
+        <!--
+          Splash icon must be adaptive-foreground style (logo + transparent padding),
+          not a full play-store plate. The system circular-masks ~240dp and crops
+          full-bleed plates to a weird center crop.
+        -->
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/felt</item>
+        <item name="postSplashScreenTheme">@style/GdxTheme</item>
+    </style>
+
+    <!-- Fullscreen game theme after splash: felt green matches the board clear. -->
+    <style name="GdxTheme" parent="android:Theme.Material.Light.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@color/felt</item>
+        <item name="android:colorBackground">@color/felt</item>
+        <item name="android:navigationBarColor">@color/felt</item>
+        <item name="android:statusBarColor">@color/felt</item>
+    </style>
+</resources>

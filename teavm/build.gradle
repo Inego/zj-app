@@ -1,0 +1,276 @@
+plugins {
+  id 'com.github.xpenatan.gdx-teavm' version "$teavmVersion"
+  id "org.jetbrains.kotlin.kapt"
+}
+
+eclipse.project.name = appName + '-teavm'
+
+dependencies {
+  implementation project(':core')
+  implementation "com.badlogicgames.gdx:gdx:$gdxVersion"
+  implementation "com.github.xpenatan.gdx-teavm:gdx-freetype-web:$teavmVersion"
+  // WebWindow fiber trampoline (WasmGC rAF). Matches gdx-teavm 1.6.2's TeaVM.
+  compileOnly 'org.teavm:teavm-core:0.16.0'
+  // The WebApplication shadow uses the same JMultiplatform types as backend-web.
+  compileOnly 'com.github.xpenatan:jMultiplatform:0.1.3'
+  testImplementation 'org.jetbrains.kotlin:kotlin-test'
+}
+
+// `debugWasm` / `runDebugWasm` are diagnostic toggles: the same Wasm dist built
+// with readable names and TeaVM debug info. Precedence is command-line `-P` >
+// debug task > gradle.properties, so `debugWasm -PteavmObfuscated=true` is honored.
+def teavmDebugTask = gradle.startParameter.taskNames.any {
+  it == 'debugWasm' || it.endsWith(':debugWasm') ||
+  it == 'runDebugWasm' || it.endsWith(':runDebugWasm')
+}
+def teavmCliProps = gradle.startParameter.projectProperties
+def teavmObfuscated = (teavmCliProps['teavmObfuscated']
+    ?: (teavmDebugTask ? 'false' : (findProperty('teavmObfuscated') ?: 'false'))).toString().toBoolean()
+def teavmDebugInformation = (teavmCliProps['teavmDebugInformation']
+    ?: (teavmDebugTask ? 'true' : (findProperty('teavmDebugInformation') ?: 'false'))).toString().toBoolean()
+if (teavmDebugTask) {
+  logger.lifecycle("TeaVM debug build: obfuscated=${teavmObfuscated}, debugInformation=${teavmDebugInformation}")
+}
+// Public browser title (not Gradle appName `zj-game`). Same locally and in production.
+def publicHtmlTitle = 'Zung Jung Mahjong'
+
+// Stage 4: Wasm preloads the startup set only. The language-pack zips are copied
+// into the web dist after the manifest is baked (see copyTeavmWebExtras), so the
+// preloader does not queue them; ensure(tag) fetches one on demand.
+def stagedAssetsDir = project(':core').layout.buildDirectory.dir('staged-assets').get().asFile
+gdxTeaVM {
+  assets(stagedAssetsDir)
+  reflection('com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator')
+  reflection('inego.zungjunggame.**')
+
+  js {
+    mainClass = 'inego.zungjunggame.teavm.TeaLauncher'
+    htmlTitle = publicHtmlTitle
+    htmlWidth = 1280
+    htmlHeight = 720
+    // API owns 8080; wasm Jetty is 8081.
+    serverPort = 8082
+    // Local default false (readable stacks). Production: -PteavmObfuscated=true.
+    obfuscated = teavmObfuscated
+    debugInformation = teavmDebugInformation
+    // Off: TeaVM's forked DevServer hits Windows CreateProcess 206 (command line too long).
+    // runWeb then serves the built webapp in-process via Jetty.
+    devServer {
+      enabled.set(false)
+    }
+  }
+
+  wasm {
+    mainClass = 'inego.zungjunggame.teavm.TeaLauncher'
+    htmlTitle = publicHtmlTitle
+    htmlWidth = 1280
+    htmlHeight = 720
+    serverPort = 8081
+    // Local default false (readable stacks). Production: -PteavmObfuscated=true.
+    obfuscated = teavmObfuscated
+    debugInformation = teavmDebugInformation
+    devServer {
+      enabled.set(false)
+    }
+  }
+}
+
+// The preload manifest and the copied web assets are produced inside the TeaVM
+// compile from the `assets(...)` directory, so the compile tasks must see the
+// staged startup set first. The build tasks wrap those compiles.
+tasks.matching { it.name in ['generateJavaScript', 'generateWasmGC', 'gdx_teavm_web_wasm_build', 'gdx_teavm_web_js_build'] }
+    .configureEach { dependsOn ':core:stageAssets' }
+
+tasks.register('buildWeb') {
+  group = 'application'
+  description = 'Build the TeaVM JavaScript web distribution'
+  dependsOn 'gdx_teavm_web_js_build'
+}
+
+tasks.register('runWeb') {
+  group = 'application'
+  description = 'Serve the TeaVM JavaScript web app locally'
+  dependsOn 'gdx_teavm_web_js_run'
+}
+
+tasks.register('buildWasm') {
+  group = 'application'
+  description = 'Build the TeaVM WebAssembly (WasmGC) distribution'
+  dependsOn 'gdx_teavm_web_wasm_build'
+}
+
+tasks.register('runWasm') {
+  group = 'application'
+  description = 'Serve the TeaVM WebAssembly app locally'
+  dependsOn 'gdx_teavm_web_wasm_run'
+}
+
+tasks.register('debugWasm') {
+  group = 'application'
+  description = 'Build the TeaVM WebAssembly dist with readable names and TeaVM debug info'
+  dependsOn 'gdx_teavm_web_wasm_build'
+}
+
+tasks.register('runDebugWasm') {
+  group = 'application'
+  description = 'Serve the debug (readable names, TeaVM debug info) WebAssembly build locally'
+  dependsOn 'gdx_teavm_web_wasm_run'
+}
+
+// Hosted credit. Do not change the boot <script> or oncontextmenu — the CSP hashes those.
+def teavmHostedCreditCss = '''
+            .zj-visually-hidden {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+            }
+            noscript .zj-credit {
+                position: fixed;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                margin: 0;
+                padding: 12px 16px;
+                color: #ccc;
+                background: #000;
+                font: 14px/1.4 sans-serif;
+                z-index: 1;
+            }
+            noscript .zj-credit a {
+                color: #fff;
+            }
+'''
+
+def teavmHostedCreditBody = '''
+        <p id="zj-credit" class="zj-visually-hidden">
+            Rules: Zung Jung Mahjong Scoring System (v3.3) by Alan Kwan.
+            <a href="https://www.zungjung.org/license.html" tabindex="-1">License and attribution</a>
+        </p>
+        <noscript>
+            <p class="zj-credit">
+                Rules: Zung Jung Mahjong Scoring System (v3.3) by Alan Kwan, CC BY-NC-SA 3.0 HK.
+                <a href="https://www.zungjung.org/license.html">License and attribution</a>
+            </p>
+        </noscript>
+'''
+
+def injectTeavmHostedCredit = { String text ->
+  // A dist built before the page moved still points at a relative license.html.
+  text = text.replace('href="license.html"', 'href="https://www.zungjung.org/license.html"')
+  if (text.contains('id="zj-credit"')) return text
+  if (!text.contains('rel="license"')) {
+    text = text.replaceFirst(/(?m)^(\s*)<\/head>/, '        <link rel="license" href="https://www.zungjung.org/license.html">\n$1</head>')
+  }
+  if (!text.contains('zj-visually-hidden')) {
+    text = text.replaceFirst(/(?m)^(\s*)<\/style>/, teavmHostedCreditCss + '$1</style>')
+  }
+  text = text.replaceFirst(/(<body[^>]*>)/, '$1\n' + teavmHostedCreditBody)
+  return text
+}
+
+tasks.register('copyTeavmWebExtras') {
+  group = 'application'
+  description = 'Copy web config and language-pack zips into the TeaVM webapp'
+  dependsOn ':core:packLanguagePacks'
+  doLast {
+    def extras = file('webapp')
+    def clientId = (findProperty('googleWebClientId') ?: '').toString()
+    def apiBase = (findProperty('apiBaseUrl') != null ? findProperty('apiBaseUrl') : 'http://127.0.0.1:8080').toString()
+    def langZips = project(':core').layout.buildDirectory.dir('langpacks/lang').get().asFile
+    ['js', 'wasm'].each { kind ->
+      def dest = file("build/dist/${kind}/webapp")
+      if (!dest.directory) return
+      copy {
+        from extras
+        into dest
+        // Only the text files carry __TOKEN__ placeholders. A line filter rewrites
+        // bytes as text, so it would corrupt a binary (favicon.ico); restrict it.
+        filesMatching(['**/*.html', '**/*.js', '**/*.css']) {
+          filter { String line ->
+            line.replace('__GOOGLE_WEB_CLIENT_ID__', clientId)
+                .replace('__API_BASE_URL__', apiBase)
+          }
+        }
+      }
+      // The license page is owned by the landing site. Copy does not delete a
+      // file left in dest by an older build, so drop it explicitly.
+      def staleLicense = new File(dest, 'license.html')
+      if (staleLicense.exists()) staleLicense.delete()
+      def html = new File(dest, 'index.html')
+      if (html.exists()) {
+        def text = html.getText('UTF-8')
+        if (!text.contains('zj-config.js')) {
+          text = text.replaceFirst(/(?m)^(\s*)<\/head>/, '        <script src="zj-config.js"></script>\n$1</head>')
+        }
+        text = injectTeavmHostedCredit(text)
+        // Mobile browsers otherwise lay the page out at ~980 CSS px and shrink
+        // the canvas to fit. Desktop windows are already device-width, so this
+        // does not change a PC session. Leave the boot <script> alone: its CSP
+        // hash is pinned.
+        if (!text.contains('name="viewport"')) {
+          text = text.replaceFirst(
+            /(?m)^(\s*)<\/head>/,
+            '        <meta name="viewport" content="width=device-width, initial-scale=1">\n$1</head>'
+          )
+        }
+        // 100vh is the large viewport (address bar hidden). The canvas is sized
+        // to window.innerHeight, and the template flex-centers it, so the
+        // leftover paints black bands and clips the bottom of the table.
+        // 100dvh is the visible viewport. On a desktop window dvh and vh are
+        // the same length. display:block drops the inline-canvas baseline gap,
+        // which otherwise shoves the canvas up by a couple of pixels. These
+        // rules follow the template's, so they win. Leave the boot <script>
+        // alone: its CSP hash is pinned.
+        if (!text.contains('height: 100dvh')) {
+          text = text.replaceFirst(
+            /(?m)^(\s*)<\/style>/,
+            '            body { height: 100dvh; }\n$1</style>'
+          )
+        }
+        if (!text.contains('#canvas { display: block; }')) {
+          text = text.replaceFirst(
+            /(?m)^(\s*)<\/style>/,
+            '            #canvas { display: block; }\n$1</style>'
+          )
+        }
+        html.write(text, 'UTF-8')
+      }
+      // The zips are deliberately outside `assets(...)` so the manifest does not
+      // preload them. Copy them in after the manifest is baked; on demand,
+      // `loadAsset("lang/<tag>.zip")` fetches exactly one.
+      if (langZips.directory) {
+        def langDest = new File(dest, 'assets/lang')
+        if (!langDest.directory) langDest.mkdirs()
+        copy {
+          from langZips
+          include '*.zip'
+          into langDest
+        }
+      }
+    }
+  }
+}
+
+// `build` is in the set because it is the task a reader reaches for first, and
+// the TeaVM compile tasks are not part of `assemble`: without this, `:teavm:build`
+// left the dist holding whatever favicon.ico the last `buildWasm` copied in, which
+// reads exactly like a stale-source bug. The copy is a no-op when the dist does
+// not exist, so `build` on a clean tree stays cheap.
+tasks.matching { it.name in ['gdx_teavm_web_wasm_build', 'gdx_teavm_web_js_build', 'build'] }.configureEach {
+  finalizedBy copyTeavmWebExtras
+}
+
+['gdx_teavm_web_wasm_run', 'gdx_teavm_web_js_run'].each { runName ->
+  tasks.matching { it.name == runName }.configureEach {
+    dependsOn copyTeavmWebExtras
+  }
+}
+repositories {
+  mavenCentral()
+}

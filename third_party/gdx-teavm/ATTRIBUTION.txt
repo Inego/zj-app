@@ -1,0 +1,27 @@
+gdx-teavm
+https://github.com/xpenatan/gdx-teavm
+
+The following files under teavm/src/main/java/ are modified copies of gdx-teavm
+1.6.2 classes. They keep the upstream package and class name so they shadow the
+dependency's versions in the Web build:
+
+  com/github/xpenatan/gdx/teavm/backends/web/WebApplication.java
+  com/github/xpenatan/gdx/teavm/backends/web/WebInput.java
+  com/github/xpenatan/gdx/teavm/backends/web/WebNet.java
+  com/github/xpenatan/gdx/teavm/backends/web/assetloader/AssetDownloadImpl.java
+  com/github/xpenatan/gdx/teavm/backends/web/dom/impl/WebWindow.java
+
+They have been modified for this project; the changes are recorded in the
+repository history. Upstream @author tags are retained in the source files.
+
+Original classes in the same package (not derived from gdx-teavm):
+
+  com/github/xpenatan/gdx/teavm/backends/web/BrowserFiber.java
+  com/github/xpenatan/gdx/teavm/backends/web/PacedWebGraphics.java
+  com/github/xpenatan/gdx/teavm/backends/web/WebGpuContextSignal.java
+  com/github/xpenatan/gdx/teavm/backends/web/WebResumeDiagnostics.java
+
+License: Apache License 2.0 — see LICENSE in this directory.
+
+Original authors include xpenatan (gdx-teavm) and noblemaster (the libGDX GWT
+input backend that gdx-teavm's WebInput and WebNet derive from).
