@@ -335,7 +335,7 @@ class OnlineConnectOverlay : Disposable, GestureSurface<OnlineConnectOverlay.Poi
             pointerX >= left && pointerX <= left + w &&
             pointerY >= bottom && pointerY <= bottom + h
         OverlayChrome.drawButton(
-            batch, px, font, glyphLayout, label,
+            batch, px, font, label,
             left, bottom, w, h,
             OverlayChrome.actionFill(hovered = hovered),
             OverlayChrome.actionRim(),

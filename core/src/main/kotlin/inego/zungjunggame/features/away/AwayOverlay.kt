@@ -251,7 +251,7 @@ class AwayOverlay : Disposable, GestureSurface<AwayOverlay.PointerResult> {
         val rim = OverlayChrome.rowRim()
         val font = Fonts.button
         OverlayChrome.drawButton(
-            batch, px, font, glyphLayout, label,
+            batch, px, font, label,
             left, bottom, w, h, bg, rim,
             if (hovered) AppPalette.inkStrong else AppPalette.ink,
         )

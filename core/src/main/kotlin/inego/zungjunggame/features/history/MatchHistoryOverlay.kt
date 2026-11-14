@@ -335,7 +335,7 @@ class MatchHistoryOverlay : Disposable, GestureSurface<ModalVerdict> {
                     val bg = OverlayChrome.rowFill(hovered)
                     val rim = OverlayChrome.rowRim()
                     OverlayChrome.drawButton(
-                        batch, px, itemFont, glyphLayout, loadMoreLabel,
+                        batch, px, itemFont, loadMoreLabel,
                         listLeft, bottom, rowsW, loadMoreH, bg, rim,
                         AppPalette.ink,
                     )

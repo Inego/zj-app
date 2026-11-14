@@ -558,7 +558,9 @@ object Fonts : Disposable {
      *
      * The measuring half of the fit contract: scale the geometry you laid out at 1
      * by this value, then paint it inside [withFaceScale] with the same value, so
-     * glyphs and their columns shrink together and cannot disagree.
+     * glyphs and their columns shrink together and cannot disagree. A one-line
+     * label that only needs the ink fitted can call
+     * [inego.zungjunggame.render.ui.FittedLabel.draw] instead of pairing the two.
      */
     fun fitScale(naturalW: Float, availableW: Float, min: Float = MIN_FIT_SCALE): Float {
         if (naturalW <= 0f || !availableW.isFinite() || availableW <= 0f || naturalW <= availableW) {

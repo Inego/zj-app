@@ -394,7 +394,7 @@ class AliasCardOverlay : Disposable, GestureSurface<ModalVerdict> {
         }
         val rim = OverlayChrome.rowRim()
         OverlayChrome.drawButton(
-            batch, px, font, glyphLayout, label,
+            batch, px, font, label,
             left, bottom, w, h, bg, rim,
             if (hovered) AppPalette.inkStrong else AppPalette.ink,
         )

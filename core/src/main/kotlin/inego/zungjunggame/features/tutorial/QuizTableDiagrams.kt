@@ -140,7 +140,7 @@ object QuizTableDiagrams {
                 (spotlight == "turn.next" && id == "right")
             val label = L10n.get(key)
             OverlayChrome.drawButton(
-                batch, px, Fonts.small, glyphLayout, label,
+                batch, px, Fonts.small, label,
                 x, y, boxW, boxH,
                 if (hot) AppPalette.diagramHot else AppPalette.diagramCold,
                 if (hot) accent else AppPalette.tint(AppPalette.rim, 0.45f),

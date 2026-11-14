@@ -284,7 +284,7 @@ class AccountOverlay : Disposable, GestureSurface<AccountOverlay.PointerResult> 
         changeH = buttonH
         val changeHovered = inRect(pointerWorldX, pointerWorldY, changeLeft, changeBottom, changeW, changeH)
         OverlayChrome.drawButton(
-            batch, px, buttonFont, glyphLayout, changeLabel,
+            batch, px, buttonFont, changeLabel,
             changeLeft, changeBottom, changeW, changeH,
             OverlayChrome.rowFill(changeHovered),
             OverlayChrome.rowRim(),

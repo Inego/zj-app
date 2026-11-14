@@ -21,6 +21,7 @@ import inego.zungjunggame.ui.Rect
 import kotlin.math.max
 import kotlin.math.min
 import inego.zungjunggame.render.ui.AppPalette
+import inego.zungjunggame.render.ui.FittedLabel
 
 /** One rounds radio option and the value it selects (`null` = unlimited). */
 data class NewGameSetupRoundGeometry(val rect: Rect, val roundsValue: Int?)
@@ -618,19 +619,20 @@ class NewGameSetupOverlay(
         batch.setColor(Color.WHITE)
 
         val font = Fonts.button
-        glyphLayout.setText(font, label)
-        font.color = when {
-            selected -> AppPalette.labelInkHover
-            hovered -> AppPalette.ink
-            else -> AppPalette.inkWarm
-        }
-        font.draw(
-            batch,
-            label,
-            discLeft + disc + Fonts.px(14f),
-            bottom + h * 0.5f + glyphLayout.height * 0.5f,
+        val textLeft = discLeft + disc + Fonts.px(14f)
+        FittedLabel.draw(
+            batch = batch,
+            font = font,
+            text = label,
+            left = textLeft,
+            centerY = bottom + h * 0.5f,
+            maxWidth = (left + w - textLeft).coerceAtLeast(1f),
+            color = when {
+                selected -> AppPalette.labelInkHover
+                hovered -> AppPalette.ink
+                else -> AppPalette.inkWarm
+            },
         )
-        font.color = Color.WHITE
     }
 
     private fun drawCheckRow(
@@ -680,17 +682,16 @@ class NewGameSetupOverlay(
         batch.setColor(Color.WHITE)
 
         val font = Fonts.button
-        glyphLayout.setText(font, label)
-        font.color =
-            if (hovered) AppPalette.inkStrong
-            else AppPalette.ink
-        font.draw(
-            batch,
-            label,
-            boxLeft + box + Fonts.px(14f),
-            bottom + h * 0.5f + glyphLayout.height * 0.5f,
+        val textLeft = boxLeft + box + Fonts.px(14f)
+        FittedLabel.draw(
+            batch = batch,
+            font = font,
+            text = label,
+            left = textLeft,
+            centerY = bottom + h * 0.5f,
+            maxWidth = (left + w - textLeft).coerceAtLeast(1f),
+            color = if (hovered) AppPalette.inkStrong else AppPalette.ink,
         )
-        font.color = Color.WHITE
     }
 
     private fun drawActionButton(
@@ -714,7 +715,7 @@ class NewGameSetupOverlay(
         val rim = OverlayChrome.actionRim()
         val font = Fonts.button
         OverlayChrome.drawButton(
-            batch, px, font, glyphLayout, label,
+            batch, px, font, label,
             left, bottom, w, h, bg, rim,
             if (hovered) AppPalette.inkStrong else AppPalette.ink,
         )

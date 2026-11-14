@@ -429,7 +429,7 @@ class RatingHistoryOverlay : Disposable {
             else -> AppPalette.inkSoft
         }
         OverlayChrome.drawButton(
-            batch, px, Fonts.button, glyphLayout, label,
+            batch, px, Fonts.button, label,
             rect.left, rect.bottom, rect.width, rect.height,
             fill, rim, ink,
         )

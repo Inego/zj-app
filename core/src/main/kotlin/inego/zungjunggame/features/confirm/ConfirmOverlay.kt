@@ -288,7 +288,7 @@ class ConfirmOverlay : Disposable, GestureSurface<ConfirmOverlay.PointerResult> 
         val rim = OverlayChrome.actionRim()
         val font = Fonts.button
         OverlayChrome.drawButton(
-            batch, px, font, glyphLayout, label,
+            batch, px, font, label,
             left, bottom, w, h, bg, rim,
             if (hovered) AppPalette.inkStrong else AppPalette.ink,
         )

@@ -3,7 +3,6 @@ package inego.zungjunggame.render.ui
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.BitmapFont
-import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import inego.zungjunggame.render.fonts.Fonts
 import kotlin.math.max
@@ -105,29 +104,23 @@ object OverlayChrome {
     }
 
     /**
-     * Fills with [fill], strokes a four-edge rim in [rim], draws [label] centered in
-     * the rect using [font]/[glyph] tinted [labelColor]; leaves batch colour and
-     * font colour WHITE.
+     * Fills with [fill], strokes a four-edge rim in [rim], draws [label] centred in
+     * the rect using [font] tinted [labelColor]; leaves batch colour and the
+     * font's tint untouched.
      *
      * The label is **fitted to the plate**: a translation wider than the button gets
-     * a uniformly smaller face ([Fonts.fitScale], floored at
-     * [Fonts.MIN_FIT_SCALE]) instead of spilling past the rim. This is the fit
-     * contract every button shares, so it lives here rather than at the call site —
-     * a site that lays out to the source-language string cannot know how long its
-     * translation will be, and there are sixteen locales to be wrong about. Peers
-     * that already fit (the hub's header link) do so because they are text, not
-     * plates, and draw their own.
-     *
-     * The fit measures [label] at the face's natural scale, then re-measures inside
-     * [Fonts.withFaceScale], so the drawn width is the one the centering used. A
-     * label that still overflows at the floor is left overflowing on purpose:
-     * shrinking past [Fonts.MIN_FIT_SCALE] would trade legibility for nothing.
+     * a uniformly smaller face ([FittedLabel], floored at [Fonts.MIN_FIT_SCALE])
+     * instead of spilling past the rim. This is the fit contract every button
+     * shares, so it lives here rather than at the call site — a site that lays out
+     * to the source-language string cannot know how long its translation will be,
+     * and there are sixteen locales to be wrong about. Peers that already fit (the
+     * hub's header link) do so because they are text, not plates, and draw their
+     * own.
      */
     fun drawButton(
         batch: SpriteBatch,
         px: Texture,
         font: BitmapFont,
-        glyph: GlyphLayout,
         label: String,
         left: Float,
         bottom: Float,
@@ -144,19 +137,15 @@ object OverlayChrome {
 
         // Clear the rim plus a little air, so a fitted label never sits on the edge.
         val inset = t + Fonts.px(LABEL_PAD_PX)
-        val available = (w - inset * 2f).coerceAtLeast(1f)
-        glyph.setText(font, label)
-        val scale = Fonts.fitScale(glyph.width, available)
-        Fonts.withFaceScale(font, scale) {
-            glyph.setText(font, label)
-            font.color = labelColor
-            font.draw(
-                batch,
-                label,
-                left + (w - glyph.width) * 0.5f,
-                bottom + h * 0.5f + glyph.height * 0.5f,
-            )
-            font.color = Color.WHITE
-        }
+        FittedLabel.draw(
+            batch = batch,
+            font = font,
+            text = label,
+            left = left + inset,
+            centerY = bottom + h * 0.5f,
+            maxWidth = (w - inset * 2f).coerceAtLeast(1f),
+            color = labelColor,
+            align = FittedLabel.Align.Center,
+        )
     }
 }

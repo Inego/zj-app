@@ -105,7 +105,7 @@ internal object HubDraw {
             else -> AppPalette.ink
         }
         OverlayChrome.drawButton(
-            batch, px, font, glyph, label,
+            batch, px, font, label,
             left, bottom, w, h, bg, rim, ink, border,
         )
     }
