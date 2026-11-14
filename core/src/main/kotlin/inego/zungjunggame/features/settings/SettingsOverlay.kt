@@ -1,5 +1,6 @@
 package inego.zungjunggame.features.settings
 
+import com.badlogic.gdx.graphics.Camera
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.GlyphLayout
@@ -17,21 +18,20 @@ import inego.zungjunggame.render.ui.*
 import inego.zungjunggame.render.ui.UiPlate
 import inego.zungjunggame.ui.GestureSurface
 import inego.zungjunggame.ui.Rect
-import kotlin.math.abs
 import kotlin.math.max
 import inego.zungjunggame.render.ui.AppPalette
 
 /**
  * What a completed press on the Settings card resolved, in the card's own
  * vocabulary. A checkbox row reports its stable row id; the volume slider reports
- * its value on the press and on each drag step that crosses to a new step, so the
+ * its value when a horizontal drag claims it and on each step-crossing drag, so the
  * value travels the action channel instead of being smuggled through a row payload.
  */
 sealed interface SettingsVerdict {
     /** A checkbox row, by its stable row id ([SettingsOverlay.TILE_LABELS_ROW], …). */
     data class Row(val id: String) : SettingsVerdict
 
-    /** The volume slider's value, reported by the press and each step-crossing drag. */
+    /** The volume slider's value, reported when a horizontal drag claims it and each step-crossing drag. */
     data class Volume(val value: Int) : SettingsVerdict
 
     /**
@@ -43,6 +43,13 @@ sealed interface SettingsVerdict {
 
     /** The top-right close control was tapped. */
     data object Close : SettingsVerdict
+
+    /**
+     * The body's offset: reported on each drag step and once more when a drag
+     * settles ([settled] true), so the owner stores where the player left the
+     * card.
+     */
+    data class BodyScroll(val offset: Float, val settled: Boolean = false) : SettingsVerdict
 
     /** A press that resolved no control. */
     data object None : SettingsVerdict
@@ -74,16 +81,26 @@ data class SettingsGeometry(
  *
  * Neither control owns its value. The checkbox renders whatever [render] is
  * handed and a row release reports its id as a [SettingsVerdict.Row]; the slider's
- * value is the model's, handed in each frame, and its press/drag steps report a
+ * value is the model's, handed in each frame, and a horizontal drag reports a
  * [SettingsVerdict.Volume]. The preference itself is model state (`ui.prefs`),
  * read through [SettingsComponent], so a control and the value it commits cannot
  * disagree — the defect the old read-back draft allowed.
+ *
+ * Title and close stay put; the rows scroll inside [OverlayBodyScroll] when the
+ * card would be taller than the safe rect (a short landscape window, or the
+ * signed-in notification section), so no row is ever pushed off-screen. The
+ * offset is the owner's: [render] is handed it and a drag reports where it moved.
+ * The gesture is **directional** and shared ([GestureAxis]): a vertical pan
+ * anywhere in the body scrolls it, including over a slider, and only a
+ * sideways-dominant drag takes a slider's value — otherwise a pan that happens
+ * to start on the volume row would be dead.
  *
  * Opened from the root menu row; Esc / outside tap dismisses back to the menu
  * (routed by the platform input processor).
  */
 class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
     private val glyphLayout = GlyphLayout()
+    private val body = OverlayBodyScroll()
 
     private fun whitePixel(): Texture = WhitePixel.get()
 
@@ -121,25 +138,47 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
 
     private val closeButton = CloseButton()
 
+    /** Which slider a press that landed on one may still turn out to be. */
+    private enum class SliderTarget { Volume, Digest }
+
+    /**
+     * The press's direction: a vertical pan over a slider belongs to the body,
+     * and only a sideways-dominant drag takes the slider. The rule is shared
+     * ([GestureAxis]); this card only maps its answer to its own controls.
+     */
+    private val axis = GestureAxis()
+
     /** Press began on a checkbox row: a release there is a tap, not a drag. */
     private var pressRow: String? = null
 
     /** Press began on the top-right close control. */
     private var pressClose = false
 
-    /** The slider value the press set, or null when the press did not claim the slider. */
-    private var pressVolumeValue: Int? = null
+    /**
+     * The slider under the press. It does **not** take the value until the drag
+     * proves sideways: a vertical pan over a slider belongs to the body.
+     */
+    private var pressSlider: Slider? = null
+    private var pressSliderTarget: SliderTarget? = null
 
-    /** The digest slider's value the press set, or null when it did not claim the press. */
-    private var pressDigestStep: Int? = null
+    /** The press began on the scrolling body, not on a control. */
+    private var pressBody = false
 
-    private var pressY = Float.NaN
-    private var dragged = false
+    /** Offset the body held when that press began, so a no-op drag reports nothing. */
+    private var pressScrollStart = 0f
 
     fun containsPanel(worldX: Float, worldY: Float): Boolean {
         return worldX >= panelLeft && worldX <= panelLeft + panelW &&
             worldY >= panelBottom && worldY <= panelBottom + panelH
     }
+
+    /** The offset the body is scrolled down (0 = top), read by the gesture bridge. */
+    override fun scrollOffset(): Float = body.scrollY
+
+    override fun scrollCoasting(): Boolean = body.isCoasting
+
+    /** Advance the body's fling inertia; [deltaSec] comes from the host's frame. */
+    fun advance(deltaSec: Float): Float = body.advance(deltaSec)
 
     /** True when the point is on the top-right close button. */
     fun isOnCloseButton(worldX: Float, worldY: Float): Boolean =
@@ -210,72 +249,109 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
         return SettingsGeometry(panel, tile, sounds, track, email, digest, close)
     }
 
-    /** No scroll region: the panel is sized to its rows. */
-    override fun onScroll(amountY: Float, x: Float, y: Float): Boolean = false
+    override fun onScroll(amountY: Float, x: Float, y: Float): Boolean {
+        body.wheel(amountY)
+        return true
+    }
 
     override fun onPointerDown(x: Float, y: Float): Boolean {
+        // A new gesture owns the body, not the one before it.
+        body.cancel()
+        clearPress()
         // The card owns gestures only within its own panel; a press outside it
         // falls through to the layer's outside-tap path.
         if (!containsPanel(x, y)) return false
         if (closeButton.contains(x, y)) {
             pressClose = true
-            pressY = y
-            dragged = false
             TouchDiagnostics.log("set down close x=${TouchDiagnostics.fmt(x)} y=${TouchDiagnostics.fmt(y)}")
             return true
         }
-        val sliderValue = onSliderPointerDown(x, y)
-        pressVolumeValue = sliderValue
-        val digestValue = if (sliderValue == null) onDigestSliderPointerDown(x, y) else null
-        pressDigestStep = digestValue
-        pressRow = when {
-            sliderValue != null -> null
-            digestValue != null -> null
-            isOnTileLabelRow(x, y) -> TILE_LABELS_ROW
-            isOnSoundsRow(x, y) -> SOUNDS_ROW
-            isOnEmailRow(x, y) -> EMAIL_OPT_IN_ROW
-            else -> null
+        axis.begin(x, y)
+        // Arm the body on every press that lands on it, so a scrollbar grab
+        // follows the finger at once. A content drag stays still until the
+        // finger commits to the vertical axis — see [onPointerDrag].
+        pressBody = body.contains(x, y)
+        if (pressBody) {
+            val before = body.scrollY
+            body.beginPointer(x, y)
+            pressScrollStart = before
         }
-        pressY = y
-        dragged = false
+        when {
+            slider.contains(x, y) -> {
+                pressSlider = slider
+                pressSliderTarget = SliderTarget.Volume
+            }
+            notificationsVisible && digestSlider.contains(x, y) -> {
+                pressSlider = digestSlider
+                pressSliderTarget = SliderTarget.Digest
+            }
+            else -> pressRow = when {
+                isOnTileLabelRow(x, y) -> TILE_LABELS_ROW
+                isOnSoundsRow(x, y) -> SOUNDS_ROW
+                isOnEmailRow(x, y) -> EMAIL_OPT_IN_ROW
+                else -> null
+            }
+        }
         TouchDiagnostics.log(
             "set down x=${TouchDiagnostics.fmt(x)} y=${TouchDiagnostics.fmt(y)} " +
-                "row=${pressRow ?: "none"} slider=${sliderValue ?: "none"} " +
-                "digest=${digestValue ?: "none"} " +
-                "slop=${TouchDiagnostics.fmt(tapSlopPx())} uiScale=${TouchDiagnostics.fmt(Fonts.uiScale)}",
+                "row=${pressRow ?: "none"} slider=${pressSliderTarget ?: "none"} " +
+                "body=$pressBody slop=${TouchDiagnostics.fmt(tapSlopPx())} " +
+                "uiScale=${TouchDiagnostics.fmt(Fonts.uiScale)}",
         )
         return true
     }
 
-    /** A slider press already set a value; emit it before the drag steps that follow. */
-    override fun pressVerdict(): SettingsVerdict? =
-        pressVolumeValue?.let { SettingsVerdict.Volume(it) }
-
     override fun onPointerDrag(x: Float, y: Float): SettingsVerdict? {
-        if (pressY.isNaN()) return null
-        val dy = abs(y - pressY)
-        val wasDragged = dragged
-        if (dy > tapSlopPx()) dragged = true
-        if (dragged && !wasDragged) {
+        if (!axis.started) return null
+        val previous = axis.owner
+        val owner = axis.resolve(
+            x = x,
+            y = y,
+            sideAvailable = pressSlider != null,
+            scrollAvailable = pressBody,
+            scrollGrabbed = body.isScrollbarDrag,
+        )
+        if (owner != previous && owner != GestureAxis.Owner.Undecided) {
+            // A slider owns this one; the body's armed press is not a scroll.
+            if (owner == GestureAxis.Owner.Side) body.cancel()
             TouchDiagnostics.log(
-                "set drag-cancel dy=${TouchDiagnostics.fmt(dy)} y=${TouchDiagnostics.fmt(y)} " +
-                    "slop=${TouchDiagnostics.fmt(tapSlopPx())}",
+                "set drag start target=$owner dx=${TouchDiagnostics.fmt(axis.dx)} " +
+                    "dy=${TouchDiagnostics.fmt(axis.dy)} slop=${TouchDiagnostics.fmt(tapSlopPx())}",
             )
         }
-        if (pressDigestStep != null) {
-            // The digest interval is a server write; it commits on release, not per drag step.
-            digestSlider.onPointerDrag(x)
-            return null
+        return when (owner) {
+            GestureAxis.Owner.Side -> {
+                val slider = pressSlider ?: return null
+                // The sliding gesture begins where the sideways intent is
+                // proved: the value under the finger when the lock happens.
+                val next = if (slider.isDragging) {
+                    slider.onPointerDrag(x)
+                } else {
+                    slider.onPointerDown(x, y)
+                } ?: return null
+                if (pressSliderTarget == SliderTarget.Volume) {
+                    SettingsVerdict.Volume(next)
+                } else {
+                    // The digest interval is a server write; it commits on release.
+                    null
+                }
+            }
+            GestureAxis.Owner.Scroll -> {
+                val offset = body.dragTo(y)
+                // A thumb drag owns the offset without being a content drag, so
+                // both must stream it or the card would jump on release.
+                if (body.isDrag || body.isScrollbarDrag) SettingsVerdict.BodyScroll(offset) else null
+            }
+            GestureAxis.Owner.Undecided -> null
         }
-        if (pressVolumeValue == null) return null
-        return onSliderPointerDrag(x)?.let { SettingsVerdict.Volume(it) }
     }
 
     /**
-     * The card carries checkbox rows and the volume slider. The overlay owns the
-     * press state machine (slop, press origin); the caller owns the *values*, which
-     * are model state. A completed row tap reports the row it selected; the slider
-     * only ends its drag here — its value already travelled the press/drag channels.
+     * The card carries checkbox rows and sliders. The overlay owns the press state
+     * machine (direction, slop, press origin); the caller owns the *values*, which
+     * are model state. A completed row tap reports the row it selected; a
+     * horizontal slider drag streams its value, and the digest interval commits
+     * once on release.
      */
     override fun onPointerUp(x: Float, y: Float): SettingsVerdict {
         if (pressClose) {
@@ -283,71 +359,81 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
             clearPress()
             return if (hit) SettingsVerdict.Close else SettingsVerdict.None
         }
-        if (pressVolumeValue != null) {
-            onSliderPointerUp()
+        if (axis.owner == GestureAxis.Owner.Side) {
+            val target = pressSliderTarget
+            val value = pressSlider?.value
+            pressSlider?.onPointerUp()
             clearPress()
-            return SettingsVerdict.None
+            return when {
+                value == null -> SettingsVerdict.None
+                // The volume already travelled the drag channel; only the server
+                // write the digest interval carries is committed once, here.
+                target == SliderTarget.Digest -> SettingsVerdict.DigestInterval(value)
+                else -> SettingsVerdict.None
+            }
         }
-        if (pressDigestStep != null) {
-            // A tap on the track and a drag both commit the value under the finger.
-            val step = digestSlider.value
-            digestSlider.onPointerUp()
+        // A press that never passed the slop is still the tap it started: on a
+        // slider it jumps to the release point, on a row it selects the row.
+        val slider = pressSlider
+        if (axis.owner == GestureAxis.Owner.Undecided && slider != null) {
+            val target = pressSliderTarget
+            val value = if (x.isNaN() || y.isNaN()) null else slider.onPointerDown(x, y)
+            slider.onPointerUp()
+            body.cancel()
             clearPress()
-            return SettingsVerdict.DigestInterval(step)
+            return when {
+                value == null -> SettingsVerdict.None
+                target == SliderTarget.Digest -> SettingsVerdict.DigestInterval(value)
+                else -> SettingsVerdict.Volume(value)
+            }
         }
-        val resolvedRow = pressRow?.takeIf { !dragged }
+        if (pressBody) {
+            // Ends a content drag or the scrollbar grab. A bar tap that jumped the
+            // thumb is a scroll too, even though the finger never travelled.
+            body.endPointer()
+            val settled = body.scrollY
+            val start = pressScrollStart
+            val resolvedRow = pressRow?.takeIf { !axis.moved }
+            clearPress()
+            return when {
+                settled != start -> SettingsVerdict.BodyScroll(settled, settled = true)
+                resolvedRow != null -> SettingsVerdict.Row(resolvedRow)
+                else -> SettingsVerdict.None
+            }
+        }
+        val resolvedRow = pressRow?.takeIf { !axis.moved }
         TouchDiagnostics.log(
             "set up x=${TouchDiagnostics.fmt(x)} y=${TouchDiagnostics.fmt(y)} " +
-                "row=${resolvedRow ?: "none"} dragged=$dragged",
+                "row=${resolvedRow ?: "none"} moved=${axis.moved}",
         )
         clearPress()
         return resolvedRow?.let(SettingsVerdict::Row) ?: SettingsVerdict.None
     }
 
     override fun cancelGesture() {
-        onSliderCancelDrag()
-        digestSlider.clearDrag()
-        clearPress()
-    }
-
-    // --- Volume slider delegation (the widget owns its press machine) ---
-
-    private fun onSliderPointerDown(worldX: Float, worldY: Float): Int? {
-        if (!slider.contains(worldX, worldY)) return null
-        return slider.onPointerDown(worldX, worldY)
-    }
-
-    private fun onSliderPointerDrag(worldX: Float): Int? =
-        slider.onPointerDrag(worldX)
-
-    private fun onSliderPointerUp(): Int? {
-        val finalVal = if (slider.isDragging) slider.value else null
-        slider.onPointerUp()
-        return finalVal
-    }
-
-    private fun onSliderCancelDrag() {
         slider.clearDrag()
-    }
-
-    private fun onDigestSliderPointerDown(worldX: Float, worldY: Float): Int? {
-        if (!notificationsVisible || !digestSlider.contains(worldX, worldY)) return null
-        return digestSlider.onPointerDown(worldX, worldY)
+        digestSlider.clearDrag()
+        body.cancel()
+        clearPress()
     }
 
     private fun clearPress() {
         pressRow = null
         pressClose = false
-        pressVolumeValue = null
-        pressDigestStep = null
-        pressY = Float.NaN
-        dragged = false
+        pressSlider = null
+        pressSliderTarget = null
+        axis.clear()
+        pressBody = false
+        pressScrollStart = 0f
     }
 
     fun render(
         batch: SpriteBatch,
+        camera: Camera,
         screenW: Float,
         screenH: Float,
+        /** Body offset the owner stored; 0 = top. */
+        scrollY: Float = 0f,
         /** Checkbox value for this frame; the caller reads it from the model. */
         showTileLabels: Boolean = UiPreferences.DEFAULT.showTileLabels,
         /** Master sound switch; drives the sounds checkbox and the slider's muted look. */
@@ -445,9 +531,13 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
             .coerceAtMost(maxPanelW)
             .coerceAtMost(avail.width)
         // Row labels wrap to the row's text width: a translation longer than the
-        // panel grows its row instead of running past the rim.
+        // panel grows its row instead of running past the rim. The scrollbar's
+        // strip is reserved whether or not it shows, so a row's height cannot
+        // change the moment the body starts overflowing.
         val rowLabelInset = Fonts.px(4f) + checkBox + checkGap
-        val rowLabelAvail = (panelW - padX * 2f - rowLabelInset).coerceAtLeast(1f)
+        val rowLabelAvail = (
+            panelW - padX * 2f - VerticalScrollbar.gutterWidth() - rowLabelInset
+        ).coerceAtLeast(1f)
         fun wrappedRowH(label: String): Float {
             glyphLayout.setText(rowFont, label, Color.WHITE, rowLabelAvail, Align.left, true)
             return max(rowH, glyphLayout.height + Fonts.px(18f))
@@ -465,10 +555,20 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
         } else {
             0f
         }
-        panelH = padY * 2f + titleFont.lineHeight + titleGap + rowsH + notifH
-        val placed = OverlayViewport.placeCentered(panelW, panelH, avail)
-        panelLeft = placed.first
-        panelBottom = placed.second
+        // Title and close are sticky chrome; the rows scroll in the body between
+        // them and the card's bottom inset.
+        val chromeH = padY * 2f + titleFont.lineHeight + titleGap
+        val fitted = body.fitAndPlace(
+            avail = avail,
+            panelW = panelW,
+            chromeH = chromeH,
+            bodyContentH = rowsH + notifH,
+            bodyInset = padY,
+            scrollY = scrollY,
+        )
+        panelH = fitted.cardH
+        panelLeft = fitted.left
+        panelBottom = fitted.bottom
 
         OverlayChrome.drawPanel(
             batch, px, panelLeft, panelBottom, panelW, panelH,
@@ -491,63 +591,69 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
             panelBottom + panelH - padY,
         )
 
-        // Rows read top-down after the title: tile labels, sounds, then volume.
+        // Rows read top-down under the sticky title: tile labels, sounds, volume,
+        // then the signed-in notification section. They live in the scroll body, so
+        // a short window scrolls instead of pushing the title off-screen.
         rowLeft = panelLeft + padX
-        this.rowW = (panelW - padX * 2f).coerceAtLeast(Fonts.px(24f))
-        var top = panelBottom + panelH - padY - titleFont.lineHeight - titleGap
+        this.rowW = body.contentWidth(panelW, padX * 2f, Fonts.px(24f))
+        val hoverX = body.hoverX(pointerWorldX)
+        val hoverY = body.hoverY(pointerWorldY)
+        body.drawBody(batch, camera, px, pointerWorldX, pointerWorldY) {
+            var top = body.contentTop
 
-        tileRowBottom = top - tileRowH
-        drawCheckRow(
-            batch, px, tileLabelsLabel, showTileLabels, tileRowBottom,
-            isOnTileLabelRow(pointerWorldX, pointerWorldY),
-            rowHeight = tileRowH,
-        )
-        top = tileRowBottom - rowGap
-
-        soundsRowBottom = top - soundsRowH
-        drawCheckRow(
-            batch, px, soundsLabel, soundsEnabled, soundsRowBottom,
-            isOnSoundsRow(pointerWorldX, pointerWorldY),
-            rowHeight = soundsRowH,
-        )
-        top = soundsRowBottom - rowGap
-
-        slider.label = volumeLabel
-        slider.valueText = ""
-        slider.stepLabels = emptyList()
-        if (!slider.isDragging) slider.setValue(soundVolume)
-        slider.layout(rowLeft, top - sliderH, this.rowW, sliderH)
-        slider.render(
-            batch,
-            px,
-            pointerWorldX = pointerWorldX,
-            pointerWorldY = pointerWorldY,
-            muted = !soundsEnabled,
-        )
-
-        if (notificationsVisible) {
-            top = top - sliderH - rowGap
-            emailRowBottom = top - emailRowH
+            tileRowBottom = top - tileRowH
             drawCheckRow(
-                batch, px, emailLabel, emailOptIn, emailRowBottom,
-                isOnEmailRow(pointerWorldX, pointerWorldY),
-                rowHeight = emailRowH,
+                batch, px, tileLabelsLabel, showTileLabels, tileRowBottom,
+                isOnTileLabelRow(hoverX, hoverY),
+                rowHeight = tileRowH,
             )
-            top = emailRowBottom - rowGap
+            top = tileRowBottom - rowGap
 
-            digestSlider.label = digestLabel
-            digestSlider.stepLabels = emptyList()
-            if (!digestSlider.isDragging) {
-                digestSlider.setValue(NotificationPrefsScale.stepFor(digestIntervalHours))
-            }
-            digestSlider.valueText = digestIntervalText(digestSlider.value)
-            digestSlider.layout(rowLeft, top - sliderH, this.rowW, sliderH)
-            digestSlider.render(
+            soundsRowBottom = top - soundsRowH
+            drawCheckRow(
+                batch, px, soundsLabel, soundsEnabled, soundsRowBottom,
+                isOnSoundsRow(hoverX, hoverY),
+                rowHeight = soundsRowH,
+            )
+            top = soundsRowBottom - rowGap
+
+            slider.label = volumeLabel
+            slider.valueText = ""
+            slider.stepLabels = emptyList()
+            if (!slider.isDragging) slider.setValue(soundVolume)
+            slider.layout(rowLeft, top - sliderH, this.rowW, sliderH)
+            slider.render(
                 batch,
                 px,
-                pointerWorldX = pointerWorldX,
-                pointerWorldY = pointerWorldY,
+                pointerWorldX = hoverX,
+                pointerWorldY = hoverY,
+                muted = !soundsEnabled,
             )
+
+            if (notificationsVisible) {
+                top = top - sliderH - rowGap
+                emailRowBottom = top - emailRowH
+                drawCheckRow(
+                    batch, px, emailLabel, emailOptIn, emailRowBottom,
+                    isOnEmailRow(hoverX, hoverY),
+                    rowHeight = emailRowH,
+                )
+                top = emailRowBottom - rowGap
+
+                digestSlider.label = digestLabel
+                digestSlider.stepLabels = emptyList()
+                if (!digestSlider.isDragging) {
+                    digestSlider.setValue(NotificationPrefsScale.stepFor(digestIntervalHours))
+                }
+                digestSlider.valueText = digestIntervalText(digestSlider.value)
+                digestSlider.layout(rowLeft, top - sliderH, this.rowW, sliderH)
+                digestSlider.render(
+                    batch,
+                    px,
+                    pointerWorldX = hoverX,
+                    pointerWorldY = hoverY,
+                )
+            }
         }
     }
 
@@ -627,6 +733,9 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
         this.panelBottom = panelBottom
         this.panelW = panelW
         this.panelH = panelH
+        // The rows live in the scroll body in [render]; mirror that so a press on
+        // chrome takes the body branch and a control press keeps its own gesture.
+        body.layout(panelLeft, panelBottom, panelW, panelH, contentHeight = panelH, scrollY = 0f)
         this.rowLeft = panelLeft + 28f
         this.rowW = panelW - 56f
         this.rowH = 60f

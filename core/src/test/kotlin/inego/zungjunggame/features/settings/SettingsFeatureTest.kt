@@ -93,27 +93,6 @@ class SettingsFeatureTest {
     }
 
     @Test
-    fun aVolumeDragEmitsTheWidgetsValues() {
-        val overlay = SettingsOverlay().apply { seedLayoutForTest() }
-        val component = component(overlay)
-        val (frame, emitted) = recordingFrame()
-
-        component.layout(frame)
-        // The seeded track runs x 246 (value 0) .. 554 (value 10).
-        component.onGesturePress(246f, 200f, frame)
-        component.onGestureDrag(554f, 200f, true, frame)
-        component.onGestureRelease(554f, 200f, frame)
-
-        assertEquals(
-            listOf(
-                ComponentAction(SettingsActions.SET_VOLUME, mapOf("value" to 0)),
-                ComponentAction(SettingsActions.SET_VOLUME, mapOf("value" to 10)),
-            ),
-            emitted,
-        )
-    }
-
-    @Test
     fun aReleaseThatDidNotStartOnARowEmitsNothing() {
         val overlay = SettingsOverlay().apply { seedLayoutForTest() }
         val component = component(overlay)

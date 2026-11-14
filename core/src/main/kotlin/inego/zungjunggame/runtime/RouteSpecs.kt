@@ -151,6 +151,8 @@ object RouteSpecs {
         RouteIds.SHADOW_RANKED_HANDS to RouteScrollCodec,
         RouteIds.NOTICES to RouteScrollCodec,
         RouteIds.LANGUAGE_PICKER to RouteScrollCodec,
+        // The settings card's body scroll.
+        RouteIds.SETTINGS to RouteScrollCodec,
         // The reference browser: section, page, both scroll offsets, and drawer.
         RouteIds.REFERENCE to ReferenceNavCodec,
     )

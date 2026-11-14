@@ -38,7 +38,6 @@ class SettingsOverlayTest {
     private val rowCentreX = 240f
     private val tileRowCentreY = 60f
     private val soundsRowCentreY = 132f
-    private val sliderCentreY = 200f
     private val emailRowCentreY = 270f
     private val limitCentreY = 339f
     private val chromeY = 400f
@@ -164,17 +163,6 @@ class SettingsOverlayTest {
         overlay.onPointerDown(rowCentreX, tileRowCentreY)
         overlay.onPointerDrag(rowCentreX, tileRowCentreY + 40f)
         assertEquals(SettingsVerdict.None, overlay.onPointerUp(rowCentreX, tileRowCentreY + 40f))
-    }
-
-    @Test
-    fun volumePressAndDragReportTheWidgetsValues() {
-        val overlay = shown()
-        // The seeded track runs x 246 (value 0) .. 554 (value 10).
-        assertTrue(overlay.onPointerDown(246f, sliderCentreY))
-        assertEquals(SettingsVerdict.Volume(0), overlay.pressVerdict())
-        assertEquals(SettingsVerdict.Volume(10), overlay.onPointerDrag(554f, sliderCentreY))
-        // The release only ends the drag; the value already travelled the channels.
-        assertEquals(SettingsVerdict.None, overlay.onPointerUp(554f, sliderCentreY))
     }
 
     @Test

@@ -1,5 +1,7 @@
 package inego.zungjunggame.features.settings
 
+import com.badlogic.gdx.graphics.Camera
+import com.badlogic.gdx.graphics.OrthographicCamera
 import inego.zungjunggame.input.Intent
 import inego.zungjunggame.input.TouchDiagnostics
 import inego.zungjunggame.net.NotificationPrefsScale
@@ -10,6 +12,8 @@ import inego.zungjunggame.runtime.RouteIds
 import inego.zungjunggame.runtime.RouteSpecs
 import inego.zungjunggame.state.StateSlot
 import inego.zungjunggame.ui.ComponentAction
+import inego.zungjunggame.ui.RouteScrollCodec
+import inego.zungjunggame.ui.RouteUiState
 import inego.zungjunggame.ui.stack.Route
 
 /** Registers the [RouteIds.SETTINGS] modal with the runtime registry. */
@@ -26,12 +30,21 @@ object SettingsFeature {
         overlay: () -> SettingsOverlay,
         preferences: StateSlot<UiPreferences>,
         notifications: () -> SettingsNotifications = { SettingsNotifications() },
+        camera: () -> Camera = { OrthographicCamera() },
+        routeUi: RouteUiState = RouteUiState(),
     ) {
         val route = Route.Modal(RouteIds.SETTINGS)
         registry.register(
             routeKey = route.key,
             factory = { registered ->
-                SettingsComponent(registered, preferences, overlay(), notifications = notifications)
+                SettingsComponent(
+                    registered,
+                    preferences,
+                    overlay(),
+                    notifications = notifications,
+                    camera = camera,
+                    state = routeUi.port(registered.key, RouteScrollCodec),
+                )
             },
             spec = RouteSpecs.specFor(route),
             actions = SettingsActions,
@@ -69,6 +82,9 @@ object SettingsActions : RouteActions {
             is SettingsVerdict.DigestInterval ->
                 ComponentAction(SET_DIGEST_INTERVAL, mapOf("step" to verdict.step))
             SettingsVerdict.Close -> ComponentAction(CLOSE)
+            // The body offset is route UI state; the component writes it through
+            // [inego.zungjunggame.ui.RouteUiActions], not this feature action.
+            is SettingsVerdict.BodyScroll -> null
             SettingsVerdict.None -> null
         }
         TouchDiagnostics.log("set action verdict=$verdict action=${action?.id ?: "null"}")

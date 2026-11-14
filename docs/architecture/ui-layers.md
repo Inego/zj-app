@@ -202,7 +202,7 @@ Current route state:
 | `TutorialShellCodec` | tutorial shell | TOC scroll, drawer, pull-tab |
 | `OnlineHubCodec` | Online hub | tab, both tab scrolls, Shadow Ranked draft |
 | `RatingHistoryCodec` | rating history | target (a public handle or self), visible window, rung |
-| `RouteScrollCodec` | score table, history, Shadow Ranked attempts, notices, language picker | body scroll |
+| `RouteScrollCodec` | score table, history, Shadow Ranked attempts, notices, language picker, settings | body scroll |
 | `ReferenceNavCodec` | reference | section, page, TOC/content scroll, drawer |
 
 ### 3b. `ui.prefs` (player-set, stack-independent)
@@ -266,6 +266,7 @@ actions. `AppGraph` constructs the concrete overlay/widget and owns its scope.
 | A value resets every hand | same; likely should live in `ui.prefs` (parks, folds) |
 | React to a tap | add a hit region in `layout()`; map its `ComponentAction` in the feature |
 | Add a drag / slider / scroll | be a `GestureHost` (`GestureBridge`); emit the verdict; keep the value in the model |
+| A scrolling body that holds a sideways-only control (a slider) | arbitrate with `render/ui/GestureAxis.kt`: a dominant sideways drag takes the control, any other pan scrolls the body; the press arms both, and `scrollGrabbed` lets the scrollbar win |
 | A pan/zoom gesture (two fingers, fling, 2D wheel) | feed `chart/ChartGestureRecognizer` from `frame.constraints.pointers` (per frame) and its wheel form from `onScroll`; apply the returned `ChartGesture` through `ChartViewport.applying`, and persist the resulting `[from, to]` the way any player-set range is persisted |
 | Cover or raise a card | `ScreenTransitions` / `RouteModals` push/pop routes; never a `visible` flag |
 | A route's state read is null right after `remove` | read **before** the removal; ordering is the caller's contract |
@@ -288,6 +289,10 @@ actions. `AppGraph` constructs the concrete overlay/widget and owns its scope.
   the widget declines.** A widget that claims the whole panel makes its regions
   dead; `ScoreBreakdownComponent` is the counter-example — it publishes both and
   its gesture surface hands pattern-row presses back to the tap path.
+- **A control inside a scroll body must not claim the press on touch-down.** A
+  press is a pan until its direction says otherwise; a slider that takes the
+  gesture immediately makes every scroll that starts on it dead. Arbitrate with
+  `render/ui/GestureAxis.kt` instead of testing the control first.
 - **`motion` runs before input and carries no `frame.layouts`**; it is for inertia
   that may emit, not a lifecycle event.
 - **Post-paint host ticks surface next frame.** Input geometry also lags a

@@ -106,6 +106,8 @@ object GameFeatures {
             deps.settingsOverlay,
             deps.uiPreferences,
             deps.settingsNotifications,
+            deps.camera,
+            deps.routeUiState,
         )
         NewGameSetupFeature.register(
             registry,

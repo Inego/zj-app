@@ -17,13 +17,12 @@ import inego.zungjunggame.render.richtext.RichColorPalette
 import inego.zungjunggame.render.richtext.RichTextBlock
 import inego.zungjunggame.render.richtext.TextRole
 import inego.zungjunggame.render.online.PopulationLabel
+import inego.zungjunggame.render.ui.GestureAxis
 import inego.zungjunggame.render.ui.OverlayBodyScroll
 import inego.zungjunggame.render.ui.Slider
-import inego.zungjunggame.render.ui.tapSlopPx
 import inego.zungjunggame.ui.GestureSurface
 import inego.zungjunggame.ui.HitRegions
 import inego.zungjunggame.ui.Rect
-import kotlin.math.abs
 import kotlin.math.max
 import inego.zungjunggame.render.ui.AppPalette
 
@@ -78,10 +77,17 @@ class LiveTabPanel : Disposable, GestureSurface<HubVerdict> {
     val slider = Slider(min = 0, max = 3, initialValue = 1)
 
     private var pressTarget: HubVerdict? = null
-    private var pressSliderValue: Int? = null
+
+    /** The press began on the minimum-humans slider; a sideways drag claims it. */
+    private var pressSliderAvailable = false
+
+    /** The press's direction, shared with every body that holds a sideways control. */
+    private val axis = GestureAxis()
+
     private var pressBody = false
-    private var pressY = Float.NaN
-    private var dragged = false
+
+    /** Offset the body held when the press began, so a track jump still reports. */
+    private var pressScrollStart = 0f
 
     enum class PrimaryAction { FindGame, CancelSearch, Disabled }
 
@@ -142,21 +148,13 @@ class LiveTabPanel : Disposable, GestureSurface<HubVerdict> {
     fun advance(deltaSec: Float): Float = body.advance(deltaSec)
 
     /**
-     * Slider drag acquisition. Consults the same [regions] map as the press
-     * machine, so a slider that was not drawn cannot capture a press.
+     * True when the press landed on the minimum-humans slider, gated by the same
+     * [regions] map the press machine reads, so a slider that was not drawn
+     * cannot capture a press.
      */
-    fun onSliderPointerDown(worldX: Float, worldY: Float): Int? {
-        if (regions.hitAt(worldX, worldY) !is HubVerdict.SetMinOtherHumans) return null
-        return slider.onPointerDown(worldX, worldY)
-    }
-
-    fun onSliderPointerDrag(worldX: Float): Int? = slider.onPointerDrag(worldX)
-
-    fun onSliderPointerUp(): Int? {
-        val finalVal = if (slider.isDragging) slider.value else null
-        slider.onPointerUp()
-        return finalVal
-    }
+    private fun sliderAt(worldX: Float, worldY: Float): Boolean =
+        regions.hitAt(worldX, worldY) is HubVerdict.SetMinOtherHumans &&
+            slider.contains(worldX, worldY)
 
     fun onSliderCancelDrag() {
         slider.clearDrag()
@@ -182,43 +180,70 @@ class LiveTabPanel : Disposable, GestureSurface<HubVerdict> {
     }
 
     override fun onPointerDown(x: Float, y: Float): Boolean {
+        body.cancel()
+        clearPress()
         if (!body.contains(x, y)) return false
-        val sliderValue = onSliderPointerDown(x, y)
-        pressSliderValue = sliderValue
-        val hit = when {
-            sliderValue != null -> HubVerdict.SetMinOtherHumans(sliderValue)
-            else -> regions.hitAt(x, y)
-        }
-        pressTarget = hit
-        pressBody = hit == null && beginBodyScroll(x, y)
-        pressY = y
-        dragged = false
+        axis.begin(x, y)
+        val hit = regions.hitAt(x, y)
+        // The slider is the one control that drags sideways. It does not take the
+        // value until the drag proves that direction; a vertical pan over it
+        // belongs to the body.
+        pressSliderAvailable = sliderAt(x, y)
+        pressTarget = hit?.takeUnless { it is HubVerdict.SetMinOtherHumans }
+        pressScrollStart = body.scrollY
+        pressBody = beginBodyScroll(x, y)
         return true
     }
 
-    override fun pressVerdict(): HubVerdict? =
-        pressSliderValue?.let { HubVerdict.SetMinOtherHumans(it) }
-
     override fun onPointerDrag(x: Float, y: Float): HubVerdict? {
-        if (abs(y - pressY) > tapSlopPx()) dragged = true
-        if (pressBody) return HubVerdict.BodyScroll(dragBodyScroll(y))
-        if (pressSliderValue == null) return null
-        return onSliderPointerDrag(x)?.let { HubVerdict.SetMinOtherHumans(it) }
+        if (!axis.started) return null
+        return when (
+            axis.resolve(
+                x = x,
+                y = y,
+                sideAvailable = pressSliderAvailable,
+                scrollAvailable = pressBody,
+                scrollGrabbed = body.isScrollbarDrag,
+            )
+        ) {
+            GestureAxis.Owner.Side -> {
+                // The slider owns this one; the body's armed press is not a scroll.
+                if (!slider.isDragging) cancelBodyScroll()
+                val next = if (slider.isDragging) {
+                    slider.onPointerDrag(x)
+                } else {
+                    slider.onPointerDown(x, y)
+                } ?: return null
+                HubVerdict.SetMinOtherHumans(next)
+            }
+            GestureAxis.Owner.Scroll -> HubVerdict.BodyScroll(dragBodyScroll(y))
+            GestureAxis.Owner.Undecided -> null
+        }
     }
 
     override fun onPointerUp(x: Float, y: Float): HubVerdict {
-        if (pressSliderValue != null) {
-            onSliderPointerUp()
+        if (axis.owner == GestureAxis.Owner.Side) {
+            slider.onPointerUp()
             clearPress()
             return HubVerdict.None
         }
-        if (pressBody) {
-            val wasDrag = endBodyScroll()
-            val settled = if (wasDrag) body.scrollY else null
+        // A press that never passed the slop is still the tap it began: on the
+        // slider it jumps to the release point.
+        if (axis.owner == GestureAxis.Owner.Undecided && pressSliderAvailable) {
+            val value = if (x.isNaN() || y.isNaN()) null else slider.onPointerDown(x, y)
+            slider.onPointerUp()
             clearPress()
-            return settled?.let(HubVerdict::BodyScroll) ?: HubVerdict.None
+            return value?.let(HubVerdict::SetMinOtherHumans) ?: HubVerdict.None
         }
-        val resolved = pressTarget?.takeIf { it != HubVerdict.None && !dragged }
+        val resolved = pressTarget?.takeIf { it != HubVerdict.None && !axis.moved }
+        if (pressBody) {
+            endBodyScroll()
+            // A bar tap that jumped the thumb scrolled too, though the finger
+            // never travelled: report the offset it landed on.
+            val settled = body.scrollY.takeIf { it != pressScrollStart }
+            clearPress()
+            return settled?.let(HubVerdict::BodyScroll) ?: resolved ?: HubVerdict.None
+        }
         clearPress()
         return resolved ?: HubVerdict.None
     }
@@ -231,10 +256,10 @@ class LiveTabPanel : Disposable, GestureSurface<HubVerdict> {
 
     private fun clearPress() {
         pressTarget = null
-        pressSliderValue = null
+        pressSliderAvailable = false
+        axis.clear()
         pressBody = false
-        pressY = Float.NaN
-        dragged = false
+        pressScrollStart = 0f
     }
 
     /** Paints the body into [bodyRect]; the offset is the owner's. */

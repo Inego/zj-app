@@ -1,5 +1,7 @@
 package inego.zungjunggame.features.settings
 
+import com.badlogic.gdx.graphics.Camera
+import com.badlogic.gdx.graphics.OrthographicCamera
 import inego.zungjunggame.input.TouchDiagnostics
 import inego.zungjunggame.net.NotificationPrefs
 import inego.zungjunggame.persist.UiPreferences
@@ -11,6 +13,8 @@ import inego.zungjunggame.ui.Frame
 import inego.zungjunggame.ui.GestureBridge
 import inego.zungjunggame.ui.Layout
 import inego.zungjunggame.ui.Rect
+import inego.zungjunggame.ui.RouteUiActions
+import inego.zungjunggame.ui.StatePort
 import inego.zungjunggame.ui.stack.Route
 
 /**
@@ -26,7 +30,8 @@ import inego.zungjunggame.ui.stack.Route
  * (GL-free); painting delegates to [SettingsOverlay.render]. The card's gestures
  * are the [GestureBridge]'s: the overlay owns the press machine and the volume
  * slider, and reports the row or slider value its gesture resolved, which
- * [SettingsActions.actionFor] maps.
+ * [SettingsActions.actionFor] maps. The body offset is route UI state — the
+ * bridge writes it through [RouteUiActions], and [motion] carries a fling.
  */
 /**
  * The account's notification settings as the card draws them.
@@ -50,9 +55,21 @@ class SettingsComponent(
      * A provider, not a stored value: the card is a view of the model, not a copy.
      */
     private val notifications: () -> SettingsNotifications = { SettingsNotifications() },
+    private val camera: () -> Camera = { OrthographicCamera() },
+    /** The route's stored body offset; null when the player has not scrolled yet. */
+    private val state: StatePort<Float> = StatePort { null },
 ) : GestureBridge<SettingsVerdict>(
     surface = { overlay },
-    actionFor = SettingsActions::actionFor,
+    actionFor = { verdict ->
+        // The body offset is route UI state, not a feature intent: it goes to the
+        // same store every other scrollable card uses.
+        if (verdict is SettingsVerdict.BodyScroll) {
+            RouteUiActions.scroll(verdict.offset)
+        } else {
+            SettingsActions.actionFor(verdict)
+        }
+    },
+    scrollActionFor = { offset -> RouteUiActions.scroll(offset) },
 ),
     Component {
     override val id: ComponentId = ComponentId(route.key.value)
@@ -64,6 +81,13 @@ class SettingsComponent(
     private var notificationsView: SettingsNotifications = SettingsNotifications()
 
     private var lastLayoutSignature: String? = null
+
+    override fun motion(frame: Frame) {
+        val before = overlay.scrollOffset()
+        val after = overlay.advance(frame.constraints.deltaSec)
+        if (after == before) return
+        frame.emit(RouteUiActions.scroll(after))
+    }
 
     override fun layout(frame: Frame): Layout {
         val constraints = frame.constraints
@@ -88,7 +112,7 @@ class SettingsComponent(
                     TouchDiagnostics.fmt(constraints.worldHeight),
             )
         }
-        return Layout(panel = geometry.panel, gestureRegions = gestureRegions)
+        return Layout(panel = geometry.panel, gestureRegions = gestureRegions, scrollable = true)
     }
 
     private fun rectText(rect: Rect): String =
@@ -99,8 +123,10 @@ class SettingsComponent(
         val c = frame.constraints
         overlay.render(
             batch = canvas.batch,
+            camera = camera(),
             screenW = c.worldWidth,
             screenH = c.worldHeight,
+            scrollY = state.read() ?: 0f,
             showTileLabels = showTileLabels,
             soundsEnabled = soundsEnabled,
             soundVolume = soundVolume,
