@@ -1,22 +1,24 @@
 package inego.zungjunggame.platform
 
 /**
- * Platform safe insets in **screen pixels**: the display cutout and the navigation
- * bar, per side.
+ * Platform safe insets in **screen pixels**: the display cutout, the navigation bar
+ * and the window caption bar, per side.
  *
  * With [com.badlogic.gdx.utils.viewport.ScreenViewport], these match world units
  * (origin bottom-left for layout: [top] is measured from the top of the screen).
  *
- * Only insets that **cannot change while the app is running** belong here. The
- * Android backend keeps the navigation bar visible — a three-button user must never
- * lose their navigation — so the bar and the cutout are both permanent and both are
- * published. The status bar is the transient one: it is hidden by policy and a swipe
- * reveals it as an overlay, so it is *not* published; publishing it made the layout
- * jump mid-transition.
+ * Only insets that **cannot change without a window or configuration change**
+ * belong here. The Android backend keeps the navigation bar visible — a three-button
+ * user must never lose their navigation — so the bar and the cutout are both
+ * permanent and both are published. The caption bar is the desktop-windowing title
+ * bar: zero on a phone, the system's occupied strip at the top of a freeform window,
+ * and published for the same reason. The status bar is the transient one: it is
+ * hidden by policy and a swipe reveals it as an overlay, so it is *not* published;
+ * publishing it made the layout jump mid-transition.
  * Anything read per-frame from here is assumed stable across a frame.
  *
  * Desktop and other backends leave zeros. Android updates via [setPixels] from the
- * cutout and navigation-bar insets.
+ * cutout, navigation-bar and caption-bar insets.
  *
  * Threading: writers are typically the Android UI thread; readers are the GL
  * thread. Fields are volatile so a torn multi-field read is possible but only

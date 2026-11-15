@@ -6,7 +6,12 @@
         <item name="android:colorBackground">@color/felt</item>
         <item name="android:navigationBarColor">@color/felt</item>
         <item name="android:statusBarColor">@color/felt</item>
-        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+        <!--
+          ALWAYS is what Android 15 requires of a target-35 non-floating window.
+          shortEdges survives only in values-v27, for API 28-30 where ALWAYS
+          does not exist.
+        -->
+        <item name="android:windowLayoutInDisplayCutoutMode">always</item>
     </style>
 
     <!--

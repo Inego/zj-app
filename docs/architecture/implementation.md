@@ -52,7 +52,7 @@ tutorial/       TutorialHost, TutorialRunner, director, progress — snapshot in
 runtime/        AppModel, RouteIds, RouteSpecs, FeatureRegistry, feature registrations
 render/         fonts, tiles, board/layout primitives, richtext, wall/seat-wind animations,
                 render/ui widgets. NO screen.
-platform/       SafeArea (cutout + navigation-bar pixels), OverlayTextPrompt, clipboard.
+platform/       SafeArea (cutout + navigation-bar + caption-bar pixels), OverlayTextPrompt, clipboard.
                 Filled in `AndroidLauncher`, whose window policy hides only the
                 status bar and reserves the navigation bar.
 engine/ engines/ hints/ shuffle/ net/   pure rules, policy, network — untouched by the UI model

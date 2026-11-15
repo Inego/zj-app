@@ -492,22 +492,33 @@ public class AndroidLauncher extends AndroidApplication {
         }
     }
 
+    /**
+     * Draw under the display cutout on every supported version.
+     *
+     * <p>{@link WindowManager.LayoutParams#LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS} is the
+     * value Android 15 requires of a target-35 non-floating window, and it is the one this
+     * app wants anyway: the felt reaches every edge while {@link SafeArea} keeps chrome out
+     * of the camera hole. {@code ALWAYS} only exists from API 30, so API 28-29 keeps the
+     * short-edge mode — the closest value that level defines, and exactly the fallback
+     * {@code WindowCompat.enableEdgeToEdge(window)} uses there.
+     */
     private void allowLayoutIntoDisplayCutout() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return;
         WindowManager.LayoutParams lp = getWindow().getAttributes();
-        lp.layoutInDisplayCutoutMode =
-                WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+        lp.layoutInDisplayCutoutMode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                ? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                : WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         getWindow().setAttributes(lp);
     }
 
     /**
-     * Publish the layout safe area into {@link SafeArea}: the display cutout and the
-     * navigation bar, per side.
+     * Publish the layout safe area into {@link SafeArea}: the display cutout, the navigation
+     * bar and the window caption bar, per side.
      *
-     * <p>Both are permanent under the policy in {@link #installWindowChrome}: a rotating
-     * cutout re-delivers insets, and a kept-visible navigation bar reports the same value
-     * for as long as the device's navigation mode holds. That matters because the layout
-     * reads this every frame.
+     * <p>Both the cutout and the navigation bar are permanent under the policy in
+     * {@link #installWindowChrome}: a rotating cutout re-delivers insets, and a kept-visible
+     * navigation bar reports the same value for as long as the device's navigation mode
+     * holds. That matters because the layout reads this every frame.
      *
      * <p>The navigation bar belongs here for two reasons. On a three-button device the
      * buttons are the user's navigation, so bottom chrome must sit above them rather than
@@ -517,23 +528,29 @@ public class AndroidLauncher extends AndroidApplication {
      * deliberately not reserved: they are swipe-priority, not occupied space, and taking
      * them would inset the board on both sides.
      *
+     * <p>The caption bar is the desktop-windowing title bar Android 16 draws over the app
+     * even in immersive mode. It is zero on a phone and on every window that does not have
+     * one, so including it changes nothing there; omitting it is what would let the top
+     * chrome slide under the window controls on a freeform/desktop window.
+     *
      * <p>The status bar is deliberately excluded: it is the transient one. It is hidden by
      * policy and a top swipe reveals it as an overlay, so the window-insets listener fires
      * with the bar present and again when it hides. Publishing that would give two
      * different layout values inside one transition, and a frame laid out from the first
      * would be presented and then jump — the menu card by half the delta (it re-centers in
      * the safe rect) and the bottom player row by the whole delta (it is anchored to the
-     * edge). A cutout and a kept-visible bar cannot do that.
+     * edge). A cutout, a kept-visible bar and a caption bar cannot do that.
      */
     private static void applySafeAreaFromInsets(WindowInsets insets) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Insets cutout = insets.getInsets(WindowInsets.Type.displayCutout());
             Insets bars = insets.getInsets(WindowInsets.Type.navigationBars());
+            Insets caption = insets.getInsets(WindowInsets.Type.captionBar());
             SafeArea.setPixels(
-                    Math.max(cutout.left, bars.left),
-                    Math.max(cutout.top, bars.top),
-                    Math.max(cutout.right, bars.right),
-                    Math.max(cutout.bottom, bars.bottom));
+                    Math.max(cutout.left, Math.max(bars.left, caption.left)),
+                    Math.max(cutout.top, Math.max(bars.top, caption.top)),
+                    Math.max(cutout.right, Math.max(bars.right, caption.right)),
+                    Math.max(cutout.bottom, Math.max(bars.bottom, caption.bottom)));
             return;
         }
         applySafeAreaFromInsetsPreR(insets);
