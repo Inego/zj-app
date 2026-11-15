@@ -30,6 +30,12 @@ enum class AppLocale(
         endonym = "English",
     ),
     @Suppress("DEPRECATION")
+    Czech(
+        tag = "cs",
+        javaLocale = Locale("cs"),
+        endonym = "Čeština",
+    ),
+    @Suppress("DEPRECATION")
     German(
         tag = "de",
         javaLocale = Locale("de"),

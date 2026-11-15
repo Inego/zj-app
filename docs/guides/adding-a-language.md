@@ -67,7 +67,7 @@ Do **not** copy or clone reference files or UI bundles from existing language di
 Add the entry to [`AppLocale.kt`](../../core/src/main/kotlin/inego/zungjunggame/i18n/AppLocale.kt),
 in the **script-grouped autonym ordering** (the picker lists `AppLocale.entries`
 in declaration order):
-1. **Latin script**: `English` is always first (`DEFAULT`), followed by strict `A–Z` ordering by **native endonym string** (`Deutsch`, `Español`, `Français`, `Italiano`, `Magyar`, `Nederlands`, `Polski`, `Português`, `Srpski`, `Suomi`, `Türkçe`).
+1. **Latin script**: `English` is always first (`DEFAULT`), followed by strict `A–Z` ordering by **native endonym string** (`Čeština`, `Deutsch`, `Español`, `Français`, `Italiano`, `Magyar`, `Nederlands`, `Polski`, `Português`, `Srpski`, `Suomi`, `Türkçe`).
 2. **Cyrillic script** (А–Я by native endonym): `Русский`, `Українська`, …
 3. **CJK ideographs / East Asian** (stroke count / native order): `日本語`, `繁體中文`, …
 

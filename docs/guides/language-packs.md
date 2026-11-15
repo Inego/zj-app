@@ -2,7 +2,7 @@
 
 Startup on Wasm downloads every file under `assets/` before the game starts
 (gdx-teavm bakes that walk into `TeaAssetManifest` and fetches five files at a
-time). That walk is 17 languages × 85 markdown pages, plus every
+time). That walk is 18 languages × 86 markdown pages, plus every
 `ui_*.properties`. Desktop and Android do not fetch them, but they still ship
 the loose tree.
 

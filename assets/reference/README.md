@@ -44,7 +44,7 @@ assets/reference/
         …
   de/                       ← German (bodies only; ids stable from structure.json)
     …
-  es/  fr/  it/  hu/  nl/  pl/  pt/  ru/  zh-HK/  ja/  sr/  fi/  uk/  el/  tr/    ← same shape, bodies only
+  cs/  es/  fr/  it/  hu/  nl/  pl/  pt/  ru/  zh-HK/  ja/  sr/  fi/  uk/  el/  tr/    ← same shape, bodies only
 ```
 
 There is **no per-locale manifest**. A locale folder holds only `.md` bodies;
@@ -311,6 +311,7 @@ this honest.
 | Folder | Notes |
 |--------|-------|
 | `en-US/` | Default / source of truth |
+| `cs/` | Czech; Latin script |
 | `de/` | German; Latin script |
 | `es/` | Spanish; Latin script |
 | `fr/` | French; Latin script |
