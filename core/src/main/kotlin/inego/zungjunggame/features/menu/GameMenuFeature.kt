@@ -98,6 +98,8 @@ object GameMenuActions : RouteActions {
     const val FORFEIT = "menu.forfeit"
     const val EXIT_TO_MAIN_MENU = "menu.exitToMainMenu"
     const val EXIT = "menu.exit"
+    /** The chrome card's top-right ✕; the only dismiss that is not a row. */
+    const val CLOSE = "menu.close"
     const val IDENTITY = "menu.identity"
     const val DROPDOWN_ACCOUNT = "menu.dropdown.account"
     const val DROPDOWN_LOG_OUT = "menu.dropdown.logOut"
@@ -121,6 +123,7 @@ object GameMenuActions : RouteActions {
         GameMenuOverlay.Action.Players -> PLAYERS
         GameMenuOverlay.Action.Forfeit -> FORFEIT
         GameMenuOverlay.Action.ExitToMainMenu -> EXIT_TO_MAIN_MENU
+        GameMenuOverlay.Action.Close -> CLOSE
         GameMenuOverlay.Action.Exit -> EXIT
         GameMenuOverlay.Action.Notices -> NOTICES
     }
@@ -160,6 +163,9 @@ object GameMenuActions : RouteActions {
         PLAYERS -> Intent.OpenOnline(null)
         FORFEIT -> Intent.PushRoute(ConfirmPrompt.Forfeit.route())
         EXIT_TO_MAIN_MENU -> Intent.ExitToMainMenu
+        // The card over a running context is the only home that shows the ✕; it
+        // drops that modal and reveals the board or shell it covered.
+        CLOSE -> Intent.HideMenu
         EXIT -> Intent.ExitApp
         IDENTITY -> Intent.LogIn
         DROPDOWN_ACCOUNT -> Intent.OpenAccount

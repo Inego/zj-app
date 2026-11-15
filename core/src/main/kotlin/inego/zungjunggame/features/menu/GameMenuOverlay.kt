@@ -16,6 +16,7 @@ import inego.zungjunggame.net.MatchHistoryFormat
 import inego.zungjunggame.render.FeltStamps
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.render.ui.CloseButton
 import inego.zungjunggame.render.ui.OverlayBodyScroll
 import inego.zungjunggame.render.ui.OverlayChrome
 import inego.zungjunggame.render.ui.OverlayViewport
@@ -141,12 +142,14 @@ private fun signInLabelKey(state: MenuSignIn): String = when (state) {
  * Opened from the top-right ☰ on a local / online board or the tutorial shell;
  * touch free-space press+release (empty board / coach-quiz felt); or Esc on
  * desktop.
- * Closed by clicking outside the panel, Esc again (desktop), or choosing an item
- * (language opens [inego.zungjunggame.features.settings.LanguagePickerOverlay]
+ * Closed by clicking outside the panel, Esc again (desktop), the chrome card's
+ * top-right ✕, or choosing an item (language opens
+ * [inego.zungjunggame.features.settings.LanguagePickerOverlay]
  * instead of cycling). Root stays open on empty felt (nothing underneath).
  *
  * On a short viewport (Android landscape) the whole card — title, optional
- * subtitle, identity, and rows — scrolls inside [OverlayViewport]'s safe rect.
+ * subtitle, identity, the chrome card's ✕, and rows — scrolls inside
+ * [OverlayViewport]'s safe rect.
  * The card yields the felt's fixed bottom-right stamp block: it stands centred
  * while the corner leaves a wing beside or a band below it, slides left only as
  * far as that wing needs, and gives up height for the band when it is too wide
@@ -174,6 +177,7 @@ private fun signInLabelKey(state: MenuSignIn): String = when (state) {
 class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
     private val glyphLayout = GlyphLayout()
     private val body = OverlayBodyScroll()
+    private val closeButton = CloseButton()
 
     private fun whitePixel(): Texture = WhitePixel.get()
 
@@ -192,6 +196,9 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
 
     /** The open state [render] was handed this frame; the owner's value. */
     private var accountDropdownOpen: Boolean = false
+
+    /** Whether the last frame drew the chrome card's close control. */
+    private var closeShown = false
 
     private var currentSignedInLabel: String? = null
     private var identityBadgeLeft = 0f
@@ -224,7 +231,7 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
 
     private var pressTarget: PressTarget = PressTarget.None
 
-    private enum class PressTarget { None, Body, Chrome, Identity, DropdownItem, OutsideDropdown, Notices }
+    private enum class PressTarget { None, Body, Chrome, Identity, DropdownItem, OutsideDropdown, Notices, Close }
 
     enum class Action {
         ScoreTable,
@@ -258,6 +265,8 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         Forfeit,
         /** Leave the current child context and return to the root menu. */
         ExitToMainMenu,
+        /** Dismiss the chrome card over a running context; its top-right ✕. */
+        Close,
         /** Quit the app (root menu only; omitted on Web/Wasm where browser tabs are not closed). */
         Exit,
     }
@@ -301,6 +310,14 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         return !(!accountDropdownOpen || dropdownRectW <= 0f) && worldX >= dropdownRectLeft && worldX <= dropdownRectLeft + dropdownRectW &&
                 worldY >= dropdownRectBottom && worldY <= dropdownRectBottom + dropdownRectH
     }
+
+    /**
+     * True when the point is on the chrome card's top-right close control. The
+     * control exists only while [render] was asked for it, and it scrolls with
+     * the header — [containsPanel] still decides whether that part is showing.
+     */
+    private fun isInsideCloseButton(worldX: Float, worldY: Float): Boolean =
+        closeShown && closeButton.contains(worldX, worldY)
 
     /** True when the point lies on the menu panel (or open dropdown). */
     fun containsPanel(worldX: Float, worldY: Float): Boolean {
@@ -375,6 +392,13 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
             return true
         }
 
+        // The close is part of the scrolled header, so a card scrolled past it
+        // must not answer a press on the scrim where it used to sit.
+        if (containsPanel(x, y) && isInsideCloseButton(x, y)) {
+            pressTarget = PressTarget.Close
+            return true
+        }
+
         if (isInsideNoticesButton(x, y)) {
             pressTarget = PressTarget.Notices
             return true
@@ -413,6 +437,14 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
                     val next = !accountDropdownOpen
                     accountDropdownOpen = next
                     GameMenuVerdict(accountDropdownOpen = next)
+                } else {
+                    GameMenuVerdict()
+                }
+            }
+            PressTarget.Close -> {
+                body.cancel()
+                if (containsPanel(x, y) && isInsideCloseButton(x, y)) {
+                    GameMenuVerdict(selectedId = Action.Close.name)
                 } else {
                     GameMenuVerdict()
                 }
@@ -481,6 +513,10 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
      *   Google row restarts or retries the attempt; the special-key row is always
      *   available. Ignored while signed in — the alias always wins.
      * @param showExit when true, include Exit on the root menu. Defaults to [canExit]
+     * @param showClose draw the chrome card's top-right close control. True for the
+     *   `game_menu` modal raised over a running context, where the card is not the
+     *   screen's own content; the root and local play menus render the card as
+     *   their content and need no dismiss of their own
      */
     fun render(
         batch: SpriteBatch,
@@ -502,6 +538,7 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         showExit: Boolean = canExit(),
         showNotices: Boolean = false,
         hasUnseenNotices: Boolean = false,
+        showClose: Boolean = false,
     ) {
         // The press machine only enters drawer mode when this frame drew the
         // drawer: an undrawn drawer is not open, so a persisted `GAME_MENU` card
@@ -561,6 +598,13 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         val badgeH = if (showIdentity) max(badgeLineH, chevronSize) + badgePadY * 2f else 0f
         val noticesBtnSize = if (showNotices) badgeH else 0f
         val noticesBtnGap = if (showNotices && showIdentity) Fonts.px(8f) else 0f
+        // The chrome card over a running context carries its own ✕: the card is
+        // not the screen's content, so an outside tap or Esc is otherwise the only
+        // way back. It belongs to the scrolled header rather than the rim.
+        val closeSide = if (showClose) CloseButton.defaultSide() else 0f
+        val closeInset = if (showClose) CloseButton.cornerInset() else 0f
+        val closeGap = if (showClose) Fonts.px(10f) else 0f
+        val closeSlot = closeInset + closeSide + closeGap
 
         val avail = OverlayViewport.available(screenW, screenH)
         val portrait = screenH > screenW
@@ -615,8 +659,13 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         val iconGap = Fonts.px(10f)
 
         // The title block and the account/notices controls are stacked, so the
-        // card only needs the wider of the two, not their sum.
+        // card only needs the wider of the two, not their sum. When the close is
+        // shown its slot is reserved on both sides of the centred title, so no
+        // translation can run under the button.
         var contentW = max(titleBlockW, headerRightW)
+        if (showClose) {
+            contentW = max(contentW, titleBlockW + (closeSlot - padX) * 2f)
+        }
         for ((action, label, leadingIcon) in items) {
             glyphLayout.setText(itemFont, label)
             val rowIcon = leadingIcon ?: iconFor(action)
@@ -646,7 +695,9 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         } else {
             titleBlockH + Fonts.px(4f) + max(badgeBoxH, noticesBtnSize)
         }
-        headerBlockH = headerRowH + titleGap
+        // The close is taller than a title line, so the header keeps its full
+        // height: the first row must not sit under the button's bottom edge.
+        headerBlockH = max(headerRowH, if (showClose) closeSide else 0f) + titleGap
         val chromeH = padY * 2f
         val n = items.size
         val itemsH = n * itemH + (n - 1).coerceAtLeast(0) * itemGap
@@ -674,6 +725,16 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
             contentHeight = bodyContentH,
             scrollY = scrollY,
         )
+        closeShown = showClose
+        if (showClose) {
+            // The header's first line owns the close; [body.contentTop] is where
+            // that line starts, so the control travels with the scroll.
+            closeButton.layoutAt(
+                left = panelLeft + panelW - closeInset - closeSide,
+                bottom = body.contentTop - closeSide,
+                side = closeSide,
+            )
+        }
         rowLeft = panelLeft + Fonts.px(12f)
         rowW = body.contentWidth(panelW, Fonts.px(24f), Fonts.px(24f))
 
@@ -725,7 +786,16 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
                 pointerWorldY = pointerWorldY,
                 padX = padX,
                 itemFont = itemFont,
+                closeSlot = closeSlot,
             )
+            if (showClose) {
+                closeButton.render(
+                    batch = batch,
+                    whitePixel = px,
+                    pointerWorldX = pointerWorldX,
+                    pointerWorldY = pointerWorldY,
+                )
+            }
             itemTop -= headerBlockH
             for (item in items) {
                 val bottom = itemTop - itemH
@@ -782,6 +852,8 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         pointerWorldY: Float,
         padX: Float,
         itemFont: BitmapFont,
+        /** Horizontal slot the close control reserves in the header; 0 when hidden. */
+        closeSlot: Float,
     ) {
         val headerBottom = headerTop - headerRowH
         val titleBlockTop = headerTop
@@ -795,8 +867,10 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
             glyphLayout.setText(subtitleFont, subtitle)
             val subtitleY = titleBlockTop - titleBlockH +
                 (subtitleLineH + glyphLayout.height) * 0.5f
-            // The subtitle keeps its right edge under the title.
-            val subtitleRight = panelLeft + panelW - padX - body.gutter
+            // The subtitle keeps its right edge under the title — clear of the
+            // close slot when the chrome card carries one.
+            val subtitleRight = panelLeft + panelW -
+                (if (closeSlot > 0f) closeSlot else padX) - body.gutter
             Fonts.drawText(
                 batch,
                 subtitleFont,

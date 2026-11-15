@@ -137,6 +137,9 @@ class GameMenuComponent(
             showExit = input.showExit,
             showNotices = input.showNotices,
             hasUnseenNotices = input.hasUnseenNotices,
+            // The card is its own surface on the root and local play menus; only
+            // the chrome modal over a running context needs a dismiss of its own.
+            showClose = route is Route.Modal,
         )
     }
 }
