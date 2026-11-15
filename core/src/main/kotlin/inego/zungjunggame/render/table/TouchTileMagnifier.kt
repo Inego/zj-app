@@ -7,6 +7,7 @@ import inego.zungjunggame.engine.DiscardWait
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.tiles.TileDrawer
+import inego.zungjunggame.render.tiles.TileLabels
 import kotlin.math.max
 import kotlin.math.min
 import inego.zungjunggame.render.ui.AppPalette
@@ -25,6 +26,11 @@ import inego.zungjunggame.render.ui.AppPalette
  * not draw desktop-chrome glyphs on a small tile. Faces keep the hand gap.
  * The row shrinks uniformly if it would leave the screen; the magnified face
  * never shrinks.
+ *
+ * The magnified face follows the tile-labels setting like the board does, since
+ * the loupe is where a learner reads the held tile. The wait row does not: its
+ * faces sit at hand size or smaller and are read as a set, so corner tags there
+ * would be noise rather than labels.
  *
  * Desktop passes the hovered hand tile's top and `showDiscardFace = false`, so
  * only the wait row is drawn above the visible hand tile.
@@ -130,7 +136,13 @@ object TouchTileMagnifier {
                 expand = 1.65f,
             )
             batch.setColor(AppPalette.sheenBright)
-            drawer.drawOpen(batch, tileType, cx, faceCy, mw, mh)
+            drawer.drawOpen(
+                batch, tileType, cx, faceCy, mw, mh,
+                // Learner aid: the loupe is where a player names the held tile,
+                // so it follows the setting like the board. `tagOrNull` folds the
+                // preference gate in, and the tag's halo takes the face tint.
+                label = TileLabels.tagOrNull(tileType),
+            )
             batch.setColor(Color.WHITE)
         }
 

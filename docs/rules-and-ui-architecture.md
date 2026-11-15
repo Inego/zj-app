@@ -169,8 +169,10 @@ with no game in progress.
   claim-choice tiles, the tutorial diagrams, and the orientation quiz — all
   following the setting like the board does, so turning the aid on shows the
   same tags everywhere. The tag lesson's forced on/off rows are the deliberate
-  exception. Reference figures and the touch magnifier stay untagged: they are
-  already enlarged.
+  exception. Reference figures stay untagged: they are already enlarged. The
+  touch magnifier tags its magnified face like the board — the loupe is where a
+  learner names the held tile — but leaves its wait row untagged, because those
+  faces sit at hand size or smaller and the row is read as a set.
 
 ## How the table UI uses the engine
 
