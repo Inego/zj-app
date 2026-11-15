@@ -11,6 +11,7 @@ import inego.zungjunggame.i18n.LocaleController
 import inego.zungjunggame.input.InputProfile
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.render.ui.CloseButton
 import inego.zungjunggame.render.ui.OverlayBodyScroll
 import inego.zungjunggame.render.ui.OverlayChrome
 import inego.zungjunggame.render.ui.OverlayViewport
@@ -32,12 +33,13 @@ data class LanguagePickerGeometry(
  * their language regardless of the current UI locale. Scales as entries are
  * added to [AppLocale] (zh-HK, fr, ja, …).
  *
- * Opened from the game menu; Esc / outside tap dismisses back to the menu
- * (handled by [inego.zungjunggame.Main]). Title is sticky; a long locale list
- * scrolls inside [OverlayViewport].
+ * Opened from the game menu; the top-right ✕, Esc or an outside tap dismisses
+ * back to the menu (handled by [inego.zungjunggame.Main]). Title is sticky; a
+ * long locale list scrolls inside [OverlayViewport].
  */
 class LanguagePickerOverlay : Disposable, GestureSurface<ModalVerdict> {
     private val body = OverlayBodyScroll()
+    private val closeButton = CloseButton()
 
     private fun whitePixel(): Texture = WhitePixel.get()
 
@@ -53,7 +55,7 @@ class LanguagePickerOverlay : Disposable, GestureSurface<ModalVerdict> {
 
     private var pressTarget: PressTarget = PressTarget.None
 
-    private enum class PressTarget { None, Body, Chrome }
+    private enum class PressTarget { None, Body, Chrome, Close }
 
     /**
      * Pixels the list is scrolled down (0 = top), reported to the
@@ -103,6 +105,10 @@ class LanguagePickerOverlay : Disposable, GestureSurface<ModalVerdict> {
         body.cancel()
         pressTarget = PressTarget.None
         if (!containsPanel(x, y)) return false
+        if (closeButton.contains(x, y)) {
+            pressTarget = PressTarget.Close
+            return true
+        }
         if (body.contains(x, y) && body.beginPointer(x, y)) {
             pressTarget = PressTarget.Body
             return true
@@ -131,6 +137,11 @@ class LanguagePickerOverlay : Disposable, GestureSurface<ModalVerdict> {
                     selectedId = locale?.name,
                     settledScrollOffset = if (wasDrag) body.scrollY else null,
                 )
+            }
+            PressTarget.Close -> {
+                val hit = !x.isNaN() && !y.isNaN() && closeButton.contains(x, y)
+                body.cancel()
+                ModalVerdict(close = hit)
             }
             PressTarget.Chrome, PressTarget.None -> {
                 body.cancel()
@@ -166,6 +177,12 @@ class LanguagePickerOverlay : Disposable, GestureSurface<ModalVerdict> {
         val padX = Fonts.px(28f)
         val padY = Fonts.px(20f)
         val titleGap = Fonts.px(14f)
+        // The ✕ sits in the title's band, so its slot is part of the header the
+        // card must be wide enough to hold. Sizes are read from the control, not
+        // its last layout, which is 0 on the first frame.
+        val closeInset = CloseButton.cornerInset()
+        val closeSide = CloseButton.defaultSide()
+        val closeSlot = closeInset + closeSide + Fonts.px(10f)
         itemH = max(Fonts.px(48f), itemFont.lineHeight + Fonts.px(22f))
         itemGap = Fonts.px(8f)
 
@@ -184,6 +201,9 @@ class LanguagePickerOverlay : Disposable, GestureSurface<ModalVerdict> {
             Fonts.px(24f),
         )
         panelW = max(Fonts.px(240f), contentW + padX * 2f)
+        // The title is centred, so the control's slot has to clear it on both
+        // sides — a translation that ran under the button would be unreadable.
+        panelW = max(panelW, titleW + closeSlot * 2f)
         panelW = if (InputProfile.detect() == InputProfile.Touch) {
             max(panelW, screenW * 0.36f).coerceAtMost(maxPanelW)
         } else {
@@ -191,7 +211,12 @@ class LanguagePickerOverlay : Disposable, GestureSurface<ModalVerdict> {
         }
         panelW = panelW.coerceAtMost(avail.width)
 
-        val chromeH = padY * 2f + titleFont.lineHeight + titleGap
+        // The header band must also hold the ✕ clear of the first row: its slot
+        // plus the list's gap is a second lower bound on the chrome.
+        val chromeH = max(
+            padY * 2f + titleFont.lineHeight + titleGap,
+            closeInset + closeSide + titleGap + padY,
+        )
         val bodyContentH = locales.size * itemH +
             (locales.size - 1).coerceAtLeast(0) * itemGap
         val fitted = body.fitAndPlace(
@@ -212,6 +237,9 @@ class LanguagePickerOverlay : Disposable, GestureSurface<ModalVerdict> {
             batch, px, panelLeft, panelBottom, panelW, panelH,
             AppPalette.panel,
         )
+        // The title is sticky chrome, so the ✕ is the card's corner control, not
+        // part of the scrolled list.
+        closeButton.layoutTopRight(panelLeft, panelBottom, panelW, panelH, closeInset)
 
         Fonts.drawText(
             batch,
@@ -220,6 +248,12 @@ class LanguagePickerOverlay : Disposable, GestureSurface<ModalVerdict> {
             panelLeft + (panelW - titleW) * 0.5f,
             panelBottom + panelH - padY,
             Color.WHITE,
+        )
+        closeButton.render(
+            batch = batch,
+            whitePixel = px,
+            pointerWorldX = pointerWorldX,
+            pointerWorldY = pointerWorldY,
         )
 
         val hoverLocale = localeAt(body.hoverX(pointerWorldX), body.hoverY(pointerWorldY))

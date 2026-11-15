@@ -50,9 +50,10 @@ object LanguagePickerFeature {
     }
 }
 
-/** Maps each locale row to [Intent.PickLocale] and dismiss to [Intent.Back]. */
+/** Maps each locale row to [Intent.PickLocale], the ✕ to [Intent.DismissLanguagePicker]. */
 object LanguagePickerActions : RouteActions {
     const val PICK = "language.pick"
+    const val DISMISS = "language.dismiss"
     const val KEY_TAG = "localeTag"
 
     /**
@@ -61,6 +62,7 @@ object LanguagePickerActions : RouteActions {
      * than to a wrong locale.
      */
     fun actionFor(verdict: ModalVerdict): ComponentAction? {
+        if (verdict.close) return ComponentAction(DISMISS)
         val name = verdict.selectedId ?: return null
         val tag = runCatching { AppLocale.valueOf(name).tag }.getOrNull() ?: return null
         return ComponentAction(PICK, mapOf(KEY_TAG to tag))
@@ -68,6 +70,7 @@ object LanguagePickerActions : RouteActions {
 
     override fun toIntent(route: Route, action: ComponentAction): Intent? = when (action.id) {
         PICK -> (action.payload[KEY_TAG] as? String)?.let { Intent.PickLocale(it) }
+        DISMISS -> Intent.DismissLanguagePicker
         else -> null
     }
 
