@@ -241,26 +241,6 @@ class GameMenuFeatureTest {
         assertEquals(Intent.ViewNotices, GameMenuActions.toIntent(route, action!!))
     }
 
-    /**
-     * Continue is one row over two different surfaces: on the local play menu it
-     * enters the parked board, and on the chrome card over a live board it only has
-     * to get out of the way (pushing a board that is already up is a no-op).
-     */
-    @Test
-    fun continueEntersTheBoardOverTheMenuAndHidesTheChromeCard() {
-        assertEquals(
-            Intent.PushRoute(Route.Layer(RouteIds.LOCAL_BOARD)),
-            GameMenuActions.toIntent(
-                Route.Layer(RouteIds.LOCAL_MENU),
-                ComponentAction(GameMenuActions.CONTINUE),
-            ),
-        )
-        assertEquals(
-            Intent.HideMenu,
-            GameMenuActions.toIntent(route, ComponentAction(GameMenuActions.CONTINUE)),
-        )
-    }
-
     @Test
     fun registerWiresMenuRoute() {
         val registry = FeatureRegistry()

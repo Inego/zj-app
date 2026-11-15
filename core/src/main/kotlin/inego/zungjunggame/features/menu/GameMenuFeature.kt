@@ -74,7 +74,7 @@ object GameMenuFeature {
  * Several legacy actions have no exact [Intent]; the nearest existing variant is
  * used and flagged here: players/tutorial/
  * exit-to-main-menu use navigation routes; `continue` pushes the local board over
- * the local play menu and hides the chrome card over a live board; `exit` quits
+ * the local play menu; `exit` quits
  * via [Intent.ExitApp]; `forfeit` opens the confirm modal the legacy handler
  * showed; the signed-out account dropdown maps its Google row to [Intent.LogIn]
  * and its special-key row to [Intent.LogInSpecialKey]. A signed-in badge only
@@ -146,13 +146,9 @@ object GameMenuActions : RouteActions {
         LANGUAGE -> Intent.PushRoute(Route.Modal(RouteIds.LANGUAGE_PICKER))
         SETTINGS -> Intent.PushRoute(Route.Modal(RouteIds.SETTINGS))
         NEW_GAME -> Intent.NewGame
-        // Over the local play menu the board context is a layer to push; over a
-        // live board the chrome card only has to get out of the way, returning to
-        // the game it covers (pushing LOCAL_BOARD would be a no-op it already is).
-        CONTINUE -> when (route) {
-            Route.Modal(RouteIds.GAME_MENU) -> Intent.HideMenu
-            else -> Intent.PushRoute(Route.Layer(RouteIds.LOCAL_BOARD))
-        }
+        // Only the local play menu draws the row: the board context is a layer to
+        // push over it. The chrome card's ✕ handles the live-board case instead.
+        CONTINUE -> Intent.PushRoute(Route.Layer(RouteIds.LOCAL_BOARD))
         PLAY_AGAINST_BOTS -> Intent.PlayAgainstBots
         TUTORIAL -> Intent.OpenTutorial
         LOG_IN -> Intent.LogIn

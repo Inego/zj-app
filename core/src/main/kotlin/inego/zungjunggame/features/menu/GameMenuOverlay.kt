@@ -499,7 +499,7 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
      * @param showScoreTable when true, include Score table (local / online child menus)
      * @param showForfeit when true, include Forfeit on the online menu. False once the
      *   match is over, when the row could only mislead (see [MatchPhase])
-     * @param showContinue when true, include Continue on the local-game menu (parked or live game)
+     * @param showContinue when true, include Continue on the local-game menu (parked game)
      * @param showIdentity when false, suppress the identity badge / account dropdown
      *   entirely. A null [signedInLabel] would still draw the signed-out badge (its
      *   chooser may include the special key even with no Google), so every child

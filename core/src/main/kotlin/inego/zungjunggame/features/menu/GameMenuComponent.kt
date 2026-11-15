@@ -129,7 +129,11 @@ class GameMenuComponent(
             context = input.context,
             showScoreTable = input.showScoreTable,
             showForfeit = input.showForfeit,
-            showContinue = input.showContinue,
+            // One home has content under it: the chrome modal over a running
+            // context. Its ✕ is the dismiss, so the Continue row — the same
+            // `HideMenu` — is dropped there. The local play menu keeps the row;
+            // it has no ✕ and Continue is how a parked board comes back.
+            showContinue = input.showContinue && route !is Route.Modal,
             showIdentity = input.showIdentity,
             signedInLabel = input.signedInLabel,
             eloRating = input.eloRating,

@@ -10,11 +10,12 @@ disposes a resource it did not construct.
 composition root holds the app scope; `Router` holds one child scope per stack entry and
 closes it when the entry leaves; `AppRuntime.dispose()` is `scope.dispose()`. Components
 never declare disposal. A widget may back several components: the game-menu card backs
-`ROOT_MENU`, `LOCAL_MENU`, and `GAME_MENU`. Identity is off on `GAME_MENU`;
-Continue there is `HideMenu`, and only that chrome home draws a close control —
-the root and local play menus are the screen's own content, so they need no
-dismiss of their own. Parked `LOCAL_MENU` keeps identity and still
-pushes the board. `Intent.LogIn` / `Intent.LogOut` always reach the account /
+`ROOT_MENU`, `LOCAL_MENU`, and `GAME_MENU`. Identity is off on `GAME_MENU`, and
+only that chrome home draws a close control — the root and local play menus are
+the screen's own content, so they need no dismiss of their own. Parked
+`LOCAL_MENU` keeps identity, draws Continue, and still pushes the board; the
+chrome card's ✕ is that same dismiss, so Continue is not drawn there.
+`Intent.LogIn` / `Intent.LogOut` always reach the account /
 confirm ports; the chrome card not drawing the badge is the live-board gate.
 
 Every UI value is one of three kinds:
