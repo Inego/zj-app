@@ -11,9 +11,12 @@ import inego.zungjunggame.ui.Frame
 import inego.zungjunggame.ui.GestureBridge
 import inego.zungjunggame.ui.HitRegions
 import inego.zungjunggame.ui.Layout
+import inego.zungjunggame.ui.Rect
 import inego.zungjunggame.ui.RouteUiActions
 import inego.zungjunggame.ui.StatePort
 import inego.zungjunggame.ui.stack.Route
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * The draft edits the Shadow Ranked panel reports as [HubVerdict]s.
@@ -49,7 +52,7 @@ private fun primaryActionFor(view: OnlineHubView): LiveTabPanel.PrimaryAction =
  *
  * [OnlineHubOverlay] owns the shell and the two tab panels. This component
  * orchestrates: it publishes the shell's tab/close/rejoin hit regions and the
- * active body as the gesture region from the overlay's last fitted geometry
+ * card viewport as the gesture region from the overlay's last fitted geometry
  * (falling back to the pure [OnlineHubOverlay.measure] before the first paint),
  * forwards the body's gestures through the [GestureBridge], and hands the route's
  * [OnlineHubState] and the host-built views in every frame.
@@ -57,6 +60,10 @@ private fun primaryActionFor(view: OnlineHubView): LiveTabPanel.PrimaryAction =
  * Discrete taps (tabs, close) travel `Layout.hitRegions`; the body's continuous
  * scroll is the panel's own and is emitted as a `routeUi.write` of the whole
  * hub state, so the tab, both scrolls and the draft stay one value.
+ *
+ * The card scrolls as one column, so the viewport is the gesture region and a
+ * press on a shell control has to be kept out of it ([onGesturePress]) — the
+ * control's tap, not a pan, is what that press means.
  */
 class OnlineHubComponent(
     route: Route,
@@ -85,6 +92,12 @@ class OnlineHubComponent(
     ),
     Component {
     override val id: ComponentId = ComponentId(route.key.value)
+
+    /**
+     * The shell controls' visible rects, from the last `layout()`. A press on one
+     * belongs to the control even though the card's viewport would otherwise pan.
+     */
+    private var pressControls: List<Rect> = emptyList()
 
     private fun currentState(): OnlineHubState = state.read() ?: DEFAULT_ONLINE_HUB_STATE
 
@@ -121,25 +134,51 @@ class OnlineHubComponent(
         // dead space resolves as Outside (see [inego.zungjunggame.input.HitResolver]),
         // which is its `outside()` — so a tap beside a control closed the hub.
         regions.add(geometry.panel, ComponentAction(OnlineHubActions.ABSORB), rank = CARD_RANK)
-        geometry.rejoin?.let { rejoin ->
-            regions.add(rejoin, ComponentAction(OnlineHubActions.REJOIN), rank = CONTROL_RANK)
+        // Every control is published only for the part of it the card still shows:
+        // the column scrolls, so a tab or the close button can be pushed past the
+        // rim, and a tap on the scrim must not hit the invisible remainder.
+        val controls = ArrayList<Rect>(6)
+        fun control(rect: Rect?, action: String) {
+            val visible = rect?.let { visiblePart(it, geometry.viewport) } ?: return
+            controls += visible
+            regions.add(visible, ComponentAction(action), CONTROL_RANK)
         }
-        regions.add(geometry.liveTab, ComponentAction(OnlineHubActions.SELECT_LIVE_TAB), CONTROL_RANK)
-        regions.add(geometry.shadowTab, ComponentAction(OnlineHubActions.SELECT_SHADOW_TAB), CONTROL_RANK)
-        regions.add(geometry.leaderboard, ComponentAction(OnlineHubActions.OPEN_LEADERBOARD), CONTROL_RANK)
+        control(geometry.rejoin, OnlineHubActions.REJOIN)
+        control(geometry.liveTab, OnlineHubActions.SELECT_LIVE_TAB)
+        control(geometry.shadowTab, OnlineHubActions.SELECT_SHADOW_TAB)
+        control(geometry.leaderboard, OnlineHubActions.OPEN_LEADERBOARD)
         // The rating is the viewer's own history link; it is published only when
         // there is a value to print, so the row has no invisible target.
-        if (v.eloRating != null) {
-            regions.add(geometry.rating, ComponentAction(OnlineHubActions.OPEN_RATING_HISTORY), CONTROL_RANK)
-        }
-        regions.add(geometry.close, ComponentAction(OnlineHubActions.DISMISS), CONTROL_RANK)
+        if (v.eloRating != null) control(geometry.rating, OnlineHubActions.OPEN_RATING_HISTORY)
+        control(geometry.close, OnlineHubActions.DISMISS)
+        pressControls = controls
 
         return Layout(
             hitRegions = regions,
             panel = geometry.panel,
-            gestureRegions = listOf(geometry.body),
+            gestureRegions = listOf(geometry.viewport),
             scrollable = true,
         )
+    }
+
+    /**
+     * A press on a shell control is that control's, not the card's: decline it so
+     * the pipeline resolves the tap against [Layout.hitRegions]. Every other press
+     * inside the viewport scrolls the whole column. See [control].
+     */
+    override fun onGesturePress(x: Float, y: Float, frame: Frame): Boolean {
+        if (pressControls.any { it.contains(x, y) }) return false
+        return super.onGesturePress(x, y, frame)
+    }
+
+    /** [rect] intersected with [bounds], or null when none of it is still shown. */
+    private fun visiblePart(rect: Rect, bounds: Rect): Rect? {
+        val left = max(rect.left, bounds.left)
+        val bottom = max(rect.bottom, bounds.bottom)
+        val right = min(rect.right, bounds.right)
+        val top = min(rect.top, bounds.top)
+        if (right <= left || top <= bottom) return null
+        return Rect(left, bottom, right - left, top - bottom)
     }
 
     override fun draw(frame: Frame, canvas: Canvas) {

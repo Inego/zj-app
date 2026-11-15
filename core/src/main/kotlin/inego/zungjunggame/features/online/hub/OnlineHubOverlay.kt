@@ -6,6 +6,8 @@ import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.BitmapFont
 import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
+import com.badlogic.gdx.math.Rectangle
+import com.badlogic.gdx.scenes.scene2d.utils.ScissorStack
 import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.net.MatchHistoryFormat
@@ -23,9 +25,13 @@ import inego.zungjunggame.ui.stack.OnlineTab
 import kotlin.math.max
 import inego.zungjunggame.render.ui.AppPalette
 
-/** GL-free shell geometry for one laid-out hub frame. */
-data class OnlineHubGeometry(
-    val panel: Rect,
+/**
+ * GL-free shell geometry for one laid-out hub frame. Every rect is in the frame
+ * the shell painted: the column's bands are already shifted by [scrollY], while
+ * [body] is the unscrolled row measure and [viewport] is the card's fixed inner
+ * box.
+ */
+data class OnlineHubGeometry(    val panel: Rect,
     val header: Rect,
     /**
      * The header's **identity row**: the alias and the ping. Both are the signed-in
@@ -58,7 +64,22 @@ data class OnlineHubGeometry(
      */
     val rating: Rect,
     val close: Rect,
+    /**
+     * The active tab body's **unscrolled** measure: its row width and the top its
+     * first row starts at. Every other rect here is shifted by [scrollY]; this is
+     * the layout input the panel lays its rows into, and the panel applies the
+     * offset itself so its own hit regions move with the rows.
+     */
     val body: Rect,
+    /**
+     * The card's inner box, rim excluded: the clip every scrolled band is drawn
+     * inside, and the gesture viewport the card scrolls in.
+     */
+    val viewport: Rect,
+    /** Whole scrolled content height: top padding, header, tab strip, body, bottom padding. */
+    val contentHeight: Float,
+    /** The offset the shell was measured at, clamped to the card's scroll range. */
+    val scrollY: Float,
     val activeTab: OnlineTab,
     /**
      * The hub-level **Rejoin** band: the way back to a table the player is still
@@ -85,7 +106,13 @@ data class OnlineHubGeometry(
  * from `layout()` and this shell paints the exact rects it published. The shell
  * owns the card chrome, the header and the two panels ([LiveTabPanel],
  * [ShadowRankedTabPanel]); a panel owns its own body, controls and gesture
- * machine and never sees the card.
+ * machine, and is handed the card's viewport only to clip and scroll what it
+ * draws.
+ *
+ * The card scrolls as **one column**: the header, the rejoin band, the tab strip
+ * and the body all share the tab's offset, so the chrome travels with the
+ * content it belongs to. Only the rim and the scrollbar stay put — the bar is
+ * the card's, and [measure] shifts every band by the same amount it maps.
  *
  * **Rejoin** is the shell's own, above the tab strip rather than in a body: the
  * table it returns to belongs to neither tab, so neither body can own the way
@@ -100,6 +127,8 @@ class OnlineHubOverlay(
 ) : Disposable {
     private val closeButton = CloseButton()
     private val glyphLayout = GlyphLayout()
+    private val clipBounds = Rectangle()
+    private val scissors = Rectangle()
 
     /** Geometry the last paint fitted to the two bodies' taller content. */
     private var measured: OnlineHubGeometry? = null
@@ -154,7 +183,7 @@ class OnlineHubOverlay(
         Fonts.ensureCreated()
         // The card hugs the taller of the two bodies, so it needs the fonts both
         // will paint with.
-        val geometry = geometryFor(screenW, screenH, state, view, shadowView)
+        val geometry = geometryFor(screenW, screenH, state, view, shadowView, state.scrollFor(state.tab))
         measured = geometry
         measuredW = screenW
         measuredH = screenH
@@ -168,6 +197,63 @@ class OnlineHubOverlay(
             AppPalette.panel,
         )
 
+        // The chrome is part of the scrolled column: it clips to the card's inner
+        // box like the body does, so a band the offset pushed past the rim cannot
+        // paint over it.
+        clipTo(geometry.viewport, batch, camera) {
+            renderChrome(
+                batch = batch,
+                px = px,
+                geometry = geometry,
+                state = state,
+                view = view,
+                pointerX = pointerWorldX,
+                pointerY = pointerWorldY,
+            )
+        }
+
+        when (state.tab) {
+            OnlineTab.Live -> livePanel.render(
+                batch = batch,
+                camera = camera,
+                bodyRect = geometry.body,
+                viewport = geometry.viewport,
+                contentHeight = geometry.contentHeight,
+                scrollY = geometry.scrollY,
+                pointerWorldX = pointerWorldX,
+                pointerWorldY = pointerWorldY,
+                view = view,
+            )
+            OnlineTab.ShadowRanked -> shadowPanel.render(
+                batch = batch,
+                camera = camera,
+                bodyRect = geometry.body,
+                viewport = geometry.viewport,
+                contentHeight = geometry.contentHeight,
+                scrollY = geometry.scrollY,
+                pointerWorldX = pointerWorldX,
+                pointerWorldY = pointerWorldY,
+                view = shadowView,
+                draft = state.draft,
+            )
+        }
+    }
+
+    /**
+     * The card's one scrolled column: the header, the rejoin band, the tab strip
+     * and the search dot, all placed at the offset [OnlineHubGeometry.measure]
+     * shifted them to. Called inside the card's clip; the body is painted by its
+     * panel, which clips itself.
+     */
+    private fun renderChrome(
+        batch: SpriteBatch,
+        px: Texture,
+        geometry: OnlineHubGeometry,
+        state: OnlineHubState,
+        view: OnlineHubView,
+        pointerX: Float,
+        pointerY: Float,
+    ) {
         renderHeader(
             batch = batch,
             px = px,
@@ -177,8 +263,8 @@ class OnlineHubOverlay(
             leaderboard = geometry.leaderboard,
             rating = geometry.rating,
             view = view,
-            pointerX = pointerWorldX,
-            pointerY = pointerWorldY,
+            pointerX = pointerX,
+            pointerY = pointerY,
         )
 
         geometry.rejoin?.let { rejoin ->
@@ -199,8 +285,8 @@ class OnlineHubOverlay(
                 w = rejoin.width,
                 h = rejoin.height,
                 border = HubDraw.borderPx(),
-                pointerX = pointerWorldX,
-                pointerY = pointerWorldY,
+                pointerX = pointerX,
+                pointerY = pointerY,
                 accent = HubDraw.goGreenInk,
             )
         }
@@ -208,11 +294,11 @@ class OnlineHubOverlay(
         val labelFont = Fonts.button
         drawTab(
             batch, px, labelFont, geometry.liveTab,
-            "online.hub.tab.live", state.tab == OnlineTab.Live, pointerWorldX, pointerWorldY,
+            "online.hub.tab.live", state.tab == OnlineTab.Live, pointerX, pointerY,
         )
         drawTab(
             batch, px, labelFont, geometry.shadowTab,
-            "online.hub.tab.shadowRanked", state.tab == OnlineTab.ShadowRanked, pointerWorldX, pointerWorldY,
+            "online.hub.tab.shadowRanked", state.tab == OnlineTab.ShadowRanked, pointerX, pointerY,
         )
         geometry.liveSearchIndicator?.let { dot ->
             batch.setColor(AppPalette.tint(AppPalette.accent, 0.95f))
@@ -222,28 +308,23 @@ class OnlineHubOverlay(
 
         batch.setColor(Color.WHITE)
         closeButton.layoutAt(geometry.close.left, geometry.close.bottom, geometry.close.width)
-        closeButton.render(batch, px, pointerWorldX, pointerWorldY)
+        closeButton.render(batch, px, pointerX, pointerY)
+    }
 
-        when (state.tab) {
-            OnlineTab.Live -> livePanel.render(
-                batch = batch,
-                camera = camera,
-                bodyRect = geometry.body,
-                scrollY = state.liveScroll,
-                pointerWorldX = pointerWorldX,
-                pointerWorldY = pointerWorldY,
-                view = view,
-            )
-            OnlineTab.ShadowRanked -> shadowPanel.render(
-                batch = batch,
-                camera = camera,
-                bodyRect = geometry.body,
-                scrollY = state.shadowScroll,
-                pointerWorldX = pointerWorldX,
-                pointerWorldY = pointerWorldY,
-                view = shadowView,
-                draft = state.draft,
-            )
+    /**
+     * Draw [block] clipped to [rect]. The chrome and the panel each clip their own
+     * paint; the rim is already on the batch, so the clip only ever trims content.
+     */
+    private fun clipTo(rect: Rect, batch: SpriteBatch, camera: Camera, block: () -> Unit) {
+        batch.flush()
+        clipBounds.set(rect.left, rect.bottom, rect.width, rect.height)
+        ScissorStack.calculateScissors(camera, batch.transformMatrix, clipBounds, scissors)
+        val on = ScissorStack.pushScissors(scissors)
+        try {
+            block()
+        } finally {
+            batch.flush()
+            if (on) ScissorStack.popScissors()
         }
     }
 
@@ -258,6 +339,7 @@ class OnlineHubOverlay(
         state: OnlineHubState,
         view: OnlineHubView,
         shadowView: ShadowRankedView,
+        scrollY: Float,
     ): OnlineHubGeometry {
         val base = measure(
             screenW, screenH, state, view.searching,
@@ -267,14 +349,17 @@ class OnlineHubOverlay(
         // Both tabs share one card height: the taller body wins, so switching
         // tabs never resizes the card or moves the tab strip under the pointer.
         // Both are measured at the same width, so the two heights are comparable.
-        val contentH = max(
-            livePanel.contentHeight(bodyW, view),
-            shadowPanel.contentHeight(bodyW, shadowView, state.draft),
-        )
+        // The offset, though, belongs to the tab on screen — its own content is
+        // what the card can scroll through.
+        val liveH = livePanel.contentHeight(bodyW, view)
+        val shadowH = shadowPanel.contentHeight(bodyW, shadowView, state.draft)
+        val activeH = if (state.tab == OnlineTab.Live) liveH else shadowH
         return measure(
             screenW, screenH, state, view.searching,
             rejoinAvailable = view.rejoinAvailable,
-            bodyContentH = contentH,
+            bodyContentH = max(liveH, shadowH),
+            activeBodyH = activeH,
+            scrollY = scrollY,
         )
     }
 
@@ -462,17 +547,23 @@ class OnlineHubOverlay(
 
         /**
          * Pure shell geometry: the card hugs the taller of the two bodies up to
-         * the viewport margins, the tab strip is its pinned top band, and the body
-         * is everything below it. The rejoin band, when present, is a pinned band
-         * above the strip. No fonts and no GL, so `layout()` and `draw()` can
+         * the viewport margins, and every band inside it — header, rejoin band,
+         * tab strip, body — sits in one column, shifted by [scrollY]. The rim and
+         * the bar do not move. No fonts and no GL, so `layout()` and `draw()` can
          * derive the same rects from a content height the caller measured.
          *
          * [rejoinAvailable] is model-derived, so layout and paint read the same
          * answer and the published hit region and the painted band cannot disagree.
          *
-         * [bodyContentH] is the taller body's unconstrained content height. The
-         * default [Float.POSITIVE_INFINITY] keeps the card viewport-filling, which
-         * is the seed the component uses before its first fitted paint.
+         * [bodyContentH] is the taller body's unconstrained content height: it
+         * sizes the card so switching tabs never resizes it. [activeBodyH] is the
+         * body actually on screen; its content — chrome included — is what the
+         * offset can travel through, so the shorter tab cannot scroll past its own
+         * last row. It defaults to [bodyContentH] for the pre-paint seed.
+         *
+         * [scrollY] is the tab's offset, clamped here to the card's range so the
+         * painted bands, the published regions and the panel's own rows share one
+         * number.
          */
         fun measure(
             screenW: Float,
@@ -481,6 +572,8 @@ class OnlineHubOverlay(
             searching: Boolean = false,
             rejoinAvailable: Boolean = false,
             bodyContentH: Float = Float.POSITIVE_INFINITY,
+            activeBodyH: Float = bodyContentH,
+            scrollY: Float = 0f,
         ): OnlineHubGeometry {
             val portrait = screenH > screenW
             val marginX = if (portrait) screenW * 0.04f else screenW * 0.10f
@@ -506,21 +599,25 @@ class OnlineHubOverlay(
                 (if (rejoinAvailable) rejoinH + headerGap else 0f) +
                 tabH + bodyGap + pad
             // The shared hug-height owner: the card is chrome plus body content,
-            // capped to the margin box and centered in it.
+            // capped to the margin box and centered in it. The rim is outside the
+            // scroll: every band clips to the inner box, so a row passing the edge
+            // cannot paint over the border.
             val available = Rect(
                 left = 0f,
                 bottom = marginY,
                 width = screenW.coerceAtLeast(1f),
                 height = (screenH - marginY * 2f).coerceAtLeast(1f),
             )
-            val fit = OverlayViewport.fitSticky(available.height, chromeH, bodyContentH)
-            val placed = OverlayViewport.placeCentered(panelW, fit.cardH, available)
-            val panel = Rect(
-                left = placed.first,
-                bottom = placed.second,
-                width = panelW,
-                height = fit.cardH,
-            )
+            val whole = OverlayViewport.fitWholeCard(available, panelW, chromeH, bodyContentH)
+            val panel = whole.panel
+            val viewport = whole.inner
+            // One offset for every band. The state carries the offset the player
+            // left the tab at; the card clamps it to the active tab's own content,
+            // and paint, hit regions and the panel's rows all read the clamped
+            // value back from the geometry.
+            val contentHeight = if (activeBodyH.isFinite()) chromeH + activeBodyH else viewport.height
+            val maxScroll = (contentHeight - viewport.height).coerceAtLeast(0f)
+            val s = scrollY.coerceIn(0f, maxScroll)
             val header = Rect(
                 left = panel.left + pad,
                 bottom = panel.top - pad - headerH,
@@ -626,21 +723,28 @@ class OnlineHubOverlay(
                 width = (panel.width - pad * 2f).coerceAtLeast(1f),
                 height = (bodyTop - bodyBottom).coerceAtLeast(1f),
             )
+            // Every band in the column travels with the offset; [body] stays the
+            // unscrolled measure the panel lays its rows into.
+            fun scrolled(rect: Rect): Rect =
+                if (s == 0f) rect else Rect(rect.left, rect.bottom + s, rect.width, rect.height)
             return OnlineHubGeometry(
                 panel = panel,
-                header = header,
-                identityRow = identityRow,
-                rankedRow = rankedRow,
-                rejoin = rejoin,
-                tabStrip = tabStrip,
-                liveTab = liveTab,
-                shadowTab = shadowTab,
-                leaderboard = leaderboard,
-                rating = rating,
-                close = close,
+                header = scrolled(header),
+                identityRow = scrolled(identityRow),
+                rankedRow = scrolled(rankedRow),
+                rejoin = rejoin?.let(::scrolled),
+                tabStrip = scrolled(tabStrip),
+                liveTab = scrolled(liveTab),
+                shadowTab = scrolled(shadowTab),
+                leaderboard = scrolled(leaderboard),
+                rating = scrolled(rating),
+                close = scrolled(close),
                 body = body,
+                viewport = viewport,
+                contentHeight = contentHeight,
+                scrollY = s,
                 activeTab = state.tab,
-                liveSearchIndicator = liveSearchIndicator,
+                liveSearchIndicator = liveSearchIndicator?.let(::scrolled),
             )
         }
     }

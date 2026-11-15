@@ -53,7 +53,13 @@ open class GestureBridge<V>(
     private val stateActionFor: (V) -> ComponentAction? = { null },
 ) : GestureHost {
 
-    override fun onGesturePress(x: Float, y: Float, frame: Frame): Boolean {
+    /**
+     * A component may override this to decline a press that belongs to a control
+     * rather than to the surface — a scrolling card whose chrome is published as
+     * hit regions needs the control's tap to stay with the control. Returning
+     * false lets the pipeline resolve the press against the layer's hit regions.
+     */
+    open override fun onGesturePress(x: Float, y: Float, frame: Frame): Boolean {
         if (!surface().onPointerDown(x, y)) return false
         // A press may already have resolved a value (a slider jumps to where it
         // was pressed); emit it before the drag steps that follow.

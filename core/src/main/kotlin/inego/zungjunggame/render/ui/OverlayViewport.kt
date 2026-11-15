@@ -133,6 +133,52 @@ object OverlayViewport {
         )
     }
 
+    /**
+     * A card that scrolls as **one column**: its outer panel and the inner box
+     * the scrolled bands are clipped to.
+     */
+    data class WholeCardFit(
+        /** The card's outer rect, rim included. */
+        val panel: Rect,
+        /** The card's inner box — the rim removed — which is the scroll viewport. */
+        val inner: Rect,
+        /** Offset range for chrome plus body inside [inner]. */
+        val maxScrollY: Float,
+    )
+
+    /**
+     * Fit a card whose whole column scrolls inside a rim: [chromeH] and
+     * [bodyContentH] share one offset, so only the rim stays fixed. The rim is
+     * therefore added **outside** the [fitSticky] card and the viewport is inset
+     * by it, which is what keeps a scrolled band from painting over the border.
+     *
+     * [chromeH] must include the card's bottom padding: the column ends that far
+     * above [WholeCardFit.inner]'s bottom at full scroll.
+     */
+    fun fitWholeCard(
+        avail: Rect,
+        panelW: Float,
+        chromeH: Float,
+        bodyContentH: Float,
+    ): WholeCardFit {
+        val rim = OverlayChrome.borderPx()
+        val chrome = chromeH.coerceAtLeast(0f)
+        val body = bodyContentH.coerceAtLeast(0f)
+        val fit = fitSticky((avail.height - rim * 2f).coerceAtLeast(1f), chrome, body)
+        val cardH = fit.cardH + rim * 2f
+        val (left, bottom) = placeCentered(panelW, cardH, avail)
+        return WholeCardFit(
+            panel = Rect(left, bottom, panelW, cardH),
+            inner = Rect(
+                left = left + rim,
+                bottom = bottom + rim,
+                width = (panelW - rim * 2f).coerceAtLeast(1f),
+                height = fit.cardH,
+            ),
+            maxScrollY = (chrome + body - fit.cardH).coerceAtLeast(0f),
+        )
+    }
+
     /** Remaining width after [maxPanelW] is also limited by [avail]. */
     fun maxPanelWidth(desiredFractionW: Float, avail: Rect, screenW: Float, minGapPx: Float): Float =
         max(1f, minOf(desiredFractionW, avail.width, (screenW - minGapPx).coerceAtLeast(1f)))

@@ -45,7 +45,7 @@ sealed interface SettingsVerdict {
     data object Close : SettingsVerdict
 
     /**
-     * The body's offset: reported on each drag step and once more when a drag
+     * The card's offset: reported on each drag step and once more when a drag
      * settles ([settled] true), so the owner stores where the player left the
      * card.
      */
@@ -86,12 +86,15 @@ data class SettingsGeometry(
  * read through [SettingsComponent], so a control and the value it commits cannot
  * disagree — the defect the old read-back draft allowed.
  *
- * Title and close stay put; the rows scroll inside [OverlayBodyScroll] when the
- * card would be taller than the safe rect (a short landscape window, or the
- * signed-in notification section), so no row is ever pushed off-screen. The
- * offset is the owner's: [render] is handed it and a drag reports where it moved.
+ * The whole card scrolls as one column ([OverlayBodyScroll.fitWholeCard]): the
+ * title, the close control and the rows share one offset and one bar, so in a
+ * short landscape window — or once the signed-in notification section is shown —
+ * the column moves under the card's rim rather than pushing a row off-screen.
+ * The title and the close therefore scroll out of view; the rim and the bar are
+ * the only fixed parts. The offset is the owner's: [render] is handed it and a
+ * drag reports where it moved.
  * The gesture is **directional** and shared ([GestureAxis]): a vertical pan
- * anywhere in the body scrolls it, including over a slider, and only a
+ * anywhere on the card scrolls it, including over a slider, and only a
  * sideways-dominant drag takes a slider's value — otherwise a pan that happens
  * to start on the volume row would be dead.
  *
@@ -161,10 +164,10 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
     private var pressSlider: Slider? = null
     private var pressSliderTarget: SliderTarget? = null
 
-    /** The press began on the scrolling body, not on a control. */
+    /** The press began on the scrolling card, not on a control. */
     private var pressBody = false
 
-    /** Offset the body held when that press began, so a no-op drag reports nothing. */
+    /** Offset the card held when that press began, so a no-op drag reports nothing. */
     private var pressScrollStart = 0f
 
     fun containsPanel(worldX: Float, worldY: Float): Boolean {
@@ -172,12 +175,12 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
             worldY >= panelBottom && worldY <= panelBottom + panelH
     }
 
-    /** The offset the body is scrolled down (0 = top), read by the gesture bridge. */
+    /** The offset the card is scrolled down (0 = top), read by the gesture bridge. */
     override fun scrollOffset(): Float = body.scrollY
 
     override fun scrollCoasting(): Boolean = body.isCoasting
 
-    /** Advance the body's fling inertia; [deltaSec] comes from the host's frame. */
+    /** Advance the card's fling inertia; [deltaSec] comes from the host's frame. */
     fun advance(deltaSec: Float): Float = body.advance(deltaSec)
 
     /** True when the point is on the top-right close button. */
@@ -255,7 +258,7 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
     }
 
     override fun onPointerDown(x: Float, y: Float): Boolean {
-        // A new gesture owns the body, not the one before it.
+        // A new gesture owns the card, not the one before it.
         body.cancel()
         clearPress()
         // The card owns gestures only within its own panel; a press outside it
@@ -267,9 +270,9 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
             return true
         }
         axis.begin(x, y)
-        // Arm the body on every press that lands on it, so a scrollbar grab
-        // follows the finger at once. A content drag stays still until the
-        // finger commits to the vertical axis — see [onPointerDrag].
+        // Arm the card's viewport on every press that lands in it, so a
+        // scrollbar grab follows the finger at once. A content drag stays still
+        // until the finger commits to the vertical axis — see [onPointerDrag].
         pressBody = body.contains(x, y)
         if (pressBody) {
             val before = body.scrollY
@@ -432,7 +435,7 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
         camera: Camera,
         screenW: Float,
         screenH: Float,
-        /** Body offset the owner stored; 0 = top. */
+        /** The card's offset the owner stored; 0 = top. */
         scrollY: Float = 0f,
         /** Checkbox value for this frame; the caller reads it from the model. */
         showTileLabels: Boolean = UiPreferences.DEFAULT.showTileLabels,
@@ -555,15 +558,16 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
         } else {
             0f
         }
-        // Title and close are sticky chrome; the rows scroll in the body between
-        // them and the card's bottom inset.
-        val chromeH = padY * 2f + titleFont.lineHeight + titleGap
-        val fitted = body.fitAndPlace(
+        // The whole column scrolls: title, close and rows share one offset, with
+        // only the card's rim fixed. The viewport is therefore the card's inner
+        // box, and the rows start below the title's band inside it.
+        val topChrome = padY + titleFont.lineHeight + titleGap
+        val chromeH = topChrome + padY
+        val fitted = body.fitWholeCard(
             avail = avail,
             panelW = panelW,
             chromeH = chromeH,
             bodyContentH = rowsH + notifH,
-            bodyInset = padY,
             scrollY = scrollY,
         )
         panelH = fitted.cardH
@@ -575,31 +579,34 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
             AppPalette.panel,
         )
 
-        closeButton.layoutTopRight(panelLeft, panelBottom, panelW, panelH)
-        closeButton.render(
-            batch = batch,
-            whitePixel = px,
-            pointerWorldX = pointerWorldX,
-            pointerWorldY = pointerWorldY,
-        )
-
-        glyphLayout.setText(titleFont, title)
-        titleFont.draw(
-            batch,
-            title,
-            panelLeft + (panelW - glyphLayout.width) * 0.5f,
-            panelBottom + panelH - padY,
-        )
-
-        // Rows read top-down under the sticky title: tile labels, sounds, volume,
-        // then the signed-in notification section. They live in the scroll body, so
-        // a short window scrolls instead of pushing the title off-screen.
+        // Rows read top-down under the title: tile labels, sounds, volume, then
+        // the signed-in notification section. They live in the scroll column with
+        // the title, so a short window scrolls instead of pushing a row off-screen.
         rowLeft = panelLeft + padX
         this.rowW = body.contentWidth(panelW, padX * 2f, Fonts.px(24f))
         val hoverX = body.hoverX(pointerWorldX)
         val hoverY = body.hoverY(pointerWorldY)
         body.drawBody(batch, camera, px, pointerWorldX, pointerWorldY) {
-            var top = body.contentTop
+            val contentTop = body.contentTop
+            // Chrome belongs to the column: it sits at the content's top and is
+            // clipped with the rows by the card's inner box.
+            glyphLayout.setText(titleFont, title)
+            titleFont.draw(
+                batch,
+                title,
+                panelLeft + (panelW - glyphLayout.width) * 0.5f,
+                contentTop - padY,
+            )
+
+            closeButton.layoutTopRight(panelLeft, contentTop - panelH, panelW, panelH)
+            closeButton.render(
+                batch = batch,
+                whitePixel = px,
+                pointerWorldX = pointerWorldX,
+                pointerWorldY = pointerWorldY,
+            )
+
+            var top = contentTop - topChrome
 
             tileRowBottom = top - tileRowH
             drawCheckRow(
@@ -733,8 +740,9 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
         this.panelBottom = panelBottom
         this.panelW = panelW
         this.panelH = panelH
-        // The rows live in the scroll body in [render]; mirror that so a press on
-        // chrome takes the body branch and a control press keeps its own gesture.
+        // The rows live in the card's scroll column in [render]; mirror that so a
+        // press on chrome takes the body branch and a control press keeps its own
+        // gesture.
         body.layout(panelLeft, panelBottom, panelW, panelH, contentHeight = panelH, scrollY = 0f)
         this.rowLeft = panelLeft + 28f
         this.rowW = panelW - 56f

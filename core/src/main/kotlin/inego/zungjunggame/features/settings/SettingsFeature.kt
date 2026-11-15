@@ -82,7 +82,7 @@ object SettingsActions : RouteActions {
             is SettingsVerdict.DigestInterval ->
                 ComponentAction(SET_DIGEST_INTERVAL, mapOf("step" to verdict.step))
             SettingsVerdict.Close -> ComponentAction(CLOSE)
-            // The body offset is route UI state; the component writes it through
+            // The card's offset is route UI state; the component writes it through
             // [inego.zungjunggame.ui.RouteUiActions], not this feature action.
             is SettingsVerdict.BodyScroll -> null
             SettingsVerdict.None -> null

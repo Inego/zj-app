@@ -30,7 +30,7 @@ import inego.zungjunggame.ui.stack.Route
  * (GL-free); painting delegates to [SettingsOverlay.render]. The card's gestures
  * are the [GestureBridge]'s: the overlay owns the press machine and the volume
  * slider, and reports the row or slider value its gesture resolved, which
- * [SettingsActions.actionFor] maps. The body offset is route UI state — the
+ * [SettingsActions.actionFor] maps. The card's offset is route UI state — the
  * bridge writes it through [RouteUiActions], and [motion] carries a fling.
  */
 /**
@@ -56,12 +56,12 @@ class SettingsComponent(
      */
     private val notifications: () -> SettingsNotifications = { SettingsNotifications() },
     private val camera: () -> Camera = { OrthographicCamera() },
-    /** The route's stored body offset; null when the player has not scrolled yet. */
+    /** The route's stored card offset; null when the player has not scrolled yet. */
     private val state: StatePort<Float> = StatePort { null },
 ) : GestureBridge<SettingsVerdict>(
     surface = { overlay },
     actionFor = { verdict ->
-        // The body offset is route UI state, not a feature intent: it goes to the
+        // The card offset is route UI state, not a feature intent: it goes to the
         // same store every other scrollable card uses.
         if (verdict is SettingsVerdict.BodyScroll) {
             RouteUiActions.scroll(verdict.offset)

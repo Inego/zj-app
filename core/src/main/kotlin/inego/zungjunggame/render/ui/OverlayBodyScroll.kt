@@ -17,7 +17,8 @@ import kotlin.math.max
  * screen lives here:
  *
  *  - **fit + place** — [fitAndPlace] sizes the card around sticky chrome and a
- *    body that hugs its content, then centers it and installs the viewport.
+ *    body that hugs its content, then centers it and installs the viewport;
+ *    [fitWholeCard] is the variant where the chrome scrolls with the body.
  *  - **wrap width** — [measureWidth] is the width to measure wrapped text at,
  *    with the scrollbar strip already taken out. It does not vary with whether
  *    the body is scrolling: a width that moved when the bar appeared would
@@ -144,6 +145,50 @@ class OverlayBodyScroll {
             bottom = bottom,
             cardH = fit.cardH,
             bodyViewH = fit.bodyViewH,
+            maxScrollY = fit.maxScrollY,
+        )
+    }
+
+    /**
+     * Size a card that scrolls as **one column**, center it in [avail], and
+     * install the viewport over the card's inner box.
+     *
+     * Unlike [fitAndPlace], nothing stays pinned: [chromeH] — the title band,
+     * the close control and the padding around them — shares the offset with
+     * [bodyContentH], so the whole column travels under the card's rim and the
+     * bar indexes the card instead of a sub-rect. The rim is the only fixed
+     * part, so it is added outside the fit and the viewport is inset by it.
+     *
+     * [chromeH] must already include the card's bottom padding: the column ends
+     * that far above the inner bottom at full scroll.
+     *
+     * @return the placed card; [Fitted.cardH] includes the rim,
+     *   [Fitted.bodyViewH] is the inner box's height, and the viewport is
+     *   installed as a side effect.
+     */
+    fun fitWholeCard(
+        avail: Rect,
+        panelW: Float,
+        chromeH: Float,
+        bodyContentH: Float,
+        scrollY: Float = 0f,
+    ): Fitted {
+        val fit = OverlayViewport.fitWholeCard(avail, panelW, chromeH, bodyContentH)
+        val chrome = chromeH.coerceAtLeast(0f)
+        val body = bodyContentH.coerceAtLeast(0f)
+        layout(
+            left = fit.inner.left,
+            bottom = fit.inner.bottom,
+            width = fit.inner.width,
+            height = fit.inner.height,
+            contentHeight = chrome + body,
+            scrollY = scrollY,
+        )
+        return Fitted(
+            left = fit.panel.left,
+            bottom = fit.panel.bottom,
+            cardH = fit.panel.height,
+            bodyViewH = fit.inner.height,
             maxScrollY = fit.maxScrollY,
         )
     }

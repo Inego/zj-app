@@ -200,9 +200,9 @@ Current route state:
 | `GameMenuCardCodec` | root/local/game menu | card body scroll + account drawer |
 | `SetupCardCodec` | new-game setup | draft `GameConfig` + scroll |
 | `TutorialShellCodec` | tutorial shell | TOC scroll, drawer, pull-tab |
-| `OnlineHubCodec` | Online hub | tab, both tab scrolls, Shadow Ranked draft |
+| `OnlineHubCodec` | Online hub | tab, both tab scroll offsets (the card scrolls as one column), Shadow Ranked draft |
 | `RatingHistoryCodec` | rating history | target (a public handle or self), visible window, rung |
-| `RouteScrollCodec` | score table, history, Shadow Ranked attempts, notices, language picker, settings | body scroll |
+| `RouteScrollCodec` | score table, history, Shadow Ranked attempts, notices, language picker, settings | scroll offset — sticky-chrome body, or the whole card column for Settings |
 | `ReferenceNavCodec` | reference | section, page, TOC/content scroll, drawer |
 
 ### 3b. `ui.prefs` (player-set, stack-independent)
@@ -288,7 +288,11 @@ actions. `AppGraph` constructs the concrete overlay/widget and owns its scope.
 - **A gesture-claimed (`scrollable`) layer's `hitRegions` only resolve for presses
   the widget declines.** A widget that claims the whole panel makes its regions
   dead; `ScoreBreakdownComponent` is the counter-example — it publishes both and
-  its gesture surface hands pattern-row presses back to the tap path.
+  its gesture surface hands pattern-row presses back to the tap path. The Online
+  hub is the same shape at the shell: its card — header, tabs and body — is one
+  scrolled column, so `OnlineHubComponent` declines the presses that land on the
+  tab/close/link rects it published, and those taps resolve against the regions
+  while every other press pans the column.
 - **A control inside a scroll body must not claim the press on touch-down.** A
   press is a pan until its direction says otherwise; a slider that takes the
   gesture immediately makes every scroll that starts on it dead. Arbitrate with

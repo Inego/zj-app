@@ -109,10 +109,17 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
         dragged = false
     }
 
+    /**
+     * Paints the body into [viewport], the card's inner box. The whole card
+     * scrolls, so this panel owns only the rows below the strip; it clips them to
+     * the card and lets [bodyRect] place them.
+     */
     fun render(
         batch: SpriteBatch,
         camera: Camera,
         bodyRect: Rect,
+        viewport: Rect,
+        contentHeight: Float,
         scrollY: Float,
         pointerWorldX: Float = Float.NaN,
         pointerWorldY: Float = Float.NaN,
@@ -133,10 +140,10 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
         val model = bodyFor(view, draft, bodyRect.width)
         val m = model.m
         body.layout(
-            bodyRect.left, bodyRect.bottom, bodyRect.width, bodyRect.height, model.rows.height, scrollY,
+            viewport.left, viewport.bottom, viewport.width, viewport.height, contentHeight, scrollY,
         )
 
-        val placed = model.rows.place(body.contentTop)
+        val placed = model.rows.place(bodyRect.top + body.scrollY)
         // One gutter, shared with Live and with the tab strip: the shell sized
         // [bodyRect] to the strip's measure, so taking it verbatim is what makes
         // every band here line up with the tabs above it.

@@ -262,11 +262,17 @@ class LiveTabPanel : Disposable, GestureSurface<HubVerdict> {
         pressScrollStart = 0f
     }
 
-    /** Paints the body into [bodyRect]; the offset is the owner's. */
+    /**
+     * Paints the body into [viewport], the card's inner box. The whole card
+     * scrolls, so this panel owns only the rows below the strip; it clips them to
+     * the card and lets [bodyRect] place them.
+     */
     fun render(
         batch: SpriteBatch,
         camera: Camera,
         bodyRect: Rect,
+        viewport: Rect,
+        contentHeight: Float,
         scrollY: Float,
         pointerWorldX: Float = Float.NaN,
         pointerWorldY: Float = Float.NaN,
@@ -288,16 +294,16 @@ class LiveTabPanel : Disposable, GestureSurface<HubVerdict> {
         val model = bodyFor(view, bodyRect.width)
         val m = model.m
         body.layout(
-            bodyRect.left,
-            bodyRect.bottom,
-            bodyRect.width,
-            bodyRect.height,
-            model.rows.height,
+            viewport.left,
+            viewport.bottom,
+            viewport.width,
+            viewport.height,
+            contentHeight,
             scrollY,
         )
 
         val geo = lobbyGeometry(bodyRect)
-        val rowPlaced = model.rows.place(body.contentTop)
+        val rowPlaced = model.rows.place(bodyRect.top + body.scrollY)
         for ((row, top) in rowPlaced) registerRegions(row, top, geo)
 
         fun hovered(rect: Rect?): Boolean =
