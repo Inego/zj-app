@@ -5,9 +5,10 @@ import com.badlogic.gdx.Preferences
 
 /**
  * [StateBackend] over libGDX [Preferences]: each blob is stored as lowercase hex
- * under its namespaced name. Uniform across desktop, Android, and web
- * (`localStorage`), so persisted state survives a restart, process death, or a
- * page reload.
+ * under its namespaced name. Used on desktop and Android, where it survives a
+ * restart and process death. The browser installs a live per-key `localStorage`
+ * backend instead ([PlatformStateBackend]): this one's web implementation keeps
+ * the whole container in a per-tab map, which two tabs cannot share.
  *
  * [put] and [remove] stage into the editor and are not flushed; callers batch
  * durability through [DefaultStateStore.flush]. On Android the editor is not the
@@ -44,14 +45,14 @@ class PreferencesStateBackend(
         if (pending.containsKey(name)) return pending[name]?.copyOf()
         val prefs = prefs() ?: return null
         if (!prefs.contains(name)) return null
-        return decodeHex(prefs.getString(name, ""))
+        return HexCodec.decode(prefs.getString(name, ""))
     }
 
     override fun put(name: String, value: ByteArray) {
         val prefs = prefs() ?: return
         val copy = value.copyOf()
         pending[name] = copy
-        prefs.putString(name, encodeHex(copy))
+        prefs.putString(name, HexCodec.encode(copy))
     }
 
     override fun remove(name: String) {
@@ -84,34 +85,5 @@ class PreferencesStateBackend(
          * would silently fail to persist.
          */
         const val STATE_NAME = "zj-state"
-    }
-
-    private fun encodeHex(bytes: ByteArray): String {
-        val digits = "0123456789abcdef"
-        val text = StringBuilder(bytes.size * 2)
-        for (byte in bytes) {
-            val value = byte.toInt() and 0xFF
-            text.append(digits[value ushr 4]).append(digits[value and 0x0F])
-        }
-        return text.toString()
-    }
-
-    private fun decodeHex(text: String): ByteArray? {
-        if (text.length % 2 != 0) return null
-        val bytes = ByteArray(text.length / 2)
-        for (i in bytes.indices) {
-            val hi = hexDigit(text[i * 2])
-            val lo = hexDigit(text[i * 2 + 1])
-            if (hi < 0 || lo < 0) return null
-            bytes[i] = ((hi shl 4) or lo).toByte()
-        }
-        return bytes
-    }
-
-    private fun hexDigit(char: Char): Int = when (char) {
-        in '0'..'9' -> char - '0'
-        in 'a'..'f' -> char - 'a' + 10
-        in 'A'..'F' -> char - 'A' + 10
-        else -> -1
     }
 }

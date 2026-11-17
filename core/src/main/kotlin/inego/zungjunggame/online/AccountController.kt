@@ -19,10 +19,13 @@ import inego.zungjunggame.net.NotificationPrefsClient
 import inego.zungjunggame.net.PresenceClient
 import inego.zungjunggame.net.ShadowRankedAttemptsClient
 import inego.zungjunggame.net.ShadowRankedHandsClient
+import inego.zungjunggame.net.StoredSessionChange
 import inego.zungjunggame.platform.GoogleAuthProvider
+import inego.zungjunggame.platform.LiveSession
 import inego.zungjunggame.platform.PlatformTimeZone
 import inego.zungjunggame.platform.GoogleSignInCancelled
 import inego.zungjunggame.platform.GoogleSignInException
+import inego.zungjunggame.platform.SessionCoordination
 import inego.zungjunggame.state.StateSlot
 
 typealias AuthRefreshRequester = (
@@ -175,6 +178,13 @@ class AccountController(
     private val startingLevelRequester: StartingLevelRequester = { token, level, done ->
         AuthApi.setStartingLevel(token, level, done)
     },
+    /**
+     * The browser's origin-wide refresh lock and foreign-write watch. Desktop
+     * and Android have one client per store, so the default calls straight
+     * through; the web launcher installs the `navigator.locks` one, which is
+     * what keeps two tabs of one origin from presenting the same token.
+     */
+    private val sessionCoordination: SessionCoordination = SessionCoordination.create(),
     /** Users whose first-login prompt this install has already answered. */
     private val firstLoginPrompts: StateSlot<Set<String>>,
 ) {
@@ -264,6 +274,31 @@ class AccountController(
      */
     private var retriedUnderToken: String? = null
 
+    /**
+     * True from the moment this tab starts acquiring the cross-tab refresh lock
+     * until it releases it. The frame loop asks for a refresh repeatedly; this
+     * is what stops a second acquisition queueing behind the first.
+     */
+    private var refreshLockHeld = false
+
+    /**
+     * The stored refresh token the in-flight rotation presented, or null when
+     * none is in flight. [AuthSession.applyRefreshed] compares it with the store
+     * so a result that lost a race with another writer is dropped, not applied.
+     */
+    private var presentedRefreshToken: String? = null
+
+    /**
+     * The access JWT another tab minted when it rotated the shared token, or
+     * null when none was announced.
+     *
+     * A rotation consumes the session row every sibling's JWT names, so the
+     * winner hands its JWT over and a sibling keeps heartbeating under it
+     * rather than exchanging the token it just adopted. Only the announcement
+     * that matches the stored refresh token is used; a stale one is ignored.
+     */
+    private var liveSession: LiveSession? = null
+
     var lifecycle: AuthLifecycle = AuthLifecycle.SignedOut
         private set
 
@@ -306,6 +341,12 @@ class AccountController(
         noticeList?.onUnauthorized = ::onUnauthorized
         notificationPrefs?.onUnauthorized = ::onUnauthorized
         LocaleBus.addListener(localeListener)
+        // Another tab rotated the token, signed out, or signed in as a different
+        // account: follow the store instead of presenting a stale credential.
+        sessionCoordination.watchForeignSessionChanges { onStoredSessionChanged() }
+        // And the tab that rotated hands over the access JWT that belongs to the
+        // token it wrote, so this one does not exchange that token in turn.
+        sessionCoordination.watchLiveSessions(::onLiveSession)
     }
 
     val isSignedIn: Boolean get() = authSession.isSignedIn
@@ -565,6 +606,9 @@ class AccountController(
         lifecycle = AuthLifecycle.SignedOut
         refreshRetryAtMs = null
         retriedUnderToken = null
+        refreshLockHeld = false
+        presentedRefreshToken = null
+        liveSession = null
         googleSignInStep = GoogleSignInStep.Idle
         specialKeyInFlight = false
         awaitingFirstLoginAlias = false
@@ -655,10 +699,32 @@ class AccountController(
      * so a Sign-in-to-play state can replace the signed-in card in place.
      */
     fun expireSession(hidePresence: Boolean = true) {
+        dropSession(hidePresence = hidePresence, dropStored = true)
+    }
+
+    /**
+     * Another tab signed in as a different account: this tab leaves the session
+     * but does **not** touch the shared store, which holds that account's login.
+     * The player can sign in again here, which adopts the store as their own.
+     */
+    private fun abandonForeignSession() {
+        logLifecycle?.invoke("session store belongs to another account → dropping this tab's session")
+        dropSession(hidePresence = true, dropStored = false)
+    }
+
+    /**
+     * @param dropStored true for an expiry or explicit sign-out, which remove
+     *   `auth.session` for every tab; false when the store belongs to another
+     *   account and this tab is only leaving its own memory of it.
+     */
+    private fun dropSession(hidePresence: Boolean, dropStored: Boolean) {
         bumpAuth()
         googleAuth.cancel()
         refreshRetryAtMs = null
         retriedUnderToken = null
+        refreshLockHeld = false
+        presentedRefreshToken = null
+        liveSession = null
         lifecycle = AuthLifecycle.SignedOut
         googleSignInStep = GoogleSignInStep.Idle
         specialKeyInFlight = false
@@ -669,7 +735,7 @@ class AccountController(
         shadowRankedHands?.clear()
         noticeList?.clear()
         notificationPrefs?.clear()
-        authSession.signOut()
+        if (dropStored) authSession.signOut() else authSession.forget()
         view.hideFirstLoginAlias()
         view.hideSpecialKey()
         view.cancelAliasEdit()
@@ -678,6 +744,58 @@ class AccountController(
         // would no-op behind a context no session can adopt and leave it stranded up.
         onSessionDropped()
         if (hidePresence) view.hidePresence()
+    }
+
+    /**
+     * React to a write another tab made to `auth.session`.
+     *
+     * A rotation only updates this tab's refresh token; the access JWT it holds
+     * names a row the rotation consumed, so the winner's announced JWT replaces
+     * it (see [onLiveSession]). A removal is a sign-out the player performed
+     * elsewhere and ends this tab's session too, and the tab stops following
+     * the key: a sign-in another tab performs afterwards does not sign it back
+     * in. A different account means this tab must leave the store alone and
+     * land signed out.
+     */
+    private fun onStoredSessionChanged() {
+        when (authSession.reloadStored()) {
+            StoredSessionChange.Unchanged -> Unit
+            StoredSessionChange.Rotated -> {
+                // The winner may already have announced the JWT for the token just
+                // adopted: take it now, so the heartbeat never 401s under the old
+                // one. Otherwise a boot restore with no access token yet has to
+                // exchange the adopted token; a live tab keeps the JWT it holds.
+                val live = liveSession
+                if (live != null && authSession.adoptLiveAccess(live)) {
+                    settleLiveAccess(live)
+                } else if (authSession.token == null && !authSession.refreshToken.isNullOrBlank()) {
+                    refreshRetryAtMs = clock()
+                }
+            }
+            StoredSessionChange.Replaced -> abandonForeignSession()
+            StoredSessionChange.Removed -> {
+                logLifecycle?.invoke("session removed in another tab → signOut")
+                dropSession(hidePresence = true, dropStored = true)
+            }
+        }
+    }
+
+    /**
+     * Take the access JWT another tab minted when it rotated the shared token.
+     *
+     * The announcement is recorded even while this tab is refreshing: the
+     * critical section looks at it after re-reading the store, and if it names
+     * the token there — the one this tab was about to present — the exchange is
+     * skipped. Outside a refresh it is applied at once, because a sibling's
+     * rotation has just invalidated the JWT this tab was using.
+     */
+    private fun onLiveSession(live: LiveSession) {
+        liveSession = live
+        if (lifecycle == AuthLifecycle.Refreshing) return
+        // A repeated announcement changes nothing; only a token this tab is not
+        // already holding is worth re-pointing every surface at.
+        if (authSession.token == live.accessToken) return
+        if (authSession.adoptLiveAccess(live)) settleLiveAccess(live)
     }
 
     /**
@@ -709,6 +827,20 @@ class AccountController(
         }
     }
 
+    /**
+     * Exchange the stored refresh token for a new session, under the platform's
+     * cross-tab lock when it has one.
+     *
+     * The critical section is **read the store → exchange → write the result**
+     * and it must not be interrupted: the token presented has to be the token
+     * the store holds at that moment, and the result has to be written before
+     * another tab may read. A tab that waited out another tab's rotation adopts
+     * the newer token here and has nothing to race; a tab that signed out or
+     * signed in during the wait is caught by the generation guard and leaves the
+     * lock untouched. When the winner also announced the access JWT that goes
+     * with the token it wrote, the tab takes it and releases without an
+     * exchange of its own.
+     */
     private fun beginRefresh() {
         val refresh = authSession.refreshToken
         if (refresh.isNullOrBlank()) {
@@ -728,10 +860,73 @@ class AccountController(
             refreshGate.request(refresh) { result -> onRefreshResult(result) }
             return
         }
-        logLifecycle?.invoke("refresh: presenting token=${AuthSession.tokenId(refresh)}")
+        if (refreshLockHeld) return
+        refreshLockHeld = true
         lifecycle = AuthLifecycle.Refreshing
-        refreshGeneration = bumpAuth()
-        refreshGate.request(refresh) { result -> onRefreshResult(result) }
+        val generation = bumpAuth()
+        refreshGeneration = generation
+        sessionCoordination.withRefreshLock { release ->
+            // A sign-in, log-out or expiry while this tab waited invalidates the
+            // attempt; that event owns the session now. The generation is the one
+            // this acquisition captured, not the field: the field may already
+            // belong to a newer attempt.
+            if (generation != authGeneration || lifecycle != AuthLifecycle.Refreshing) {
+                refreshLockHeld = false
+                release()
+                return@withRefreshLock
+            }
+            when (authSession.reloadStored()) {
+                StoredSessionChange.Removed -> {
+                    refreshLockHeld = false
+                    release()
+                    logLifecycle?.invoke("refresh: session removed by another tab → signOut")
+                    expireSession(hidePresence = true)
+                    return@withRefreshLock
+                }
+                StoredSessionChange.Replaced -> {
+                    refreshLockHeld = false
+                    release()
+                    abandonForeignSession()
+                    return@withRefreshLock
+                }
+                StoredSessionChange.Rotated,
+                StoredSessionChange.Unchanged,
+                -> Unit
+            }
+            // The store may already hold a token the other tab just rotated to,
+            // and that tab handed over the JWT it received. Presenting the token
+            // again would consume the row it created and refuse every sibling's
+            // token: a rotation per heartbeat, forever. The announcement is the
+            // answer, so leave the lock without exchanging.
+            val live = liveSession
+            if (live != null && authSession.adoptLiveAccess(live)) {
+                refreshLockHeld = false
+                release()
+                logLifecycle?.invoke("refresh: took live access from another tab → no exchange")
+                settleLiveAccess(live)
+                return@withRefreshLock
+            }
+            val presented = authSession.refreshToken
+            if (presented.isNullOrBlank()) {
+                refreshLockHeld = false
+                release()
+                expireSession()
+                return@withRefreshLock
+            }
+            logLifecycle?.invoke("refresh: presenting token=${AuthSession.tokenId(presented)}")
+            presentedRefreshToken = presented
+            refreshGate.request(presented) { result ->
+                try {
+                    onRefreshResult(result)
+                } finally {
+                    // The result has been written (or refused) by now, so the
+                    // store may be read by the next tab.
+                    refreshLockHeld = false
+                    presentedRefreshToken = null
+                    release()
+                }
+            }
+        }
     }
 
     private fun onRefreshResult(result: Result<AuthLogin>) {
@@ -739,12 +934,13 @@ class AccountController(
         if (lifecycle != AuthLifecycle.Refreshing) return
         result.fold(
             onSuccess = { signed ->
-                applyRefreshedSession(signed)
-                if (!awaitingFirstLoginAlias) {
-                    presenceClient.requestNow()
-                    refreshAccountSurfaces()
+                if (applyRefreshedSession(signed)) {
+                    if (!awaitingFirstLoginAlias) {
+                        presenceClient.requestNow()
+                        refreshAccountSurfaces()
+                    }
+                    logLifecycle?.invoke("refresh ok user=${signed.user.id}")
                 }
-                logLifecycle?.invoke("refresh ok user=${signed.user.id}")
             },
             onFailure = { error ->
                 val cause = error.message ?: error::class.java.simpleName
@@ -1103,12 +1299,58 @@ class AccountController(
         presenceClient.start(token)
     }
 
-    /** Apply a rotated session. Keep a live presence loop in place. */
-    private fun applyRefreshedSession(signed: AuthLogin) {
+    /**
+     * Apply a rotated session, or converge on the store when the result lost a
+     * race with another writer. Keep a live presence loop in place.
+     *
+     * The rotation is also announced to the origin's other tabs with the access
+     * JWT it received: they adopted that token and their own JWT is now spent.
+     *
+     * @return true when the rotation landed; the caller may then treat the
+     *   session as established.
+     */
+    private fun applyRefreshedSession(signed: AuthLogin): Boolean {
+        val presented = presentedRefreshToken
+        presentedRefreshToken = null
+        if (presented == null || !authSession.applyRefreshed(signed, presented)) {
+            settleSupersededRefresh()
+            return false
+        }
+        val refreshToken = signed.refreshToken
+        if (!refreshToken.isNullOrBlank()) {
+            sessionCoordination.publishLiveSession(
+                LiveSession(refreshToken, signed.token, signed.user.id),
+            )
+        }
+        settleAccessToken(signed.token)
+        return true
+    }
+
+    /**
+     * Adopt the access JWT another tab announced for the rotation it wrote.
+     *
+     * Nothing is exchanged and nothing is written: the store already holds that
+     * refresh token. Only the surfaces follow the new credential — including the
+     * heartbeat that was refused under the JWT the rotation invalidated.
+     */
+    private fun settleLiveAccess(live: LiveSession) {
+        settleAccessToken(live.accessToken)
+        if (awaitingFirstLoginAlias) return
+        presenceClient.requestNow()
+        refreshAccountSurfaces()
+    }
+
+    /**
+     * Make [token] the live access JWT and re-point everything already up.
+     *
+     * The attempts and hand tables were loaded under the previous token, and
+     * whatever a restored card shows was fetched without the new one. The same
+     * tail serves a rotation this tab performed and a JWT a sibling handed over:
+     * both mean the session is live again under this token.
+     */
+    private fun settleAccessToken(token: String) {
         refreshRetryAtMs = null
         retriedUnderToken = null
-        authSession.applyRefreshed(signed)
-        val token = signed.token
         // A rotated token is what the attempts list loads under: the card may be
         // up while a refresh lands, and nothing else repopulates it.
         shadowRankedAttempts?.load(token)
@@ -1128,6 +1370,24 @@ class AccountController(
         } else {
             presenceClient.start(token)
         }
+    }
+
+    /**
+     * The store moved while this tab was rotating — another tab signed in or out,
+     * or a lockless sibling exchange won the write. Follow the store: adopt its
+     * token, or end the session it says was ended. A boot that adopted a token but
+     * still has no access JWT schedules one more exchange; a live tab keeps the
+     * JWT it already holds.
+     */
+    private fun settleSupersededRefresh() {
+        onStoredSessionChanged()
+        if (lifecycle != AuthLifecycle.Refreshing) return
+        if (authSession.refreshToken.isNullOrBlank()) {
+            expireSession()
+            return
+        }
+        lifecycle = if (authSession.isSignedIn) AuthLifecycle.SignedIn else AuthLifecycle.SignedOut
+        if (authSession.token == null) refreshRetryAtMs = clock()
     }
 
     private fun bumpAuth(): Int {

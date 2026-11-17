@@ -19,7 +19,7 @@ import inego.zungjunggame.platform.ColdStartGate
 import inego.zungjunggame.render.TableFelt
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.state.DefaultStateStore
-import inego.zungjunggame.state.PreferencesStateBackend
+import inego.zungjunggame.state.PlatformStateBackend
 import inego.zungjunggame.ui.Scope
 
 /**
@@ -145,8 +145,7 @@ class Main : ApplicationAdapter() {
 
     private fun readPersistedLocale(): AppLocale {
         return try {
-            val statePrefs = PreferencesStateBackend(PreferencesStateBackend.STATE_NAME)
-            val store = DefaultStateStore(statePrefs)
+            val store = DefaultStateStore(PlatformStateBackend.create())
             val seeded = !store.contains(AppLocaleKey)
             val locale = store.resolveStartupLocale()
             BootDiagnostics.mark(

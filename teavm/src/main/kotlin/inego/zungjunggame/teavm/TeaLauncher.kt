@@ -11,16 +11,26 @@ import inego.zungjunggame.Main
 import inego.zungjunggame.app.DeepLink
 import inego.zungjunggame.i18n.LanguagePack
 import inego.zungjunggame.i18n.PlatformLanguages
+import inego.zungjunggame.persist.AuthPersistedSessionKey
 import inego.zungjunggame.platform.PlatformTimeZone
 import inego.zungjunggame.input.InputProfile
 import inego.zungjunggame.net.ApiConfig
 import inego.zungjunggame.platform.GoogleAuthProvider
 import inego.zungjunggame.platform.OverlayClipboard
+import inego.zungjunggame.platform.SessionCoordination
 import inego.zungjunggame.platform.WebSocketClient
+import inego.zungjunggame.state.PlatformStateBackend
+import inego.zungjunggame.state.PreferencesStateBackend
 
 /** Launches the Web (TeaVM) application. */
 class TeaLauncher {
     companion object {
+        /**
+         * `localStorage` namespace libGDX's preferences and the per-key state
+         * backend share. Changing it abandons every stored session and setting.
+         */
+        private const val STORAGE_PREFIX = "zj_game"
+
         @JvmStatic
         fun main(args: Array<String>) {
             ApiConfig.baseUrl = NativeApiConfig.resolveApiBase(ApiConfig.DEFAULT_BASE_URL)
@@ -36,7 +46,7 @@ class TeaLauncher {
                 useGL30 = true
                 antialiasing = true
                 usePhysicalPixels = true
-                storagePrefix = "zj_game"
+                storagePrefix = STORAGE_PREFIX
                 showDownloadLogs = false
                 // gdx-freetype-web is old-style Emscripten (`var Module=...` in scripts/freetype.js).
                 // Pixmap uses window.Gdx from gdx.wasm.js; FreeType JNI glue needs this script.
@@ -63,6 +73,24 @@ class TeaLauncher {
             WebSocketClient.factory = { TeaWebSocketClient() }
             GoogleAuthProvider.factory = { WasmGoogleAuthProvider() }
             OverlayClipboard.factory = { WasmOverlayClipboard.shared }
+            // One live localStorage key per state key. libGDX's WebPreferences
+            // caches the whole container per tab and rewrites every key on flush,
+            // so two tabs would overwrite each other's writes — and the refresh
+            // token is written by whichever tab is rotating.
+            PlatformStateBackend.factory = {
+                WasmStateBackend(STORAGE_PREFIX, PreferencesStateBackend.STATE_NAME)
+            }
+            // The origin-wide refresh lock, plus the wake-up when another tab
+            // rotates the token, signs out, or signs in as a different account.
+            SessionCoordination.factory = {
+                WasmSessionCoordination(
+                    webStateStorageKey(
+                        STORAGE_PREFIX,
+                        PreferencesStateBackend.STATE_NAME,
+                        AuthPersistedSessionKey.fullName,
+                    ),
+                )
+            }
             // navigator.languages. TeaVM Locale.getDefault is not the browser,
             // and the preload listener resolves ui.locale before Main starts.
             PlatformLanguages.provider = {

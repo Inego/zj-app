@@ -67,6 +67,16 @@ A Java exception thrown inside that fiber (for example
 `preloadManifest` rejecting a manifest line that is not five colon-separated
 tokens) also escapes `step`. It will not show up as `Fatal Error`.
 
+**`@JSBody` re-emitted by the Wasm backend.** A bridge body must be a plain
+statement list. TeaVM parses it and prints it again, and that printer drops the
+grouping parentheses of an immediately-invoked function expression:
+`(function() { ... })();` reaches the browser as `function() { ... }();`, and the
+module dies before `Main` with `SyntaxError: Function statements require a
+function name` from `new Function` inside `teavm@initializer`. The stack points
+at `jsoImports` in `app.wasm-runtime.js`, not at the bridge, and the app logs
+nothing. Write statements, and declare helpers with `function name() {}`: the
+body is already a function, so declarations and `return` are legal there.
+
 ## What to read off the console
 
 | Console | Where startup stopped |

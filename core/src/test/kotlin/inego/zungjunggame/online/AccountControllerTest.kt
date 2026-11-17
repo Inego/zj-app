@@ -308,34 +308,6 @@ class AccountControllerTest {
     }
 
     @Test
-    fun restoreSessionRefreshesWhenOnlyRefreshTokenIsPresent() {
-        val auth = testAuth()
-        auth.applyPersisted("ref-1", testUser())
-        val presence = createPresenceClient()
-        val view = FakeAccountView()
-        var sentRefresh: String? = null
-        val controller = AccountController(
-            firstLoginPrompts = firstLoginPromptsSlot(),
-            authSession = auth,
-            presenceClient = presence,
-            view = view,
-            profileRequester = { _, _ -> },
-            refreshRequester = { token, done ->
-                sentRefresh = token
-                done(Result.success(AuthLogin("access-2", testUser(), "ref-2")))
-            },
-        )
-
-        controller.restoreSession()
-
-        assertEquals("ref-1", sentRefresh)
-        assertEquals("access-2", controller.token)
-        assertEquals("ref-2", auth.refreshToken)
-        assertEquals(AuthLifecycle.SignedIn, controller.lifecycle)
-        assertTrue(presence.signedIn)
-    }
-
-    @Test
     fun restoreSessionRotatesStoredSessionOnReload() {
         val slot = authSlot()
         AuthSession(slot).signIn(AuthLogin("access-1", testUser(), "ref-1"))

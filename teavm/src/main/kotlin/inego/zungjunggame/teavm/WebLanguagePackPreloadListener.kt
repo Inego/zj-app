@@ -6,7 +6,7 @@ import inego.zungjunggame.i18n.AppLocale
 import inego.zungjunggame.i18n.LanguagePack
 import inego.zungjunggame.persist.resolveStartupLocale
 import inego.zungjunggame.state.DefaultStateStore
-import inego.zungjunggame.state.PreferencesStateBackend
+import inego.zungjunggame.state.PlatformStateBackend
 
 /**
  * The gdx-teavm preload screen, held up until the persisted language's pack is
@@ -51,7 +51,7 @@ class WebLanguagePackPreloadListener : WebPreloadApplicationListener() {
     }
 
     private fun readPersistedTag(): String = try {
-        val store = DefaultStateStore(PreferencesStateBackend(PreferencesStateBackend.STATE_NAME))
+        val store = DefaultStateStore(PlatformStateBackend.create())
         store.resolveStartupLocale().tag
     } catch (_: Throwable) {
         AppLocale.DEFAULT.tag

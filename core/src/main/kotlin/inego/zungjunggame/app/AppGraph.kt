@@ -139,7 +139,7 @@ import inego.zungjunggame.session.table.TableViewState
 import inego.zungjunggame.state.DefaultStateStore
 import inego.zungjunggame.state.FileStateBackend
 import inego.zungjunggame.state.PlatformSecretBox
-import inego.zungjunggame.state.PreferencesStateBackend
+import inego.zungjunggame.state.PlatformStateBackend
 import inego.zungjunggame.state.StateSlot
 import inego.zungjunggame.state.StateStore
 import inego.zungjunggame.tutorial.TutorialDirector
@@ -258,9 +258,11 @@ class AppGraph(
         // name: on desktop the first is a file at the same depth as the second,
         // and one path cannot be both.
         val secretBox = PlatformSecretBox.create()
-        val statePrefs = PreferencesStateBackend(PreferencesStateBackend.STATE_NAME)
+        // The browser installs a live per-key backend here; every other platform
+        // uses the libGDX preferences container (see [PlatformStateBackend]).
+        val stateBackend = PlatformStateBackend.create()
         val stateFilePath = FileStateBackend(FileStateBackend.STATE_DIR)
-        val stateStore: StateStore = DefaultStateStore(statePrefs, secretBox = secretBox)
+        val stateStore: StateStore = DefaultStateStore(stateBackend, secretBox = secretBox)
         val stateFiles: StateStore = DefaultStateStore(stateFilePath)
         val state = AppStateSource(
             stack = StateSlot(stateStore, StackStateKey),

@@ -7,6 +7,11 @@ package inego.zungjunggame.net
  * server, so overlapping 401s register here instead of sending again: the first
  * [request] starts the send, and every later one joins it. Each waiter — the
  * starter and each joiner — receives that one send's result.
+ *
+ * This is the **in-tab** half. Another tab of the browser is a separate JS
+ * context with its own gate; the origin-wide half is
+ * [inego.zungjunggame.platform.SessionCoordination], which serializes the
+ * read-exchange-write section across tabs.
  */
 class AuthRefreshGate(
     private val send: (

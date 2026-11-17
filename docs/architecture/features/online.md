@@ -40,7 +40,18 @@ are in [sessions.md](../sessions.md); route mechanics are in [stack.md](../stack
   rotated token; log-out and expiry clear it. Concurrent 401s from different
   surfaces join the one `AuthRefreshGate` refresh (`onUnauthorized` starts it or
   joins it) instead of each sending — or late ones returning early — so they share
-  one rotated session and one reload. A 401 carries the credential that was
+  one rotated session and one reload. `AuthRefreshGate` is the **in-tab** half:
+  tabs of one origin share `auth.session`, so the exchange also takes the
+  origin-wide refresh lock (`SessionCoordination`). Inside it the tab re-reads the
+  key, presents the token it found, and writes the result before releasing; a tab
+  that waited adopts the rotation instead of presenting the token it remembers. The
+  tab that rotated also announces the access JWT that came with it (a same-origin
+  `BroadcastChannel`, memory-only), so the adopter keeps working under that JWT
+  instead of exchanging the newly stored token in turn. A
+  result that would overwrite a key another tab changed (a sign-in or sign-out
+  bypasses the lock) is dropped and the tab follows the store — see
+  [state and persistence](../state-and-persistence.md).
+  A 401 carries the credential that was
   refused: when it is **not** the token now held, the request merely outlived the
   rotation that replaced it, so `onUnauthorized` re-reads the up surfaces under the
   held token (once per token) instead of consuming a second refresh token —

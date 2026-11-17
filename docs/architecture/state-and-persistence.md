@@ -22,12 +22,20 @@ the key's default applies. `StateSlot(store, key)` is the narrow accessor handed
 that owns a value. A migration step must emit the **next** version's layout, not the current
 one.
 
-Two backends ship, and **the containers must not share a name**:
+The backends, and **the containers must not share a name**:
 
 - `PreferencesStateBackend` — libGDX `Preferences`, container `zj-state`, for the small keys.
 - `FileStateBackend` — byte-blob files in the keyed folder `zj-files` (`session.freeplay`,
   `session.tutorial`); `DesktopFileStateBackend` is plain `java.io` over the same folder
   because the desktop launcher reads the window geometry before `Gdx.files` exists.
+- On the web `WasmStateBackend` replaces the preferences container with **one live
+  `localStorage` key per state key** (`pref:zj_game:zj-state:<name>s`, the layout
+  `WebPreferences` used, so an existing save survives). libGDX's web preferences are a
+  **per-tab snapshot**: the constructor loads the whole container into a map, reads never
+  look at `localStorage` again, and `flush()` deletes and rewrites every key from that
+  snapshot — two tabs would neither observe each other's writes nor preserve them. The
+  backend is selected through `PlatformStateBackend.factory`, which the web launcher
+  installs before the preload screen resolves the locale.
 - On desktop the launcher's `DesktopDataDir` owns the root (`~/.zj-app`, or the
   `--data-dir` / `-Dzj.dataDir` override) and hands it to every desktop consumer: the log,
   the crash flags, the window store, the libGDX preferences directory, and the core
@@ -44,7 +52,9 @@ Two backends ship, and **the containers must not share a name**:
   can simply write it again is batched this way.
 - **Committed.** A `StateKey.secret` value is durable before its write returns
   (`StateStore.commit`): the store seals it, publishes it to the container, and reads the
-  bytes back. The reason is the event that produces the value, not tidiness. The server
+  bytes back from the live container — the browser's `localStorage`, the desktop/Android
+  preferences map after `flush()`. The reason is the event that produces the value, not
+  tidiness. The server
   consumes a refresh token the moment it answers, so a rotation still sitting in backend
   memory is a credential the next boot presents already burned — and a token two rotations
   behind is what the server reads as reuse, which revokes the whole family and forces a
@@ -54,6 +64,35 @@ Two backends ship, and **the containers must not share a name**:
   A desktop run is therefore still signed in after a kill (`taskkill /F`, an IDE Stop), which
   is exactly the case the batched policy never covered. It is not `fsync`-durable: the bytes
   reach the OS page cache, not the platter.
+
+**One session, several tabs.** The browser shares `auth.session` across every tab of the
+origin, but each tab holds its own `AuthSession` in memory. A rotation is therefore a
+critical section over the shared key: `SessionCoordination.withRefreshLock` takes an
+origin-wide `navigator.locks` lock (installed by the web launcher), and inside it the
+controller re-reads the key (`AuthSession.reloadStored`), presents the token it found, and
+writes the result before releasing. A tab that waited out another tab's rotation presents
+the newer token instead of replaying the one it remembers; a tab that signed out or signed
+in during the wait is caught by the generation guard. A result that would overwrite a key
+another tab changed is **dropped** and the tab follows the store
+(`AuthSession.applyRefreshed` compares the presented token), never merged — and never
+revoked, because the only other writer is a legitimate sibling rotation. A `storage`
+event, a visibility change, and a bfcache `pageshow` poke the other tabs to re-read. The
+rotation also consumes the session row every sibling's access JWT names, so the tab that
+wrote it announces the JWT it received over a same-origin `BroadcastChannel`
+(`SessionCoordination.publishLiveSession`); a sibling that adopts that refresh token takes
+the announced JWT and keeps heartbeating instead of exchanging the token again. Without
+that handoff two visible tabs consume each other's tokens once per heartbeat. Nothing new
+is stored: the access JWT stays memory-only and crosses only between same-origin tabs. A
+hidden tab runs the section unlocked: its frame loop is paused, so the callback that would
+release the lock cannot run until the tab is visible again, and the reload plus
+compare-and-swap make the unlocked exchange a sibling, which the server recovers from,
+rather than a replay.
+
+A tab that signs out — or follows another tab's sign-out — also gives up the key: a
+sign-in another tab performs afterwards does not sign it back in, so that tab stays on the
+signed-out landing until the player signs in there or the page is reloaded. And a sign-out
+that lands after another account took the key leaves that account's session alone instead
+of deleting it.
 
 | Key | Holds |
 |---|---|

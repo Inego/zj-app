@@ -170,7 +170,6 @@ public final class NativeGis {
                     },
                     auto_select: false,
                     cancel_on_tap_outside: true,
-                    use_fedcm_for_prompt: true,
                     use_fedcm_for_button: true,
                     ux_mode: 'popup',
                     context: 'signin'
@@ -194,10 +193,13 @@ public final class NativeGis {
                   onError('button_failed');
                   return;
                 }
-                // One Tap / FedCM prompt is best-effort. Do not pass a moment
-                // listener: isNotDisplayed / getNotDisplayedReason are removed
-                // under mandatory FedCM. HTTPS is already gated in Kotlin.
-                try { google.accounts.id.prompt(); } catch (e3) {}
+                // No google.accounts.id.prompt(): the overlay already shows
+                // Google's button, and One Tap would put a second, passive
+                // chooser over it. On FedCM that call also costs a /gsi/status
+                // request, the "nonce belongs in params" deprecation warning,
+                // and an AbortError when cancel() tears it down after the
+                // credential arrives. The button drives sign-in, actively under
+                // FedCM where the browser supports it.
               }
             };
             """)

@@ -2,6 +2,7 @@ package inego.zungjunggame.input
 
 import com.badlogic.gdx.Application
 import com.badlogic.gdx.Gdx
+import kotlin.random.Random
 
 /**
  * Android-only diagnostics (Honor often hides app logcat).
@@ -17,13 +18,30 @@ object TouchDiagnostics {
     private const val TOUCH_LOG = "ZjTouch"
     private const val TOUCH_LOG_FILE = "zj_touch.log"
 
+    /**
+     * Names this runtime and orders its lines.
+     *
+     * A Wasm build runs once per browser tab, and two tabs write the same
+     * `ZjTouch:` prefix into two consoles that look identical when pasted. The
+     * tag tells the tabs apart; the counter tells a reader whether a line was
+     * written now or was already in the scrollback.
+     *
+     * Seeded explicitly: TeaVM's Wasm backend has no
+     * `java.util.concurrent.ThreadLocalRandom`, and the unseeded
+     * `Random.Default` is what reaches for it. A seeded [Random] is pure Kotlin.
+     */
+    private val contextTag: String =
+        Random(System.nanoTime()).nextInt(0x1000000).toString(16).padStart(6, '0')
+    private var sequence = 0
+
     fun log(message: String) {
         val app = Gdx.app ?: return
-        app.log(TOUCH_LOG, message)
+        val tagged = "[$contextTag ${++sequence}] $message"
+        app.log(TOUCH_LOG, tagged)
         // File mirror is Android-only — Gdx.files.local would land under assets/ on desktop.
         if (app.type != Application.ApplicationType.Android) return
         try {
-            val line = "${System.currentTimeMillis()} $message\n"
+            val line = "${System.currentTimeMillis()} $tagged\n"
             Gdx.files?.local(TOUCH_LOG_FILE)?.writeString(line, /* append = */ true)
         } catch (_: Exception) {
             // Never let diagnostics break gameplay.
