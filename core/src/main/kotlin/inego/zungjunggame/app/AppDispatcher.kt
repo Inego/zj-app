@@ -107,6 +107,8 @@ class AppDispatcher(
             Intent.StartShadowRanked -> online.shadowRankedStart()
             Intent.CancelShadowRankedStart -> online.shadowRankedCancelStart()
             Intent.RetryShadowRankedStart -> online.shadowRankedRetryStart()
+            is Intent.SetShadowRankedRounds -> online.setShadowRankedRounds(intent.rounds)
+            Intent.ToggleShadowRankedChicken -> online.toggleShadowRankedChicken()
             Intent.RefreshShadowRankedAttempts -> online.shadowRankedRefreshAttempts()
             Intent.ViewShadowRankedAttempts -> online.viewShadowRankedAttempts()
             Intent.LoadMoreShadowRankedAttempts -> online.loadMoreShadowRankedAttempts()

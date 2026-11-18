@@ -130,6 +130,12 @@ sealed interface Intent {
     /** Retry a failed Shadow Ranked start with the remembered draft. */
     data object RetryShadowRankedStart : Intent
 
+    /** Set the draft's rounds (1 or 2); stores it and refreshes the pool count. */
+    data class SetShadowRankedRounds(val rounds: Int) : Intent
+
+    /** Flip the draft's chicken toggle; stores it and refreshes the pool count. */
+    data object ToggleShadowRankedChicken : Intent
+
     /** Reload the signed-in account's Shadow Ranked attempts. */
     data object RefreshShadowRankedAttempts : Intent
 

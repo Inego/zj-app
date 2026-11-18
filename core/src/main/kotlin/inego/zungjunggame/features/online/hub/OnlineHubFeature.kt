@@ -65,8 +65,9 @@ object OnlineHubFeature {
  *
  * The tab strip selects a tab, the close button and back leave the hub, the live
  * body's controls reuse the live intents, and the Shadow Ranked controls drive
- * the start lifecycle. The draft edits are not here: they are the route's own
- * state and the component writes them back through [inego.zungjunggame.ui.RouteUiActions].
+ * the start lifecycle and the draft. The draft edits are global commands rather
+ * than route-state writes resolved here: the effect that stores the new draft
+ * also refreshes the pool count keyed by it.
  */
 object OnlineHubActions : RouteActions {
     // Shell: the tabs and the close button.
@@ -121,6 +122,15 @@ object OnlineHubActions : RouteActions {
     const val VIEW_ATTEMPTS = "onlineHub.shadowRanked.viewAttempts"
 
     /**
+     * The two draft edits. They are global commands because the draft is also the
+     * pool's key: the effect writes the route state **and** refreshes the count,
+     * so a badge can never outlive the draft it was read for.
+     */
+    const val SET_ROUNDS_ONE = "onlineHub.shadowRanked.roundsOne"
+    const val SET_ROUNDS_TWO = "onlineHub.shadowRanked.roundsTwo"
+    const val TOGGLE_CHICKEN = "onlineHub.shadowRanked.toggleChicken"
+
+    /**
      * The description's info control. Stable reference page id (`structure.json`,
      * Rules section); the panel deep-links to it, never an English label.
      */
@@ -160,9 +170,9 @@ object OnlineHubActions : RouteActions {
         HubVerdict.Retry -> ComponentAction(RETRY)
         HubVerdict.ViewAttempts -> ComponentAction(VIEW_ATTEMPTS)
         HubVerdict.ShadowRankedReference -> ComponentAction(VIEW_REFERENCE)
-        // The draft edits are route-state writes the component resolves itself
-        // (see `draftEdit`), not global commands.
-        HubVerdict.SetRoundsOne, HubVerdict.SetRoundsTwo, HubVerdict.ToggleChicken -> null
+        HubVerdict.SetRoundsOne -> ComponentAction(SET_ROUNDS_ONE)
+        HubVerdict.SetRoundsTwo -> ComponentAction(SET_ROUNDS_TWO)
+        HubVerdict.ToggleChicken -> ComponentAction(TOGGLE_CHICKEN)
         HubVerdict.None, is HubVerdict.BodyScroll -> null
     }
 
@@ -186,6 +196,9 @@ object OnlineHubActions : RouteActions {
         START -> Intent.StartShadowRanked
         CANCEL_START -> Intent.CancelShadowRankedStart
         RETRY -> Intent.RetryShadowRankedStart
+        SET_ROUNDS_ONE -> Intent.SetShadowRankedRounds(1)
+        SET_ROUNDS_TWO -> Intent.SetShadowRankedRounds(2)
+        TOGGLE_CHICKEN -> Intent.ToggleShadowRankedChicken
         VIEW_ATTEMPTS -> Intent.ViewShadowRankedAttempts
         VIEW_REFERENCE -> Intent.OpenReference(SHADOW_RANKED_PAGE_ID)
         else -> null

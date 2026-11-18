@@ -2,7 +2,6 @@ package inego.zungjunggame.features.online.hub
 
 import com.badlogic.gdx.graphics.Camera
 import com.badlogic.gdx.graphics.OrthographicCamera
-import inego.zungjunggame.online.DEFAULT_SHADOW_RANKED_DRAFT
 import inego.zungjunggame.ui.Canvas
 import inego.zungjunggame.ui.Component
 import inego.zungjunggame.ui.ComponentAction
@@ -17,25 +16,6 @@ import inego.zungjunggame.ui.StatePort
 import inego.zungjunggame.ui.stack.Route
 import kotlin.math.max
 import kotlin.math.min
-
-/**
- * The draft edits the Shadow Ranked panel reports as [HubVerdict]s.
- *
- * The draft is the hub route's own state, not a global command, so the component
- * writes the whole [OnlineHubState] back through [OnlineHubCodec] exactly as it
- * does a scroll; the feature's `toIntent` never sees these. Null for every other
- * verdict.
- */
-private fun draftEdit(verdict: HubVerdict, current: OnlineHubState): ComponentAction? {
-    val draft = current.draft ?: DEFAULT_SHADOW_RANKED_DRAFT
-    val updated = when (verdict) {
-        HubVerdict.SetRoundsOne -> draft.copy(rounds = 1)
-        HubVerdict.SetRoundsTwo -> draft.copy(rounds = 2)
-        HubVerdict.ToggleChicken -> draft.copy(allowChickenHands = !draft.allowChickenHands)
-        else -> return null
-    }
-    return RouteUiActions.write(OnlineHubCodec, current.copy(draft = updated))
-}
 
 /** The live body's primary action, resolved from [view]'s presence and table. */
 private fun primaryActionFor(view: OnlineHubView): LiveTabPanel.PrimaryAction =
@@ -57,9 +37,11 @@ private fun primaryActionFor(view: OnlineHubView): LiveTabPanel.PrimaryAction =
  * forwards the body's gestures through the [GestureBridge], and hands the route's
  * [OnlineHubState] and the host-built views in every frame.
  *
- * Discrete taps (tabs, close) travel `Layout.hitRegions`; the body's continuous
- * scroll is the panel's own and is emitted as a `routeUi.write` of the whole
- * hub state, so the tab, both scrolls and the draft stay one value.
+ * Discrete taps (tabs, close, the Shadow Ranked draft) travel `Layout.hitRegions`;
+ * the body's continuous scroll is the panel's own and is emitted as a
+ * `routeUi.write` of the whole hub state, so the tab and both scrolls stay one
+ * value. The draft is stored by its effect, not here: changing it also changes
+ * the pool count's key.
  *
  * The card scrolls as one column, so the viewport is the gesture region and a
  * press on a shell control has to be kept out of it ([onGesturePress]) — the
@@ -79,10 +61,9 @@ class OnlineHubComponent(
         surface = { overlay.panelFor((state.read() ?: DEFAULT_ONLINE_HUB_STATE).tab) },
         actionFor = { verdict ->
             val current = state.read() ?: DEFAULT_ONLINE_HUB_STATE
-            draftEdit(verdict, current)
-                ?: verdict.settledScrollOffset?.let { offset ->
-                    RouteUiActions.write(OnlineHubCodec, current.withScroll(current.tab, offset))
-                }
+            verdict.settledScrollOffset?.let { offset ->
+                RouteUiActions.write(OnlineHubCodec, current.withScroll(current.tab, offset))
+            }
                 ?: OnlineHubActions.actionFor(verdict, primaryActionFor(view()))
         },
         scrollActionFor = { offset ->

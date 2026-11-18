@@ -28,6 +28,23 @@ object ChallengeJson {
         )
     }
 
+    /**
+     * Parse `GET /challenges/pool` into the selected draft's two counts.
+     *
+     * A missing or negative count is malformed, not zero: the badge distinguishes
+     * "none available" from "the server did not answer", so it must not turn an
+     * absent field into a real zero.
+     */
+    fun parsePool(body: String): ShadowRankedPoolCounts {
+        val root = JsonReader().parse(body)
+            ?: throw IllegalArgumentException("empty pool response")
+        val available = root.getInt("available", -1)
+        val createdOpen = root.getInt("created_open", -1)
+        require(available >= 0) { "missing or negative available" }
+        require(createdOpen >= 0) { "missing or negative created_open" }
+        return ShadowRankedPoolCounts(available = available, createdOpen = createdOpen)
+    }
+
     /** Parse `GET /challenges` into the hub's attempts list, newest first. */
     fun parseList(body: String): ChallengeList {
         val root = JsonReader().parse(body)

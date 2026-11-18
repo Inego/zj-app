@@ -34,6 +34,28 @@ object ShadowRankedFormat {
         L10n.format("shadowRanked.rating_line", signedRating(delta))
 
     /**
+     * The tab's one pool line: "3 earlier · 1 of yours for others".
+     *
+     * Both numbers are counts, and both labels are fixed plural fragments — genitive
+     * plural where the language inflects — so each bundle's `_one` and `_many` forms
+     * carry the same wording and only the number changes. The counts are 0 or above
+     * one almost always, so the label must not switch to a singular form for `1`.
+     */
+    fun poolLine(counts: ShadowRankedPoolCounts): String {
+        val available = if (counts.available == 1) {
+            L10n.get("shadowRanked.pool.available_one")
+        } else {
+            L10n.format("shadowRanked.pool.available_many", counts.available.toString())
+        }
+        val created = if (counts.createdOpen == 1) {
+            L10n.get("shadowRanked.pool.created_one")
+        } else {
+            L10n.format("shadowRanked.pool.created_many", counts.createdOpen.toString())
+        }
+        return "$available · $created"
+    }
+
+    /**
      * The finished attempt's score list: "Bot +32 · Maria +80 · You +48".
      *
      * The bot and the listing player's own row are named by the bundle; every other

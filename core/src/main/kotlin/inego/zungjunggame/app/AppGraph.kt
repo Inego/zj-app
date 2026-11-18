@@ -21,6 +21,8 @@ import inego.zungjunggame.features.menu.GameMenuRenderInput
 import inego.zungjunggame.features.menu.MenuSignIn
 import inego.zungjunggame.features.notices.NoticesOverlay
 import inego.zungjunggame.features.notices.NoticesRenderInput
+import inego.zungjunggame.features.online.hub.DEFAULT_ONLINE_HUB_STATE
+import inego.zungjunggame.features.online.hub.OnlineHubCodec
 import inego.zungjunggame.features.online.hub.OnlineHubOverlay
 import inego.zungjunggame.features.online.hub.OnlineHubView
 import inego.zungjunggame.features.online.hub.ShadowRankedView
@@ -40,12 +42,14 @@ import inego.zungjunggame.net.NotificationPrefsClient
 import inego.zungjunggame.net.RatingHistoryClient
 import inego.zungjunggame.net.ShadowRankedAttemptsClient
 import inego.zungjunggame.net.ShadowRankedHandsClient
+import inego.zungjunggame.net.ShadowRankedPoolClient
 import inego.zungjunggame.net.ShadowRankedStartClient
 import inego.zungjunggame.online.AccountController
 import inego.zungjunggame.online.AuthLifecycle
 import inego.zungjunggame.online.OnlineAwayPort
 import inego.zungjunggame.online.OnlineCoordinator
 import inego.zungjunggame.online.OnlineTablePort
+import inego.zungjunggame.online.ShadowRankedPoolTracker
 import inego.zungjunggame.online.ShadowRankedStarter
 import inego.zungjunggame.net.PresenceClient
 import inego.zungjunggame.persist.AppLocaleKey
@@ -605,6 +609,17 @@ class AppGraph(
         // the constructor rather than hooked from here.
         val shadowRankedAttempts =
             scope.own("shadowRankedAttempts") { ShadowRankedAttemptsClient() }
+        // The Shadow Ranked tab's pool reading. Scope-owned like the attempts list
+        // because it holds an async callback; sign-out and account change clear it,
+        // and nothing about it is persisted (a restored count would be a stale
+        // fact). The client reports a rejected session to the account lifecycle's
+        // one owner.
+        val shadowRankedPoolClient = ShadowRankedPoolClient(
+            onUnauthorized = { used -> accountController.onUnauthorized(used) },
+        )
+        val shadowRankedPool = scope.own("shadowRankedPool") {
+            ShadowRankedPoolTracker(shadowRankedPoolClient)
+        }
         // The hand tables of one challenge. Scope-owned like the attempts list
         // because it holds an async callback; the account lifecycle clears and
         // reloads it through the constructor.
@@ -958,6 +973,7 @@ class AppGraph(
             ShadowRankedView(
                 signedIn = accountController.isSignedIn,
                 start = shadowRankedStarter.snapshot(),
+                pool = shadowRankedPool.counts(account = accountController.user?.id),
             )
         }
 
@@ -1154,6 +1170,7 @@ class AppGraph(
             transitions = transitions,
             routeUi = routeUiState,
             shadowRankedStarter = shadowRankedStarter,
+            shadowRankedPool = shadowRankedPool,
             shadowRankedAttempts = shadowRankedAttempts,
             shadowRankedHands = shadowRankedHands,
             leaderboardClient = leaderboardClient,

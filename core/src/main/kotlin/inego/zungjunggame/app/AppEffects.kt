@@ -173,6 +173,12 @@ interface OnlineEffects {
     /** Retry a failed Shadow Ranked start with the remembered draft. */
     fun shadowRankedRetryStart()
 
+    /** Set the draft's rounds (1 or 2), store it and refresh the pool count. */
+    fun setShadowRankedRounds(rounds: Int)
+
+    /** Flip the draft's chicken toggle, store it and refresh the pool count. */
+    fun toggleShadowRankedChicken()
+
     /** Reload the signed-in account's Shadow Ranked attempts. */
     fun shadowRankedRefreshAttempts()
 

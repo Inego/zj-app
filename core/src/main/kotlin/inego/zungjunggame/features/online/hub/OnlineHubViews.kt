@@ -5,6 +5,7 @@ import inego.zungjunggame.net.PresenceSnapshot
 import inego.zungjunggame.net.PresenceTable
 import inego.zungjunggame.net.QueueChicken
 import inego.zungjunggame.net.QueueRounds
+import inego.zungjunggame.net.ShadowRankedPoolCounts
 import inego.zungjunggame.online.ShadowRankedStartState
 
 /**
@@ -84,4 +85,11 @@ data class OnlineHubView(
 data class ShadowRankedView(
     val signedIn: Boolean = false,
     val start: ShadowRankedStartState = ShadowRankedStartState.Idle,
+    /**
+     * The last pool counts read for the signed-in account, or null before the first
+     * answer and after a failed read. While a draft change's read is in flight this
+     * is still the previous draft's line, which is deliberate: the row must not
+     * blank for a round trip. An unknown count is never painted as zero.
+     */
+    val pool: ShadowRankedPoolCounts? = null,
 )

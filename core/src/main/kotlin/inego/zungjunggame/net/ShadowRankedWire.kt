@@ -30,7 +30,7 @@ data class ChallengeStart(
 
 /**
  * How the Shadow Ranked wire's transport failed. The adapter is the only producer;
- * the two clients map it to their own failure vocabularies.
+ * the clients map it to their own failure vocabularies.
  */
 enum class ShadowRankedWireError {
     /** The server rejected the session (HTTP 401). */
@@ -65,6 +65,19 @@ interface ShadowRankedStartWire {
     )
 }
 
+/**
+ * HTTP transport for `GET /challenges/pool`: how many challenges the selected
+ * draft would hand this player, and how many of the player's own are still open.
+ */
+interface ShadowRankedPoolWire {
+    fun pool(
+        token: String,
+        rounds: ChallengeRounds,
+        allowChicken: Boolean,
+        onDone: (Result<ShadowRankedPoolCounts>) -> Unit,
+    )
+}
+
 /** HTTP transport for `GET /challenges`: the player's attempts, newest first. */
 interface ShadowRankedAttemptsWire {
     fun list(
@@ -95,7 +108,7 @@ interface ShadowRankedHandsWire {
 }
 
 /**
- * The one thin wire adapter behind both Shadow Ranked clients: it owns the request
+ * The one thin wire adapter behind the Shadow Ranked clients: it owns the request
  * shape, the [ChallengeJson] bridge, and the timeout. [TIMEOUT_MS] is the single
  * declaration of the request's `timeOut` **and** the boundary a transport failure
  * is classified by, so the request's wait and the clients' `Timeout` verdict cannot
@@ -104,7 +117,11 @@ interface ShadowRankedHandsWire {
  *
  * Callbacks always run on the libGDX application thread.
  */
-object ShadowRankedWire : ShadowRankedStartWire, ShadowRankedAttemptsWire, ShadowRankedHandsWire {
+object ShadowRankedWire :
+    ShadowRankedStartWire,
+    ShadowRankedAttemptsWire,
+    ShadowRankedHandsWire,
+    ShadowRankedPoolWire {
     /** The request timeout, and the boundary [shadowRankedTransportFailure] classifies by. */
     const val TIMEOUT_MS = 15_000
 
@@ -211,6 +228,58 @@ object ShadowRankedWire : ShadowRankedStartWire, ShadowRankedAttemptsWire, Shado
                     onDone(
                         Result.failure(
                             ShadowRankedWireException("Shadow Ranked attempts request cancelled", ShadowRankedWireError.Refused),
+                        ),
+                    )
+                }
+            }
+        })
+    }
+
+    override fun pool(
+        token: String,
+        rounds: ChallengeRounds,
+        allowChicken: Boolean,
+        onDone: (Result<ShadowRankedPoolCounts>) -> Unit,
+    ) {
+        val sentAtMs = TimeUtils.millis()
+        val request = HttpRequest(HttpMethods.GET).apply {
+            url = ApiConfig.baseUrl.trimEnd('/') +
+                "/challenges/pool?rounds=${rounds.wire}&allow_chicken=$allowChicken"
+            timeOut = TIMEOUT_MS
+            setHeader("Accept", "application/json")
+            setHeader("Authorization", "Bearer $token")
+        }
+        Gdx.net.sendHttpRequest(request, object : HttpResponseListener {
+            override fun handleHttpResponse(httpResponse: HttpResponse) {
+                val status = httpResponse.status.statusCode
+                val body = httpResponse.resultAsString
+                val result = when (status) {
+                    200 -> runCatching { ChallengeJson.parsePool(body) }
+                    401 -> Result.failure(
+                        ShadowRankedWireException(
+                            AuthJson.parseErrorMessage(body, "Unauthorized"),
+                            ShadowRankedWireError.Unauthorized,
+                        ),
+                    )
+                    else -> Result.failure(
+                        ShadowRankedWireException(
+                            AuthJson.parseErrorMessage(body, "Shadow Ranked pool failed ($status)"),
+                            ShadowRankedWireError.Refused,
+                        ),
+                    )
+                }
+                post { onDone(result) }
+            }
+
+            override fun failed(t: Throwable) {
+                post { onDone(Result.failure(shadowRankedTransportFailure(t, TimeUtils.millis() - sentAtMs))) }
+            }
+
+            override fun cancelled() {
+                post {
+                    onDone(
+                        Result.failure(
+                            ShadowRankedWireException("Shadow Ranked pool request cancelled", ShadowRankedWireError.Refused),
                         ),
                     )
                 }

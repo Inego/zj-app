@@ -230,6 +230,10 @@ class AppDispatcherTest {
         override fun shadowRankedStart() { shadowStarts++ }
         override fun shadowRankedCancelStart() { shadowCancels++ }
         override fun shadowRankedRetryStart() { shadowRetries++ }
+        // The draft edits are supplied for the interface the dispatcher maps;
+        // nothing in this file asserts them.
+        override fun setShadowRankedRounds(rounds: Int) {}
+        override fun toggleShadowRankedChicken() {}
         override fun shadowRankedRefreshAttempts() { shadowRefreshes++ }
         override fun viewShadowRankedAttempts() { viewAttemptsCount++ }
         override fun loadMoreShadowRankedAttempts() { loadMoreAttemptsCount++ }

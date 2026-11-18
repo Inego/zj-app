@@ -16,6 +16,9 @@ import inego.zungjunggame.net.QueueChicken
 import inego.zungjunggame.net.QueueRounds
 import inego.zungjunggame.net.ShadowRankedAttemptsClient
 import inego.zungjunggame.net.ShadowRankedHandsClient
+import inego.zungjunggame.net.ShadowRankedPoolClient
+import inego.zungjunggame.net.ShadowRankedPoolCounts
+import inego.zungjunggame.net.ShadowRankedPoolWire
 import inego.zungjunggame.net.ShadowRankedStartClient
 import inego.zungjunggame.net.ShadowRankedStartWire
 import inego.zungjunggame.online.AccountController
@@ -23,6 +26,7 @@ import inego.zungjunggame.online.FakePlayHost
 import inego.zungjunggame.online.OnlineAwayPort
 import inego.zungjunggame.online.OnlineCoordinator
 import inego.zungjunggame.online.OnlineTablePort
+import inego.zungjunggame.online.ShadowRankedPoolTracker
 import inego.zungjunggame.online.ShadowRankedStarter
 import inego.zungjunggame.persist.AuthPersistedSessionKey
 import inego.zungjunggame.persist.DismissedFirstLoginPromptsKey
@@ -98,6 +102,16 @@ class AppOnlineEffectsTest {
         ) {
             starts += Triple(token, rounds, allowChicken)
         }
+    }
+
+    /** The tab switch also reads the pool; no assertion here depends on it. */
+    private class NoOpPoolWire : ShadowRankedPoolWire {
+        override fun pool(
+            token: String,
+            rounds: ChallengeRounds,
+            allowChicken: Boolean,
+            onDone: (Result<ShadowRankedPoolCounts>) -> Unit,
+        ) {}
     }
 
     private class FakeView : AccountController.View {
@@ -176,6 +190,9 @@ class AppOnlineEffectsTest {
             shadowRankedStarter = ShadowRankedStarter(
                 token = { auth.token },
                 client = ShadowRankedStartClient(sender = startWire),
+            ),
+            shadowRankedPool = ShadowRankedPoolTracker(
+                ShadowRankedPoolClient(api = NoOpPoolWire()),
             ),
             shadowRankedAttempts = ShadowRankedAttemptsClient(),
             shadowRankedHands = ShadowRankedHandsClient(),

@@ -9,10 +9,12 @@ import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.engine.GameConfig
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.net.PatternlessRule
+import inego.zungjunggame.net.ShadowRankedFormat
 import inego.zungjunggame.net.ShadowRankedStartFailure
 import inego.zungjunggame.online.ShadowRankedStartState
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.render.ui.FittedLabel
 import inego.zungjunggame.render.ui.InfoButton
 import inego.zungjunggame.render.ui.OverlayBodyScroll
 import inego.zungjunggame.render.ui.tapSlopPx
@@ -395,6 +397,16 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
                 noteColor(row.tone),
             )
 
+            is ShadowPoolRow -> FittedLabel.draw(
+                batch = batch,
+                font = labelFont,
+                text = row.text,
+                left = contentLeft,
+                centerY = top - row.height * 0.5f,
+                maxWidth = textW,
+                color = AppPalette.inkMuted,
+            )
+
             is ShadowLinkRow -> {
                 val rect = Rect(rowLeft + rowW - row.linkW, top - row.height, row.linkW, row.height)
                 HubDraw.drawLink(
@@ -470,6 +482,12 @@ internal class ShadowNoteRow(
     override val height: Float,
 ) : ShadowRow
 
+/** The pool line: one fixed-height line of muted copy, shrunk to the body's measure. */
+internal class ShadowPoolRow(
+    val text: String,
+    override val height: Float,
+) : ShadowRow
+
 /** A standalone link that opens a card of its own. */
 internal class ShadowLinkRow(
     val link: String,
@@ -496,8 +514,7 @@ internal class ShadowRankedStartSection {
         // shown.
         val rounds = draft?.rounds
         // Rounds and the patternless toggle are one control group: the tight
-        // rhythm continues between them, and the toggle opens the block gap to
-        // whatever the player does next.
+        // rhythm continues between them. The pool line is the group's last line.
         rows.add(
             ShadowChoicesRow(
                 options = listOf(
@@ -516,6 +533,19 @@ internal class ShadowRankedStartSection {
                 height = m.rowH,
             ),
             height = m.rowH,
+        )
+        // The pool line is always laid out, one line high, whether or not the
+        // answer is known: it sits directly under the draft controls, so a row
+        // that appeared, disappeared or wrapped would move the start plate below
+        // it while the player is changing the draft. The copy is painted through
+        // [FittedLabel], so a longer translation shrinks for this width instead of
+        // taking a second line; only a resize of the panel re-fits it.
+        rows.add(
+            ShadowPoolRow(
+                text = view.pool?.let(ShadowRankedFormat::poolLine).orEmpty(),
+                height = m.noteH,
+            ),
+            height = m.noteH,
             trail = HubGap.Block,
         )
         // Every start state resolves to one plate, centred, at the width its own

@@ -1,5 +1,6 @@
 package inego.zungjunggame.app
 
+import inego.zungjunggame.engine.GameConfig
 import inego.zungjunggame.features.online.hub.DEFAULT_ONLINE_HUB_STATE
 import inego.zungjunggame.features.online.hub.OnlineHubCodec
 import inego.zungjunggame.features.online.hub.OnlineHubState
@@ -43,6 +44,8 @@ internal class AppOnlineEffects(
     /** The hub route's player-set tab, both scrolls, and Shadow Ranked draft. */
     private val routeUi: RouteUiState,
     private val shadowRankedStarter: ShadowRankedStarter,
+    /** The Shadow Ranked tab's in-memory pool reading; refreshed, never persisted. */
+    private val shadowRankedPool: ShadowRankedPoolTracker,
     private val shadowRankedAttempts: ShadowRankedAttemptsClient,
     private val shadowRankedHands: ShadowRankedHandsClient,
     /** The hub's leaderboard reading; opening takes a new one. */
@@ -77,6 +80,8 @@ internal class AppOnlineEffects(
 
     override fun abandonToLobby() {
         // Leaving the table reveals the hub on the tab the table was entered from.
+        // The table's own exit port returns the hub to that tab, and that tab's
+        // selection is what re-reads the pool.
         onlineCoordinator.leaveOnlineTable()
         routes.removeModal(RouteIds.GAME_MENU)
     }
@@ -125,6 +130,8 @@ internal class AppOnlineEffects(
         val remembered = routeUi.read(hubRoute.key, OnlineHubCodec) ?: DEFAULT_ONLINE_HUB_STATE
         val target = tab ?: remembered.tab
         if (target != remembered.tab) storeHub(remembered.copy(tab = target))
+        // A fresh push loads through [hubEnter], once. An already-open hub is
+        // revealed, not re-entered, and was read when its tab was selected.
         transitions.onlineHub()
     }
 
@@ -133,8 +140,16 @@ internal class AppOnlineEffects(
         // stored until a write happens, so defaulting to the requested tab would
         // make the first switch a no-op and leave the hub unreadable.
         val current = routeUi.read(hubRoute.key, OnlineHubCodec) ?: DEFAULT_ONLINE_HUB_STATE
-        if (current.tab == tab) return
+        // Entering Shadow Ranked is a read trigger: the counts belong to the tab,
+        // and a count from the first visit may be minutes old. A re-selection is
+        // one too — a second tap on the active tab, or the table handing the hub
+        // back through its own exit port — so only the write is skipped.
+        if (current.tab == tab) {
+            if (tab == OnlineTab.ShadowRanked) refreshShadowRankedPoolIfVisible()
+            return
+        }
         storeHub(current.copy(tab = tab))
+        if (tab == OnlineTab.ShadowRanked) refreshShadowRankedPoolIfVisible()
     }
 
     /**
@@ -145,6 +160,7 @@ internal class AppOnlineEffects(
      * rather than in [accountController], which cannot see `features/`.
      */
     fun resetHubTabForAccountChange() {
+        shadowRankedPool.clear()
         val current = routeUi.read(hubRoute.key, OnlineHubCodec) ?: return
         if (current.tab == OnlineTab.Live) return
         storeHub(current.copy(tab = OnlineTab.Live))
@@ -174,12 +190,15 @@ internal class AppOnlineEffects(
      *
      * The attempts list is deliberately not here: the hub only links to its
      * card, so it loads when that card appears ([shadowRankedAttemptsEnter])
-     * rather than on every visit to the hub.
+     * rather than on every visit to the hub. The pool line is here, because it is
+     * part of the tab: when Shadow Ranked is the visible tab, entering the hub is
+     * one of its read triggers.
      */
     fun hubEnter() {
         onlineCoordinator.presenceClient.requestNow()
         accountController.refreshAccountSurfaces()
         accountController.token?.let { onlineCoordinator.noticeList.refresh(it) }
+        refreshShadowRankedPoolIfVisible()
     }
 
     override fun shadowRankedStart() {
@@ -199,6 +218,62 @@ internal class AppOnlineEffects(
         if (accountController.token == null) return
         shadowRankedStarter.retry()
     }
+
+    /**
+     * The draft's rounds. The write is the effect's because the draft is the pool
+     * count's key: the stored value and the badge change together, and a response
+     * for the previous draft cannot paint.
+     */
+    override fun setShadowRankedRounds(rounds: Int) {
+        val current = hubState()
+        val draft = current.draft ?: DEFAULT_SHADOW_RANKED_DRAFT
+        if (draft.rounds == rounds) return
+        storeDraft(current, draft.copy(rounds = rounds))
+    }
+
+    override fun toggleShadowRankedChicken() {
+        val current = hubState()
+        val draft = current.draft ?: DEFAULT_SHADOW_RANKED_DRAFT
+        storeDraft(current, draft.copy(allowChickenHands = !draft.allowChickenHands))
+    }
+
+    /** Store [draft] on [current] and read the pool for it. */
+    private fun storeDraft(current: OnlineHubState, draft: GameConfig) {
+        val updated = current.copy(draft = draft)
+        storeHub(updated)
+        refreshShadowRankedPool(updated)
+    }
+
+    /**
+     * The selected draft's pool line. The tab is the trigger, not a poll: this is
+     * called on entering the tab, on every draft edit, and when a game hands the
+     * hub back. With no account or token the tracker clears instead of sending.
+     */
+    private fun refreshShadowRankedPool(state: OnlineHubState = hubState()) {
+        val draft = state.draft ?: DEFAULT_SHADOW_RANKED_DRAFT
+        shadowRankedPool.load(
+            account = accountController.user?.id,
+            token = accountController.token,
+            rounds = draft.rounds.toChallengeRounds(),
+            allowChicken = draft.allowChickenHands,
+        )
+    }
+
+    /**
+     * Refresh only when the hub is actually on screen — the stack's paint range,
+     * not merely present beneath a table — and Shadow Ranked is the visible tab.
+     * A session rotation during a live game must not run a cosmetic read behind
+     * the board.
+     */
+    private fun refreshShadowRankedPoolIfVisible() {
+        if (routes.stack.paintRange.none { it.route.key == hubRoute.key }) return
+        val state = hubState()
+        if (state.tab != OnlineTab.ShadowRanked) return
+        refreshShadowRankedPool(state)
+    }
+
+    private fun hubState(): OnlineHubState =
+        routeUi.read(hubRoute.key, OnlineHubCodec) ?: DEFAULT_ONLINE_HUB_STATE
 
     override fun shadowRankedRefreshAttempts() {
         shadowRankedAttempts.load(accountController.token)
@@ -400,6 +475,12 @@ internal class AppOnlineEffects(
         if (routes.isOpen(Route.Modal(RouteIds.RATING_HISTORY).key)) {
             ratingHistoryEnter()
         }
+        // A restored hub enters before the session is back, so its pool read was
+        // skipped; a rotation also replaces the credential. Both land here and the
+        // visible tab re-reads once. The answer on screen is kept: it is keyed by
+        // the account and draft, not the token, and this read's generation drops a
+        // late response fetched with the old one.
+        refreshShadowRankedPoolIfVisible()
     }
 
     override fun loadLeaderboardWindow(offset: Int) {
@@ -544,7 +625,8 @@ internal class AppOnlineEffects(
     }
 
     override fun connectCancel() {
-        // Leaving the table reveals the hub on the tab it was entered from.
+        // Leaving the table reveals the hub on the tab it was entered from; the
+        // table's exit port selects that tab, which re-reads the pool.
         onlineCoordinator.leaveOnlineTable()
         routes.removeModal(RouteIds.GAME_MENU)
     }
@@ -557,7 +639,8 @@ internal class AppOnlineEffects(
         val authExpired = onlineCoordinator.onlineHost?.connectionFailure ==
             ConnectionFailure.Authentication
         // Leaving the table reveals the hub on the tab the table was entered from;
-        // there is no second landing.
+        // there is no second landing. The table's exit port selects that tab, and
+        // a Shadow Ranked selection re-reads the pool.
         onlineCoordinator.leaveOnlineTable()
         routes.removeModal(RouteIds.GAME_MENU)
         if (authExpired) {
