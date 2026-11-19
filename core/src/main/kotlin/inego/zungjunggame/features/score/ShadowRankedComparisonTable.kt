@@ -236,7 +236,7 @@ internal class ShadowRankedComparisonTable {
         Fonts.withFaceScale(font, scale) {
             var x = contentLeft
             font.color.set(fade(nameColor, alpha))
-            font.draw(batch, name, x, baseline, metrics.nameW, Align.left, false)
+            Fonts.drawText(batch, font, name, x, baseline, font.color)
             x += metrics.nameW + metrics.colGap
             font.color.set(fade(ratingColor, alpha))
             font.draw(batch, rating, x, baseline, metrics.ratingW, Align.right, false)
@@ -280,12 +280,12 @@ internal class ShadowRankedComparisonTable {
             rowFont: BitmapFont,
         ): Columns {
             val colGap = Fonts.px(16f)
-            var nameW = textWidth(glyph, rowFont, L10n.get("shadowRanked.score_you"))
+            var nameW = Fonts.textWidth(rowFont, L10n.get("shadowRanked.score_you"))
             var ratingW = textWidth(glyph, rowFont, L10n.get("shadowRanked.col_rating"))
             var scoreW = textWidth(glyph, rowFont, L10n.get("shadowRanked.col_score"))
             var deltaW = textWidth(glyph, rowFont, L10n.get("shadowRanked.col_delta"))
             for ((name, _, opponentRating, opponentScore, delta) in comparison.comparisons) {
-                nameW = max(nameW, textWidth(glyph, rowFont, name))
+                nameW = max(nameW, Fonts.textWidth(rowFont, name))
                 ratingW = max(ratingW, textWidth(glyph, rowFont, ratingCell(opponentRating)))
                 scoreW = max(scoreW, textWidth(glyph, rowFont, ShadowRankedFormat.signedScore(
                     opponentScore

@@ -61,6 +61,7 @@ layout**.
 | Move | Primitive | Contract | Used for |
 |---|---|---|---|
 | Measure | `Fonts.textWidth` / `textHeight` / `drawText` | Per-code-unit split into primary and fallback runs, summed; `drawText` mirrors the measure | Everything that paints outside rich text |
+| Measure (wrapped) | `Fonts.wrappedHeight` / `drawWrapped` | One face for the whole block — primary when it covers it, else the fallback, else whichever covers more with its own gaps boxed — so wrap and ink agree | Status copy over the felt |
 | Measure (doc) | `GdxTextMeasurer` | Adapts the same faces to `RichTextLayout`'s `TextMeasurer` | Reference, notices, coach |
 | Fit | `Fonts.fitScale` + `Fonts.withFaceScale` | Shrink uniformly, never above 1, clamp at `MIN_FIT_SCALE = 0.6` | Buttons, plaque rows, banners, chart labels |
 | Fit (one line) | `FittedLabel.draw` | Measure → fit → re-measure within `withFaceScale`, then paint; left or centred | Plate captions, setup rows |
@@ -87,6 +88,13 @@ Cross-face kerning is deliberately dropped (`FallbackText.kt:12-14`).
   per cluster, so a flag or an emoji sequence is a single stand-in.
 - Height uses the whole-string fallback line box, so one Han character in a
   Latin run adopts the CJK line height (`FallbackText.kt:57-64`).
+- A **wrapped block** takes one face for the whole block instead: wrapping is
+  per glyph, so a paragraph cannot change faces mid-line. `Fonts.wrappedHeight`
+  / `Fonts.drawWrapped` use the primary when it covers every character, else
+  the fallback (which carries Latin beside Han). When neither covers the block,
+  the face that covers more of it paints the block and boxes the clusters *that
+  face* cannot draw — substituting against "either face" would leave the chosen
+  face painting tofu for the other face's script (`FallbackText.block`).
 - Design pixels become world pixels through `uiScale = density` (phone web
   ×`160/96`), clamped to `[1, 3]`; faces are rasterized at
   `designSize × uiScale` (`Fonts.kt:743-751`, `:873`).
@@ -388,13 +396,14 @@ Two script limits are unfixed and worth knowing before designing a slot:
 
 - **No RTL.** No bidi reordering and no RTL locale; alignment is only
   left/centre/right (`i18n/AppLocale.kt:19-133`, `RichTextLayout.kt:417-421`).
-- **Astral and combining code points are handled per code unit by the painter.**
-  `TextFit.ellipsize` snaps to code-point boundaries, not grapheme clusters, so
-  a base + combining mark can still be cut apart; `FallbackText` judges an
-  astral glyph by its surrogate halves (`TextFit.kt:31-40`,
-  `FallbackText.kt:104-120`). Editing no longer has this limit: carets,
-  selections, deletions and the visible slice all sit on `Graphemes`
-  boundaries (§5).
+- **Cutting is grapheme-blind; painting is not.** `TextFit.ellipsize` snaps to
+  code-point boundaries, not grapheme clusters, so a base + combining mark can
+  still be cut apart (`TextFit.kt:31-40`). The painter no longer judges an
+  astral glyph by its surrogate halves: `FallbackText` replaces a whole grapheme
+  cluster with one substitute box when any of its code points is undrawable,
+  and an astral code point is never drawable by the BMP-only layout
+  (`FallbackText.kt:187-206`). Editing sits on `Graphemes` boundaries
+  throughout: carets, selections, deletions and the visible slice (§5).
 
 Locale is also a cache key, and it is not the same key as a face rebuild.
 `Fonts.applyLocale` disposes and rebuilds faces only when the script profile
@@ -497,34 +506,37 @@ These are observations about today's code, not rules. They are ordered by damage
 already on screen; 5–8 are lower-severity gaps in specific surfaces,
 consistency, duplication and invalidation.
 
-Four cases now pass end to end and are the pattern for the rest. **Editing**
-(§5) stores UTF-16 units, edits on grapheme boundaries, and gives both editors
-one per-kind cap. The **leaderboard name** is measured, ellipsized and painted
-with the same primary + fallback pair. The **`setup.chicken` row** measures a
-wrapped caption before paint, grows the row to hold it, and derives the toggle
-and info rects from that grown row. **Undrawable text** becomes one substitute
-glyph before measure and paint, and desktop typed input keeps its code point, so
-a name can no longer hide an invisible character or store a truncated one. Do
-not re-solve those with a new abstraction; reuse the primitives they established
-(`text/Graphemes.kt`, `text/TextEdit.kt`, `Fonts.drawText`,
+The name-bearing surfaces now pass end to end and are the pattern for the rest.
+**Editing** (§5) stores UTF-16 units, edits on grapheme boundaries, and gives
+both editors one per-kind cap. The **leaderboard name**, the **attempts card**
+and the **Shadow Ranked hands viewer** measure, ellipsize and paint through the
+same primary + fallback pair. The **turn banner** uses the wrapped-block pair,
+because a paragraph cannot change faces mid-line. The **settlement tables**
+(`ScoreBreakdownPainter`, `RatingChangesTable`, `ShadowRankedComparisonTable`),
+the **account card** and the **rating-history title** paint names the same way.
+The **`setup.chicken` row** measures a wrapped caption before paint, grows the
+row to hold it, and derives the toggle and info rects from that grown row.
+**Undrawable text** becomes one substitute glyph before measure and paint, and
+desktop typed input keeps its code point, so a name can no longer hide an
+invisible character or store a truncated one. Do not re-solve those with a new
+abstraction; reuse the primitives they established (`text/Graphemes.kt`,
+`text/TextEdit.kt`, `Fonts.drawText`, `Fonts.drawWrapped`,
 `FallbackText.substituteUndrawable`, `GlyphLayout` before `fitAndPlace`).
 
-1. **Raw paint still skips the fallback face.** The leaderboard row now paints
-   through `Fonts.drawText` (`features/leaderboard/LeaderboardOverlay.kt`), but
-   match-history rows, segmented tabs, the TOC list, the turn banner and the
-   hub's wrapped prose still paint raw, and match history's own `textWidth` also
-   measures raw, so its columns are sized for the primary
-   (`features/history/MatchHistoryOverlay.kt:425-428`, `:466-495`,
+1. **Raw paint still skips the fallback face.** Match-history rows, segmented
+   tabs, the TOC list and the hub's wrapped prose still paint raw, and match
+   history's own `textWidth` also measures raw, so its columns are sized for
+   the primary (`features/history/MatchHistoryOverlay.kt:425-428`, `:466-495`,
    `render/ui/SegmentedTabs.kt:120-133`,
    `render/ui/ScrollableItemList.kt:372-386`,
-   `render/table/TurnStatusBanner.kt:236-239`,
    `features/online/hub/HubDraw.kt:248-269`); the quiz dock's action labels do
    the same in both measure and paint (`features/tutorial/TableChip.kt:81-94`).
-   In a Latin locale a Han name or translation is then measured with the
-   fallback and painted as tofu, and an undrawable code point stays invisible
-   instead of showing the substitute glyph `FallbackText` would give it.
-   **Next:** pair measure and draw helpers per surface, taking
-   `Fonts.textWidth`/`Fonts.drawText` as the reference pair.
+   Those rows carry dates, scores and rules rather than player names, so the
+   failure is a translated string measured with the fallback and painted as
+   tofu, or an undrawable code point left invisible instead of showing the
+   substitute glyph `FallbackText` would give it. **Next:** pair measure and
+   draw helpers per surface, taking `Fonts.textWidth`/`Fonts.drawText` as the
+   reference pair, and `Fonts.wrappedHeight`/`drawWrapped` for a wrapped block.
 2. **Rich text can lay out and paint at different scales or line heights.** Line
    boxes reserve the primary line height while paint can use the taller
    fallback, so a mixed-script body can clip vertically; and link hit boxes are

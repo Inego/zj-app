@@ -333,8 +333,7 @@ internal data class ScoreBreakdownLayout(
             var deltaW = 0f
             var afterW = 0f
             for ((name, before, delta, after) in input.settlement) {
-                glyph.setText(settleFont, name)
-                seatNameW = max(seatNameW, glyph.width)
+                seatNameW = max(seatNameW, Fonts.textWidth(settleFont, name))
                 glyph.setText(settleFont, before.toString())
                 beforeW = max(beforeW, glyph.width)
                 glyph.setText(settleFont, ScoreBreakdownText.formatSignedDelta(delta))
@@ -343,8 +342,7 @@ internal data class ScoreBreakdownLayout(
                 afterW = max(afterW, glyph.width)
             }
             for (line in input.ratingLines) {
-                glyph.setText(settleFont, line.name)
-                seatNameW = max(seatNameW, glyph.width)
+                seatNameW = max(seatNameW, Fonts.textWidth(settleFont, line.name))
                 if (!line.pending) {
                     glyph.setText(settleFont, line.before.toString())
                     beforeW = max(beforeW, glyph.width)

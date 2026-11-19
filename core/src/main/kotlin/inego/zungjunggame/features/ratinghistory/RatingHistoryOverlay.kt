@@ -356,12 +356,11 @@ class RatingHistoryOverlay : Disposable {
         val title = RatingHistoryText.title(target, chart?.publication?.displayName)
         val titleScale = Fonts.fitScale(Fonts.textWidth(titleFont, title), geometry.title.width)
         Fonts.withFaceScale(titleFont, titleScale) {
-            glyphLayout.setText(titleFont, title)
-            titleFont.draw(
-                batch,
-                title,
+            Fonts.drawText(
+                batch, titleFont, title,
                 geometry.title.left,
-                geometry.title.centerY + glyphLayout.height * 0.5f,
+                geometry.title.centerY + Fonts.textHeight(titleFont, title) * 0.5f,
+                titleFont.color,
             )
         }
 

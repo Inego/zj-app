@@ -2,7 +2,6 @@ package inego.zungjunggame.render.table
 
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.g2d.BitmapFont
-import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.utils.Align
 import inego.zungjunggame.engine.DecisionType
@@ -34,7 +33,6 @@ import kotlin.math.min
  * (`showTurnStatus = false`) so coach copy owns the center.
  */
 object TurnStatusBanner {
-    private val glyphLayout = GlyphLayout()
 
     /** Air between the banner and the opposite hand. */
     private const val FELT_AIR_DP = 8f
@@ -159,7 +157,7 @@ object TurnStatusBanner {
 
     /** Height of [text] wrapped to [wrapW] on [font], in world px. */
     private fun wrappedHeight(font: BitmapFont, text: String, wrapW: Float): Float =
-        glyphLayout.apply { setText(font, text, Color.WHITE, wrapW, Align.center, true) }.height
+        Fonts.wrappedHeight(font, text, wrapW, Align.center)
 
     /**
      * Paint the banner in the band between the live-wall count and the opposite
@@ -234,8 +232,12 @@ object TurnStatusBanner {
         )
         val scale = min(labelScale * STATUS_FACE_FACTOR, bandFit)
         Fonts.withFaceScale(font, scale) {
-            glyphLayout.setText(font, lines, Color.WHITE, wrapW, Align.center, true)
-            font.draw(batch, glyphLayout, cx - wrapW * 0.5f, textBottom + glyphLayout.height)
+            val blockH = wrappedHeight(font, lines, wrapW)
+            Fonts.drawWrapped(
+                batch, font, lines,
+                cx - wrapW * 0.5f, textBottom + blockH,
+                wrapW, Align.center, Color.WHITE,
+            )
         }
     }
 }

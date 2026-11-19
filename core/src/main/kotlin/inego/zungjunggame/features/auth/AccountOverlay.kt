@@ -219,8 +219,7 @@ class AccountOverlay : Disposable, GestureSurface<AccountOverlay.PointerResult> 
         glyphLayout.setText(titleFont, title, Color.WHITE, maxPanelW - padX * 2f, Align.center, true)
         var contentW = glyphLayout.width
         if (name.isNotEmpty()) {
-            glyphLayout.setText(nameFont, name)
-            contentW = max(contentW, glyphLayout.width)
+            contentW = max(contentW, Fonts.textWidth(nameFont, name))
         }
         for (label in listOf(changeLabel, deleteLabel)) {
             glyphLayout.setText(buttonFont, label)
@@ -230,7 +229,7 @@ class AccountOverlay : Disposable, GestureSurface<AccountOverlay.PointerResult> 
 
         glyphLayout.setText(titleFont, title, Color.WHITE, panelW - padX * 2f, Align.center, true)
         val titleH = glyphLayout.height
-        val nameH = if (name.isEmpty()) 0f else nameFont.lineHeight
+        val nameH = if (name.isEmpty()) 0f else Fonts.textHeight(nameFont, name)
 
         panelH = padY * 2f + titleH + titleGap + nameH + nameGap + buttonH + linkGap + linkH
         val clamped = OverlayViewport.clampSize(panelW, panelH, avail)
@@ -266,14 +265,9 @@ class AccountOverlay : Disposable, GestureSurface<AccountOverlay.PointerResult> 
         // Signed-in name
         var top = panelBottom + panelH - padY - titleH - titleGap
         if (name.isNotEmpty()) {
-            nameFont.color = AppPalette.inkMuted
-            nameFont.draw(
-                batch,
-                TextFit.ellipsize(nameFont, name, contentWInner),
-                contentLeft, top,
-                contentWInner, Align.center, false,
-            )
-            nameFont.color = Color.WHITE
+            val fitted = TextFit.ellipsize(nameFont, name, contentWInner)
+            val nameX = contentLeft + (contentWInner - Fonts.textWidth(nameFont, fitted)) * 0.5f
+            Fonts.drawText(batch, nameFont, fitted, nameX, top, AppPalette.inkMuted)
         }
         top -= nameH + nameGap
 

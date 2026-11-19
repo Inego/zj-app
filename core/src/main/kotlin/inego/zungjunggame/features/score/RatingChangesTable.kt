@@ -65,8 +65,7 @@ class RatingChangesTable {
         var deltaW = minDeltaW
         var afterW = minAfterW
         for ((name, before, delta, after, _, _, _, pending) in lines) {
-            glyph.setText(font, name)
-            nameW = max(nameW, glyph.width)
+            nameW = max(nameW, Fonts.textWidth(font, name))
             if (!pending) {
                 glyph.setText(font, before.toString())
                 beforeW = max(beforeW, glyph.width)
@@ -196,7 +195,7 @@ class RatingChangesTable {
 
                 var x = contentLeft
                 font.color.set(fade(nameColor, alpha))
-                font.draw(batch, name, x, baseline, nameW, Align.left, false)
+                Fonts.drawText(batch, font, name, x, baseline, font.color)
                 x += nameW + colGap
 
                 if (pending) {

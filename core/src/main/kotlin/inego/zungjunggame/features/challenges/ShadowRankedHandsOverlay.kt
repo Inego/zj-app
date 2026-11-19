@@ -27,6 +27,7 @@ import inego.zungjunggame.render.ui.HandsTableRenderer
 import inego.zungjunggame.render.ui.HandsTableRow
 import inego.zungjunggame.render.ui.OverlayChrome
 import inego.zungjunggame.render.ui.OverlayViewport
+import inego.zungjunggame.render.ui.TextFit
 import inego.zungjunggame.render.ui.UiIcons
 import inego.zungjunggame.render.ui.VerticalScroll
 import inego.zungjunggame.ui.GestureSurface
@@ -485,14 +486,12 @@ class ShadowRankedHandsOverlay : Disposable, GestureSurface<ModalVerdict> {
         val chevron = if (open) UiIcons.chevronUp else UiIcons.chevronDown
         val iconSide = min(whoRect.height * 0.55f, Fonts.px(22f))
         val textWidth = (whoRect.width - iconSide - Fonts.px(24f)).coerceAtLeast(1f)
-        glyphLayout.setText(font, line, Color.WHITE, textWidth, Align.left, true)
-        font.color = AppPalette.ink
-        font.draw(
-            batch, line, whoRect.left + Fonts.px(12f),
-            whoRect.bottom + (whoRect.height + glyphLayout.height) * 0.5f,
-            textWidth, Align.left, true,
+        val fitted = TextFit.ellipsize(font, line, textWidth)
+        Fonts.drawText(
+            batch, font, fitted, whoRect.left + Fonts.px(12f),
+            whoRect.bottom + (whoRect.height + Fonts.textHeight(font, fitted)) * 0.5f,
+            AppPalette.ink,
         )
-        font.color = Color.WHITE
         batch.setColor(AppPalette.tint(AppPalette.ink, 0.9f))
         batch.draw(
             chevron,
@@ -548,14 +547,12 @@ class ShadowRankedHandsOverlay : Disposable, GestureSurface<ModalVerdict> {
                 }
                 val line = whoLine(attempt)
                 val tw = (dropdownW - Fonts.px(24f)).coerceAtLeast(1f)
-                glyphLayout.setText(font, line, Color.WHITE, tw, Align.left, true)
-                font.color = if (index == selectedIndex) AppPalette.accent else AppPalette.inkSoft
-                font.draw(
-                    batch, line, dropdownLeft + Fonts.px(12f),
-                    rect.bottom + (rowH + glyphLayout.height) * 0.5f,
-                    tw, Align.left, true,
+                val fitted = TextFit.ellipsize(font, line, tw)
+                Fonts.drawText(
+                    batch, font, fitted, dropdownLeft + Fonts.px(12f),
+                    rect.bottom + (rowH + Fonts.textHeight(font, fitted)) * 0.5f,
+                    if (index == selectedIndex) AppPalette.accent else AppPalette.inkSoft,
                 )
-                font.color = Color.WHITE
                 rows += index to rect
                 rowTop -= rowH
             }

@@ -16,6 +16,7 @@ import inego.zungjunggame.render.ui.CloseButton
 import inego.zungjunggame.render.ui.OverlayBodyScroll
 import inego.zungjunggame.render.ui.OverlayChrome
 import inego.zungjunggame.render.ui.OverlayViewport
+import inego.zungjunggame.render.ui.TextFit
 import inego.zungjunggame.render.ui.VerticalScrollbar
 import inego.zungjunggame.ui.GestureSurface
 import inego.zungjunggame.ui.ModalVerdict
@@ -226,10 +227,10 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         // readable floor and the viewport — the same "never wider than it must be"
         // policy the hands-table viewer uses for its panel.
         val (rowsLeftMax, rowsRatingW) = measureRows(attempts, itemFont, labelFont, inlineGap, nowMs)
-        val leftMax = max(rowsLeftMax, if (showHeader) textWidth(headerFont, headerChallenge) else 0f)
-        val ratingW = max(rowsRatingW, if (showHeader) textWidth(headerFont, headerRating) else 0f)
-        val statusW = statusText?.let { textWidth(labelFont, it) } ?: 0f
-        val loadMoreW = if (showLoadMore) textWidth(itemFont, loadMoreLabel) else 0f
+        val leftMax = max(rowsLeftMax, if (showHeader) Fonts.textWidth(headerFont, headerChallenge) else 0f)
+        val ratingW = max(rowsRatingW, if (showHeader) Fonts.textWidth(headerFont, headerRating) else 0f)
+        val statusW = statusText?.let { Fonts.textWidth(labelFont, it) } ?: 0f
+        val loadMoreW = if (showLoadMore) Fonts.textWidth(itemFont, loadMoreLabel) else 0f
         val contentW = rowPad * 2f + maxOf(leftMax + colGap + ratingW, statusW, loadMoreW)
 
         val rowHeights = attempts.map { if (it.hasScore()) scoreRowH else baseRowH }
@@ -268,9 +269,9 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         closeButton.render(batch, px, pointerWorldX, pointerWorldY)
 
         val title = L10n.get("shadowRanked.attempts.title")
-        glyphLayout.setText(titleFont, title)
-        val titleBaseline = panelBottom + panelH - closeInset - (closeButton.side - glyphLayout.height) * 0.5f
-        titleFont.draw(batch, title, panelLeft + pad, titleBaseline)
+        val titleBaseline = panelBottom + panelH - closeInset -
+            (closeButton.side - Fonts.textHeight(titleFont, title)) * 0.5f
+        Fonts.drawText(batch, titleFont, title, panelLeft + pad, titleBaseline, titleFont.color)
 
         val titleBottom = panelBottom + panelH - closeInset - titleRowH
         val headerTop = titleBottom - titleGap
@@ -364,12 +365,13 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         rating: String,
         padX: Float,
     ) {
-        glyphLayout.setText(font, challenge)
-        val baseline = bottom + (height + glyphLayout.height) * 0.5f
-        font.color = AppPalette.ink
-        font.draw(batch, challenge, left + padX, baseline)
-        glyphLayout.setText(font, rating)
-        font.draw(batch, rating, left + width - padX - glyphLayout.width, baseline)
+        val baseline = bottom + (height + Fonts.textHeight(font, challenge)) * 0.5f
+        Fonts.drawText(batch, font, challenge, left + padX, baseline, AppPalette.ink)
+        Fonts.drawText(
+            batch, font, rating,
+            left + width - padX - Fonts.textWidth(font, rating), baseline,
+            AppPalette.ink,
+        )
         font.color = Color.WHITE
     }
 
@@ -397,17 +399,17 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         var leftMax = 0f
         var ratingW = 0f
         for (entry in attempts) {
-            ratingW = max(ratingW, textWidth(itemFont, ShadowRankedFormat.signedRating(entry.ratingDelta)))
+            ratingW = max(ratingW, Fonts.textWidth(itemFont, ShadowRankedFormat.signedRating(entry.ratingDelta)))
             // The code line: the challenge code, then the date and player count.
-            val codeLine = textWidth(itemFont, entry.publicId) +
-                inlineGap + textWidth(itemFont, attemptInlineMeta(entry, nowMs))
+            val codeLine = Fonts.textWidth(itemFont, entry.publicId) +
+                inlineGap + Fonts.textWidth(itemFont, attemptInlineMeta(entry, nowMs))
             leftMax = max(leftMax, codeLine)
             leftMax = max(
                 leftMax,
-                textWidth(labelFont, ShadowRankedFormat.rulesLabel(entry.rounds, entry.allowChicken)),
+                Fonts.textWidth(labelFont, ShadowRankedFormat.rulesLabel(entry.rounds, entry.allowChicken)),
             )
             if (entry.hasScore()) {
-                leftMax = max(leftMax, textWidth(labelFont, ShadowRankedFormat.scoreLine(entry.scores)))
+                leftMax = max(leftMax, Fonts.textWidth(labelFont, ShadowRankedFormat.scoreLine(entry.scores)))
             }
         }
         measuredAttempts = attempts
@@ -415,11 +417,6 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         measuredLeftMax = leftMax
         measuredRatingW = ratingW
         return leftMax to ratingW
-    }
-
-    private fun textWidth(font: BitmapFont, text: String): Float {
-        glyphLayout.setText(font, text)
-        return glyphLayout.width
     }
 
     internal fun seedLayoutForTest(
@@ -503,39 +500,41 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         batch.setColor(Color.WHITE)
 
         // Code line: the challenge code, then its date and player count, with the
-        // rating right-aligned.
+        // rating right-aligned. Every run goes through the primary + fallback
+        // pair: a score line carries an opponent's own name, which is often in a
+        // script the primary face has no glyph for.
         val line1 = bottom + height - Fonts.px(10f)
-        itemFont.color = AppPalette.accent
-        itemFont.draw(batch, entry.publicId, left + padX, line1)
-        glyphLayout.setText(itemFont, entry.publicId)
-        itemFont.color = AppPalette.inkMuted
-        itemFont.draw(batch, attemptInlineMeta(entry, nowMs), left + padX + glyphLayout.width + inlineGap, line1)
+        val idW = Fonts.textWidth(itemFont, entry.publicId)
+        Fonts.drawText(batch, itemFont, entry.publicId, left + padX, line1, AppPalette.accent)
+        Fonts.drawText(
+            batch, itemFont, attemptInlineMeta(entry, nowMs),
+            left + padX + idW + inlineGap, line1, AppPalette.inkMuted,
+        )
 
         val rating = ShadowRankedFormat.signedRating(entry.ratingDelta)
-        glyphLayout.setText(itemFont, rating)
-        itemFont.color = ratingColor(entry.ratingDelta)
-        itemFont.draw(batch, rating, left + width - padX - glyphLayout.width, line1)
+        Fonts.drawText(
+            batch, itemFont, rating,
+            left + width - padX - Fonts.textWidth(itemFont, rating), line1,
+            ratingColor(entry.ratingDelta),
+        )
 
         val line2 = line1 - itemFont.lineHeight - gap
-        labelFont.color = AppPalette.inkMuted
-        labelFont.draw(
-            batch,
+        Fonts.drawText(
+            batch, labelFont,
             ShadowRankedFormat.rulesLabel(entry.rounds, entry.allowChicken),
-            left + padX,
-            line2,
+            left + padX, line2, AppPalette.inkMuted,
         )
 
         if (entry.hasScore()) {
+            // One row per score, so the line is cut rather than wrapped: the row
+            // height reserves exactly one line.
             val line3 = line2 - labelFont.lineHeight - gap
-            labelFont.color = AppPalette.inkWarm
-            glyphLayout.setText(
-                labelFont, ShadowRankedFormat.scoreLine(entry.scores),
-                labelFont.color, width - padX * 2f, Align.left, true,
+            val score = TextFit.ellipsize(
+                labelFont,
+                ShadowRankedFormat.scoreLine(entry.scores),
+                width - padX * 2f,
             )
-            labelFont.draw(
-                batch, ShadowRankedFormat.scoreLine(entry.scores), left + padX, line3,
-                width - padX * 2f, Align.left, true,
-            )
+            Fonts.drawText(batch, labelFont, score, left + padX, line3, AppPalette.inkWarm)
         }
         labelFont.color = Color.WHITE
         itemFont.color = Color.WHITE

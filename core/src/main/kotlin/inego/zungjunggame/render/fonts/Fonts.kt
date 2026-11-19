@@ -471,6 +471,34 @@ object Fonts : Disposable {
         FallbackText.draw(batch, primary, fallbackFor(primary), text, x, y, color)
     }
 
+    /**
+     * Height of [text] wrapped to [wrapWidth] on the face [drawWrapped] will
+     * paint it with. A wrapped block takes one face for the whole block, so the
+     * wrap and the ink cannot disagree.
+     */
+    fun wrappedHeight(primary: BitmapFont, text: String, wrapWidth: Float, align: Int): Float {
+        if (text.isEmpty()) return 0f
+        if (textNeedsFallback(text)) ensureFallback()
+        return FallbackText.wrappedHeight(primary, fallbackFor(primary), text, wrapWidth, align)
+    }
+
+    /** Paint [text] wrapped to [wrapWidth]; measure with [wrappedHeight]. */
+    fun drawWrapped(
+        batch: SpriteBatch,
+        primary: BitmapFont,
+        text: String,
+        x: Float,
+        y: Float,
+        wrapWidth: Float,
+        align: Int,
+        color: Color,
+    ) {
+        if (textNeedsFallback(text)) ensureFallback()
+        FallbackText.drawWrapped(
+            batch, primary, fallbackFor(primary), text, x, y, wrapWidth, align, color,
+        )
+    }
+
     fun fallbackFor(primary: BitmapFont): BitmapFont? {
         if (!fallbackCreated && !fallbackAttempted) return null
         ensureFallbackGenerators()

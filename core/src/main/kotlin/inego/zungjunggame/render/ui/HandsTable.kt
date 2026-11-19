@@ -255,39 +255,39 @@ class HandsTableRenderer {
         headerFont: BitmapFont,
         cellFont: BitmapFont,
     ): Grid {
-        var winner = textWidth(headerFont, L10n.get("handsTable.winner"))
-        var from = textWidth(headerFont, L10n.get("handsTable.from"))
-        var score = textWidth(headerFont, L10n.get("handsTable.score"))
-        var patternsSample = textWidth(headerFont, L10n.get("handsTable.patterns"))
+        var winner = Fonts.textWidth(headerFont, L10n.get("handsTable.winner"))
+        var from = Fonts.textWidth(headerFont, L10n.get("handsTable.from"))
+        var score = Fonts.textWidth(headerFont, L10n.get("handsTable.score"))
+        var patternsSample = Fonts.textWidth(headerFont, L10n.get("handsTable.patterns"))
         var patternsToken = 0f
         var seatHeader = 0f
         var seatCell = 0f
         for (doc in model.docs) {
-            for (player in doc.players) seatHeader = max(seatHeader, textWidth(headerFont, player.label))
+            for (player in doc.players) seatHeader = max(seatHeader, Fonts.textWidth(headerFont, player.label))
             for (row in doc.rows) {
-                winner = max(winner, textWidth(cellFont, row.winner))
-                from = max(from, textWidth(cellFont, row.from))
-                score = max(score, textWidth(cellFont, row.score))
-                patternsSample = max(patternsSample, textWidth(cellFont, row.patterns))
+                winner = max(winner, Fonts.textWidth(cellFont, row.winner))
+                from = max(from, Fonts.textWidth(cellFont, row.from))
+                score = max(score, Fonts.textWidth(cellFont, row.score))
+                patternsSample = max(patternsSample, Fonts.textWidth(cellFont, row.patterns))
                 for (token in row.patterns.split(' ')) {
-                    if (token.isNotEmpty()) patternsToken = max(patternsToken, textWidth(cellFont, token))
+                    if (token.isNotEmpty()) patternsToken = max(patternsToken, Fonts.textWidth(cellFont, token))
                 }
                 for (seat in 0 until 4) {
                     val delta = row.deltas.getOrElse(seat) { 0 }
                     val total = row.totals.getOrElse(seat) { 0 }
                     // The player cell draws the delta in Fonts.body, and the footer
                     // totals in the larger Fonts.labelActive; the header uses cellFont.
-                    seatCell = max(seatCell, textWidth(Fonts.body, HandsTableText.formatSignedDelta(delta)))
-                    seatCell = max(seatCell, textWidth(cellFont, total.toString()))
-                    seatCell = max(seatCell, textWidth(Fonts.labelActive, HandsTableText.formatSignedDelta(total)))
+                    seatCell = max(seatCell, Fonts.textWidth(Fonts.body, HandsTableText.formatSignedDelta(delta)))
+                    seatCell = max(seatCell, Fonts.textWidth(cellFont, total.toString()))
+                    seatCell = max(seatCell, Fonts.textWidth(Fonts.labelActive, HandsTableText.formatSignedDelta(total)))
                 }
             }
         }
         val gap = Fonts.px(12f)
-        val numW = max(textWidth(headerFont, "#"), textWidth(cellFont, "99"))
-        val scoreW = max(score, textWidth(cellFont, "9999"))
-        val seatW = max(seatHeader, max(seatCell, textWidth(cellFont, "+9999")))
-        val patternsHeader = textWidth(headerFont, L10n.get("handsTable.patterns"))
+        val numW = max(Fonts.textWidth(headerFont, "#"), Fonts.textWidth(cellFont, "99"))
+        val scoreW = max(score, Fonts.textWidth(cellFont, "9999"))
+        val seatW = max(seatHeader, max(seatCell, Fonts.textWidth(cellFont, "+9999")))
+        val patternsHeader = Fonts.textWidth(headerFont, L10n.get("handsTable.patterns"))
         val patternsMin = max(patternsHeader, patternsToken)
         val patternsW = max(patternsHeader, patternsSample)
         return Grid(
@@ -516,15 +516,17 @@ class HandsTableRenderer {
         align: Int,
         color: Color,
     ) {
-        glyphLayout.setText(font, text, color, w, align, false)
+        val textW = Fonts.textWidth(font, text)
         val textX = when (align) {
-            Align.center -> x + (w - glyphLayout.width) * 0.5f
-            Align.right -> x + w - glyphLayout.width
+            Align.center -> x + (w - textW) * 0.5f
+            Align.right -> x + w - textW
             else -> x
         }
-        font.color = color
-        font.draw(batch, text, textX, y + (h + glyphLayout.height) * 0.5f)
-        font.color = Color.WHITE
+        Fonts.drawText(
+            batch, font, text, textX,
+            y + (h + Fonts.textHeight(font, text)) * 0.5f,
+            color,
+        )
     }
 
     private fun drawWrapped(
@@ -543,11 +545,6 @@ class HandsTableRenderer {
         font.color = color
         font.draw(batch, text, x, top, w.coerceAtLeast(1f), Align.left, true)
         font.color = Color.WHITE
-    }
-
-    private fun textWidth(font: BitmapFont, text: String): Float {
-        glyphLayout.setText(font, text)
-        return glyphLayout.width
     }
 
     private fun wrappedHeight(font: BitmapFont, text: String, width: Float): Float {

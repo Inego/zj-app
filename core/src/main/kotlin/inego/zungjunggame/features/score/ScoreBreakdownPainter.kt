@@ -524,7 +524,7 @@ internal class ScoreBreakdownPainter(
                         Fonts.withFaceScale(settleFont, bodyScale) {
                             var x = contentLeft
                             settleFont.color.set(fade(nameColor, expandedAlpha))
-                            settleFont.draw(batch, name, x, baseline, settle.nameW, Align.left, false)
+                            Fonts.drawText(batch, settleFont, name, x, baseline, settleFont.color)
                             x += settle.nameW + settle.colGap
 
                             settleFont.color.set(fade(AppPalette.inkMuted, expandedAlpha))
