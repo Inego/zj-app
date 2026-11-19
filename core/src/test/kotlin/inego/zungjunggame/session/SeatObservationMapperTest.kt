@@ -218,6 +218,60 @@ class SeatObservationMapperTest {
     }
 
     @Test
+    fun claimedChowTileIsCountedOnceAfterTheClaim() {
+        // Seat 0 is on its ActOnHand turn after claiming 2m for a 1m-2m-3m chow.
+        // The claimed tile is now in the meld, not the discarder's river, but the
+        // snapshot still carries it as lastDiscarded. It must not be subtracted a
+        // second time by the last-discard fallback: seat 0 holds one more 2m, so
+        // two copies are visible and two are still unseen.
+        val chowTile = 1 // 2m
+        val snapshot = SeatSnapshotWire(
+            handNumber = 1,
+            mySeat = 0,
+            eastSeat = 0,
+            liveWallSize = 50,
+            currentPlayer = 0,
+            decisionType = "ActOnHand",
+            lastDiscarder = 1,
+            lastDiscarded = chowTile,
+            isPendingDiscard = false,
+            isKongRobWindow = false,
+            handScore = 0,
+            winnerSeat = null,
+            winSource = null,
+            isTerminal = false,
+            scoreDeltas = null,
+            seats = listOf(
+                SeatSnapshotViewWire(
+                    seat = 0,
+                    concealedCount = 10,
+                    concealedTiles = listOf(chowTile, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+                    drawnTile = -1,
+                    hasDrawnTile = false,
+                    melds = listOf(
+                        MeldWire(
+                            tiles = listOf(
+                                MeldTileWire(0, open = true, rotated = false),
+                                MeldTileWire(chowTile, open = true, rotated = true),
+                                MeldTileWire(2, open = true, rotated = false),
+                            ),
+                        ),
+                    ),
+                    river = emptyList(),
+                    seatWindTile = Tiles.EAST,
+                ),
+                SeatSnapshotViewWire(seat = 1, concealedCount = 13, concealedTiles = null, drawnTile = -1, hasDrawnTile = false, melds = emptyList(), river = emptyList(), seatWindTile = Tiles.SOUTH),
+                SeatSnapshotViewWire(seat = 2, concealedCount = 13, concealedTiles = null, drawnTile = -1, hasDrawnTile = false, melds = emptyList(), river = emptyList(), seatWindTile = Tiles.WEST),
+                SeatSnapshotViewWire(seat = 3, concealedCount = 13, concealedTiles = null, drawnTile = -1, hasDrawnTile = false, melds = emptyList(), river = emptyList(), seatWindTile = Tiles.NORTH),
+            ),
+        )
+
+        val obs = snapshot.toSeatObservation()
+        assertNotNull(obs)
+        assertEquals(2, obs.remainingTiles[chowTile])
+    }
+
+    @Test
     fun returnsNullWhenOwnConcealedTilesNull() {
         val snapshot = SeatSnapshotWire(
             handNumber = 1,

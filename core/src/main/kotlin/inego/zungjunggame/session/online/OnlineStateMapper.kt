@@ -252,9 +252,13 @@ fun TableViewState.toSeatObservation(): SeatObservation? {
         }
     }
 
-    // 6. Do not also subtract lastDiscarded unless that tile is still absent from
-    // the discarder's projected river.
-    if (lastDiscarded in 0 until NUM_TILE_TYPES &&
+    // 6. lastDiscarded is an extra visible tile only while it is still the
+    // pending discard. Once a claim resolves it lives in the claimer's meld (or
+    // the promoter's kong), and once everyone passes it is in the river; both
+    // were already subtracted above. Keep the fallback for a pending discard the
+    // view did not place in its discarder's river.
+    if (isPendingDiscard &&
+        lastDiscarded in 0 until NUM_TILE_TYPES &&
         lastDiscarder in 0 until NUM_PLAYERS
     ) {
         val discarderSeat = seats.firstOrNull { it.seat == lastDiscarder }
