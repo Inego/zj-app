@@ -1,14 +1,19 @@
 package inego.zungjunggame.net
 
 import inego.zungjunggame.i18n.L10n
+import inego.zungjunggame.platform.PlatformTimeZone
 import kotlin.math.roundToInt
 
 /**
  * Display strings for a [MatchSummary]. Uses [L10n]; unit-testable once bootstrapped.
  */
 object MatchHistoryFormat {
-    fun dayLabel(endedAt: String, nowMs: Long): String {
-        val day = UtcDate.relativeDay(endedAt, nowMs)
+    /**
+     * The day label for an instant: Today/Yesterday in the device's zone, or the
+     * local calendar date. A process that cannot place an instant reads UTC.
+     */
+    fun dayLabel(instantIso: String, nowMs: Long): String {
+        val day = UtcDate.relativeDay(instantIso, nowMs, PlatformTimeZone::offsetMinutesAt)
         return when (day.kind) {
             UtcDate.RelativeKind.Today -> L10n.get("history.today")
             UtcDate.RelativeKind.Yesterday -> L10n.get("history.yesterday")
@@ -44,12 +49,17 @@ object MatchHistoryFormat {
      *
      * The day word is the one match history already shows ([history.today] /
      * [history.yesterday]), so the two lists read the same and no locale needs a
-     * new translation. The clock is UTC (see [UtcDate.clockFromEpochMs]): it only
-     * orders notices within a day, and the client knows no other zone.
+     * new translation. Both the day and the clock are read in the device's zone
+     * ([PlatformTimeZone]); a process that cannot place the instant reads UTC.
      */
     fun sentLabel(createdAt: String, nowMs: Long): String? {
         val millis = UtcDate.epochMillisFromIso(createdAt) ?: return null
-        return L10n.format("history.day_at", dayLabel(createdAt, nowMs), UtcDate.clockFromEpochMs(millis))
+        val offset = PlatformTimeZone.offsetMinutesAt(millis) ?: 0
+        return L10n.format(
+            "history.day_at",
+            dayLabel(createdAt, nowMs),
+            UtcDate.clockFromEpochMs(millis + offset * UtcDate.MS_PER_MINUTE),
+        )
     }
 
     fun placeLabel(placement: Int): String = when (placement) {

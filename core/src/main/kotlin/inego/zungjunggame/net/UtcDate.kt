@@ -7,6 +7,7 @@ package inego.zungjunggame.net
  */
 object UtcDate {
     const val MS_PER_DAY = 86_400_000L
+    const val MS_PER_MINUTE = 60_000L
 
     enum class RelativeKind { Today, Yesterday, Date }
 
@@ -126,8 +127,8 @@ object UtcDate {
      *
      * The time of day is paired with a day label (see [relativeDay]) rather than a
      * full stamp, so the clock only has to order notices *within* a day. It is
-     * UTC because every stamp this client receives is UTC and nothing on the
-     * client knows the player's zone.
+     * UTC; a caller that shows the player's own clock shifts the instant by the
+     * device's offset first.
      */
     fun clockFromEpochMs(epochMs: Long): String {
         val withinDay = epochMs - floorDiv(epochMs, MS_PER_DAY) * MS_PER_DAY
@@ -157,14 +158,41 @@ object UtcDate {
         )
     }
 
-    fun relativeDay(endedAtIso: String, nowMs: Long): RelativeDay {
-        val ended = parseIsoDate(endedAtIso) ?: return RelativeDay(RelativeKind.Date, endedAtIso)
-        val today = ymdFromEpochMs(nowMs)
-        if (ended == today) return RelativeDay(RelativeKind.Today, ended)
-        val yesterday = ymdFromEpochMs(nowMs - MS_PER_DAY)
-        if (ended == yesterday) return RelativeDay(RelativeKind.Yesterday, ended)
-        return RelativeDay(RelativeKind.Date, ended)
+    /**
+     * The device's local calendar day [instantIso] falls on, relative to local [nowMs].
+     *
+     * [offsetMinutesAt] places an instant in the device's zone: minutes east of UTC
+     * at that instant, or null when this process cannot place one (the instant then
+     * reads as UTC, the stamp's own clock). It is asked per instant because a zone's
+     * offset follows its own daylight-saving rules, so one cached number cannot
+     * place both ends.
+     *
+     * The comparison is by civil date, not by elapsed time: a match at 00:30 local
+     * is today even though it ended minutes ago, and a 23:50 one may be yesterday.
+     * A stamp that is a date rather than an instant keeps that date.
+     */
+    fun relativeDay(
+        instantIso: String,
+        nowMs: Long,
+        offsetMinutesAt: (Long) -> Int?,
+    ): RelativeDay {
+        val instant = epochMillisFromIso(instantIso)
+        val day = if (instant != null) {
+            localYmd(instant, offsetMinutesAt)
+        } else {
+            parseIsoDate(instantIso) ?: return RelativeDay(RelativeKind.Date, instantIso)
+        }
+        val nowLocal = localEpochMs(nowMs, offsetMinutesAt)
+        if (day == ymdFromEpochMs(nowLocal)) return RelativeDay(RelativeKind.Today, day)
+        if (day == ymdFromEpochMs(nowLocal - MS_PER_DAY)) return RelativeDay(RelativeKind.Yesterday, day)
+        return RelativeDay(RelativeKind.Date, day)
     }
+
+    private fun localEpochMs(epochMs: Long, offsetMinutesAt: (Long) -> Int?): Long =
+        epochMs + (offsetMinutesAt(epochMs) ?: 0) * MS_PER_MINUTE
+
+    private fun localYmd(epochMs: Long, offsetMinutesAt: (Long) -> Int?): String =
+        ymdFromEpochMs(localEpochMs(epochMs, offsetMinutesAt))
 
     private fun floorDiv(a: Long, b: Long): Long {
         var q = a / b

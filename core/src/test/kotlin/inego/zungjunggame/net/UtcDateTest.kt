@@ -23,11 +23,11 @@ class UtcDateTest {
     @Test
     fun relativeDayTodayYesterdayAndDate() {
         val now = 1_704_067_200_000L + 12 * 3_600_000L
-        val today = UtcDate.relativeDay("2024-01-01T08:00:00Z", now)
+        val today = UtcDate.relativeDay("2024-01-01T08:00:00Z", now) { null }
         assertEquals(UtcDate.RelativeKind.Today, today.kind)
-        val yesterday = UtcDate.relativeDay("2023-12-31T23:00:00Z", now)
+        val yesterday = UtcDate.relativeDay("2023-12-31T23:00:00Z", now) { null }
         assertEquals(UtcDate.RelativeKind.Yesterday, yesterday.kind)
-        val older = UtcDate.relativeDay("2023-12-01T00:00:00Z", now)
+        val older = UtcDate.relativeDay("2023-12-01T00:00:00Z", now) { null }
         assertEquals(UtcDate.RelativeKind.Date, older.kind)
         assertEquals("2023-12-01", older.ymd)
     }

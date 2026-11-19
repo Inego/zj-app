@@ -563,11 +563,11 @@ private fun ChallengeEntry.isFinished(): Boolean = status == ChallengeStatus.Fin
 private fun ChallengeEntry.hasScore(): Boolean = isFinished() && scores.isNotEmpty()
 
 /**
- * The code line's right-hand metadata: the date, the running player count, and —
- * unless the attempt finished — its status.
+ * The code line's right-hand metadata: the attempt's local date, the running player
+ * count, and — unless the attempt finished — its status.
  */
 private fun attemptInlineMeta(entry: ChallengeEntry, nowMs: Long): String = buildString {
-    append(MatchHistoryFormat.dayLabel(entry.createdAt, nowMs))
+    append(MatchHistoryFormat.dayLabel(entry.startedAt, nowMs))
     append(" · ").append(ShadowRankedFormat.playersLabel(entry.players))
     if (!entry.isFinished()) {
         // A finished row's status is not worth saying; anything else is.

@@ -29,6 +29,10 @@ data class ChallengeScoreRow(
  * One of the player's Shadow Ranked attempts, for the hub's attempts list.
  * Wire name retained.
  *
+ * [createdAt] is when the *challenge* (the pinned deal) was created — the first
+ * player's play time — not this attempt's. [startedAt] is when this player
+ * started, and is what "My attempts" shows.
+ *
  * [players] is the running distinct-player count. [ratingDelta] is the net rating this
  * account has moved on the attempt so far. [scores] is present only once
  * this attempt finishes, because the bot total and the other players' totals stay hidden
