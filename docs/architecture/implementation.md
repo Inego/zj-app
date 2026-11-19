@@ -73,6 +73,7 @@ Each detail doc is canonical for its mechanism; this page does not restate them.
 |---|---|
 | [components.md](components.md) | The component contract: `Component`, `Frame`, `Layout`, space, context and the composition root. |
 | [widgets-and-state.md](widgets-and-state.md) | Widgets, scopes, ownership by construction, the three kinds of UI state, hosts and snapshots. |
+| [text-in-space.md](text-in-space.md) | Text measurement, fit/cut/wrap/scroll moves, column budgets and bounds, script and input limits, and the prioritized non-uniform surfaces. |
 | [frame-loop.md](frame-loop.md) | The per-frame order: assemble → motion → layout → input → host ticks → paint → flush. |
 | [stack.md](stack.md) | Routes, `LayerSpec`, `Router`, back vs generic dismissal, `StackState`. |
 | [state-and-persistence.md](state-and-persistence.md) | `StateStore`/`StateKey`/schemas, backends, flush policy, keys, route UI store, cold start. |

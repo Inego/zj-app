@@ -1,0 +1,642 @@
+# Text in space — fitting variable-length strings
+
+Every string in this UI can grow: a translation, a stored alias, a five-digit
+rating, a wall count crossing 99, a CJK name, a narrower phone. This page is the
+map of how the UI answers that growth. It is orientation, not law: the binding
+rules are [`AGENTS.md`](../../AGENTS.md) and [`principles.md`](principles.md).
+This page names the mechanism that owns each answer, the inputs a width may be
+derived from, and the places where the model is not yet uniform.
+
+Paths are under `core/src/main/kotlin/inego/zungjunggame/` unless stated.
+
+> **In one paragraph.** Measure with the face that paints. Shrink a one-line
+> control caption to a 0.6 floor, and when it is still too wide there, change
+> the layout rather than the floor; ellipsize an identifier; wrap prose and
+> scroll it; reserve a digit column for a number; scroll editable text
+> horizontally around the caret. Derive every slot from the safe box, the
+> scrollbar gutter, or a policy limit — never from the rows in hand.
+
+---
+
+## 0. The model
+
+```
+measure with the face pair that will paint
+        │
+        ├─ one-line identifier ────────▶ cut          (TextFit.ellipsize)
+        ├─ one-line control caption ───▶ fit          (FittedLabel, floor 0.6)
+        ├─ prose ──────────────────────▶ wrap → scroll
+        ├─ number ─────────────────────▶ fixed digit budget
+        ├─ table cell ─────────────────▶ fixed column + cut or wrap
+        ├─ editable value ─────────────▶ horizontal scroll around the caret
+        └─ tag on a tile ──────────────▶ proportional fit
+```
+
+Two **intended** invariants span the moves below; §7 lists the places where
+the code does not yet meet them:
+
+1. **Measure the ink where it will land.** The width used for layout and the
+   face used for paint are the same primary + fallback pair. A fit multiplies
+   both faces and the geometry by one scale
+   (`render/fonts/Fonts.kt:548-601`). Violated today by raw paints and by
+   rich-text line boxes (§7.2).
+2. **Derive the slot from an input that cannot move while the surface is open.**
+   A body width is the panel minus its insets minus the scrollbar strip; a
+   column is a digit budget, a snapshot total or an alias-policy budget, never
+   the rows currently in hand.
+   Re-measure on a panel resize, a locale/script change, or a change in the
+   data's own declared bound — not on paging, scrolling or fetching
+   (`AGENTS.md:50-55`, `render/ui/OverlayBodyScroll.kt:105-118`). Violated by
+   the three row-measured tables (§7.4).
+
+Different surfaces need not share one move. What should be uniform is that every
+surface has a **width source**, a **legible outcome when that width is
+insufficient**, and **paint and interaction geometry derived from the same
+layout**.
+
+---
+
+## 1. The toolbox
+
+| Move | Primitive | Contract | Used for |
+|---|---|---|---|
+| Measure | `Fonts.textWidth` / `textHeight` / `drawText` | Per-code-unit split into primary and fallback runs, summed; `drawText` mirrors the measure | Everything that paints outside rich text |
+| Measure (doc) | `GdxTextMeasurer` | Adapts the same faces to `RichTextLayout`'s `TextMeasurer` | Reference, notices, coach |
+| Fit | `Fonts.fitScale` + `Fonts.withFaceScale` | Shrink uniformly, never above 1, clamp at `MIN_FIT_SCALE = 0.6` | Buttons, plaque rows, banners, chart labels |
+| Fit (one line) | `FittedLabel.draw` | Measure → fit → re-measure within `withFaceScale`, then paint; left or centred | Plate captions, setup rows |
+| Cut | `TextFit.ellipsize` | Single line, U+2026, binary search, code-point boundary, `""` when nothing fits | Names, page titles, identity lines |
+| Wrap | `LineBreaker` / `RichTextLayout` | Whitespace + CJK + kinsoku break opportunities; greedy fill to width | Documents, settings rows, hub prose |
+| Scroll | `OverlayBodyScroll`, `VerticalScroll`, `RichTextView` | Clip a viewport, paint a scrollbar, reserve its strip always | Any body that can outgrow its card |
+| Scroll (input) | `OverlayTextField` | Horizontal window that follows the caret | The alias editor |
+| Clip | `ScissorStack` | Cut paint at a rect | Lists and tables — a safety net, not a fitting strategy |
+
+### 1a. Measurement is fallback-aware
+
+`Fonts.textWidth` scans the string, lazily opens the fallback face when a
+character needs it, then delegates to `FallbackText`, which walks UTF-16 code
+units, picks primary or fallback per glyph, and sums the runs
+(`render/fonts/Fonts.kt:446-472`, `render/fonts/FallbackText.kt:21-53`).
+Cross-face kerning is deliberately dropped (`FallbackText.kt:12-14`).
+
+- The fallback is **direction-flipped by locale**: Roboto fills Latin for a CJK
+  primary; a CJK face fills Han for a Latin primary
+  (`render/fonts/FontFaceResolver.kt:75-104`, `render/fonts/ScriptProfile.kt:13-29`).
+- A glyph in neither face falls back to the **primary**, i.e. tofu rather than
+  omission (`FallbackText.kt:119`).
+- Height uses the whole-string fallback line box, so one Han character in a
+  Latin run adopts the CJK line height (`FallbackText.kt:47-53`).
+- Design pixels become world pixels through `uiScale = density` (phone web
+  ×`160/96`), clamped to `[1, 3]`; faces are rasterized at
+  `designSize × uiScale` (`Fonts.kt:743-751`, `:873`).
+
+A raw `BitmapFont.draw`, or a private `GlyphLayout.setText`, bypasses this
+split. It measures or paints the primary alone — correct for a fixed tag,
+wrong for a name or a translation.
+
+### 1b. Fit has a readability floor, not a fit guarantee
+
+```
+fitScale(naturalW, availableW, min = 0.6)
+    = 1f                         if it already fits or a slot is degenerate
+    = max(available / natural, min)   otherwise
+```
+
+`withFaceScale` runs a block with the primary **and its paired fallback**
+multiplied by the same scale and restores both in `finally`
+(`Fonts.kt:565-601`). `FittedLabel.draw` is the one-line package: it measures,
+fits, re-measures the ink inside the scaled face, centres or left-aligns it, and
+paints (`render/ui/FittedLabel.kt:42-66`).
+
+The floor is intentional: past 0.6 the run **overflows its slot** rather than
+shrinking into illegibility (`Fonts.kt:548-570`, `FittedLabel.kt:8-19`). A
+caller that hands `FittedLabel` a multi-line string will paint it as one line.
+
+### 1c. Cut removes the tail, never the line
+
+`TextFit.ellipsize` returns:
+
+- `""` for empty text, `maxWidth <= 0`, or a slot too narrow for the ellipsis;
+- the text unchanged when it fits;
+- `text[0, end).trimEnd() + "…"` for the widest prefix that fits, snapping down
+  off a low surrogate so a supplementary code point is not split.
+
+It has no newline handling and does not wrap (`render/ui/TextFit.kt:10-40`).
+Cut only what may lose its tail: a player name, a page title, an identity line.
+A control caption that loses its tail stops being a control.
+
+### 1d. Wrapping needs a break opportunity
+
+`LineBreaker` is the document-grade breaker: whitespace runs collapse, CJK is
+one token per character (surrogate-aware), opening punctuation glues forward,
+closing punctuation glues back, and a hyphen followed by text allows a soft
+break (`render/fonts/LineBreaker.kt:20-141`). `wrap` preserves hard `\n`
+(`:147-184`). `RichTextLayout` turns spans into atoms and fills lines greedily to
+the column width, dropping leading/trailing spaces and aligning each line
+(`render/richtext/RichTextLayout.kt:352-464`).
+
+Overlay and table code that does not use a document often calls
+`GlyphLayout(wrap = true)` directly. That wraps correctly for one face but not
+for mixed script; if you use it, reserve the measured height and paint the same
+width you measured (`features/settings/SettingsOverlay.kt:544-550`,
+`features/online/hub/LiveTabPanel.kt:531-560`).
+
+**No breaker can split an atom.** A long URL, an unhyphenated German compound,
+a three-digit list marker or a wide tile run is placed on its own line and
+overflows (`RichTextLayout.kt:403-409`).
+
+### 1e. Scroll is the answer for content, not for labels
+
+`OverlayViewport` fits sticky chrome plus a hugging body, then
+`OverlayBodyScroll` clips the body and paints a scrollbar
+(`render/ui/OverlayViewport.kt:113-134`, `render/ui/OverlayBodyScroll.kt:131-194`).
+The body's width is computed with the scrollbar strip **always** subtracted, so
+prose cannot re-wrap the moment the bar appears
+(`OverlayBodyScroll.kt:105-118`).
+
+Use scroll when the content itself matters and may be arbitrarily long
+(reference articles, notices, coach copy). Use fit or cut for a one-line label;
+scrolling a label is a symptom of a missing move.
+
+### 1f. Clip is not a fitting strategy
+
+`ScissorStack` is used by lists, tables and rich-text hosts to keep paint inside
+a viewport (`render/ui/ScrollableItemList.kt:372-386`,
+`render/richtext/RichTextView.kt:270-304`). It hides the symptom. A label that
+reaches the scissor without being fitted or cut has already failed — the user
+sees a word cut mid-glyph, with no ellipsis.
+
+---
+
+## 2. Where the width comes from
+
+### 2a. Cards
+
+Every card built on `OverlayViewport` starts from the safe inner area minus a
+12 dp margin (`render/ui/OverlayViewport.kt:35-51`). Width is then:
+
+```kotlin
+max(1f, min(desiredFraction, available.width, screenW - minGap))
+```
+
+so the fraction is the *desire*, the safe box the truth
+(`OverlayViewport.kt:183-184`). A card hugs its chrome and body, then is clamped
+and centred (`OverlayViewport.kt:53-63`). The common caps are 0.88 portrait /
+0.72 landscape for menu, settings and language; 0.90 / 0.72 for setup; the hub
+caps landscape at 560 dp (`features/menu/GameMenuOverlay.kt:611-616`,
+`features/settings/SettingsOverlay.kt:527-533`,
+`features/online/hub/OnlineHubOverlay.kt:583-587`).
+
+A body measured through `OverlayBodyScroll.measureWidth` gets
+`panelW - insetX - 12` on **every** frame, whether or not it is overflowing
+(`OverlayBodyScroll.kt:105-118`). This is the single most important width
+invariant in the UI: it makes the wrap width independent of the overflow state.
+`fitSticky` keeps chrome fixed above a clipped body (tables, history);
+`fitWholeCard` scrolls the whole column and insets the viewport by the rim
+(settings, the hub) (`OverlayViewport.kt:113-180`).
+
+### 2b. Tables
+
+A table's columns are sized from what cannot change mid-view:
+
+- a **digit budget** for every numeric column, measured from a repeated-digit
+  sample (`"0000"`, `"-9999"`, `"99"`);
+- a **policy budget** for a name (`AliasPolicy.STORED_GRAPHEMES = 24`, measured
+  as the wider of 24 `W` and 12 `中`; a display budget, not proof that every
+  legal alias fits — §7.4);
+- a **snapshot bound** for a place (`digits(total)`), not the page in hand;
+- the **header**, measured into the same column so translation widens the column
+  instead of clipping the word — unless the panel cannot hold the widened table
+  (§7.4).
+
+The leaderboard is the reference implementation for stable measurement: it
+measures with `Float.MAX_VALUE` so the card cannot feed back into its own
+measurement, sizes the place column from the snapshot total, and centres both
+the card and the grid
+(`features/leaderboard/LeaderboardOverlay.kt:335-351`, `:403-408`, `:780-812`).
+Match history states the same rule in words: the loaded pages are deliberately
+not an input (`features/history/MatchHistoryOverlay.kt:347-365`).
+
+The numeric anchors are **budgets, not bounds**. The leaderboard's rating column
+is a four-digit sample and its count columns three, because the client knows no
+server cap; a value wider than the sample — a five-digit rating, for example —
+is right-aligned into a cell that cannot hold it
+(`LeaderboardOverlay.kt:821-833`). `RatingChangesTable` and `ScoreBreakdownLayout`
+instead measure the loaded rows and floor at `"0000"` / `"+0000"`, which adapts
+to the values on screen but makes the sample a minimum, not a proof
+(`features/score/RatingChangesTable.kt:90-94`,
+`features/score/ScoreBreakdownLayout.kt:357-361`). A budget is a display
+decision; a bound is a proof (§7.4).
+
+**The accepted exceptions:** the hands table lets Patterns absorb the slack when
+the table is narrower than the 320 dp panel floor (`render/ui/HandsTable.kt:228-236`);
+the score breakdown lets a name column absorb slack so numeric columns keep the
+card's right edge (`features/score/ScoreBreakdownLayout.kt:738-749`). Both are
+deliberate, and neither is permission for a generic column to fill a panel:
+numbers need an edge, prose does not.
+
+### 2c. Buttons and rows
+
+- A plate hugs its label with a fixed pad, then a floor
+  (`OverlayChrome.drawButton`, `render/ui/OverlayChrome.kt:83-149`).
+- A dock sizes each button from `label + 48`, then falls back to an equal share
+  when the row cannot fit. The plate's height comes from one line plus padding,
+  but the caption may wrap: a longer translation has no reserved height
+  (`tutorial/slide/layout/SlideChromeLayout.kt:156-196`,
+  `features/tutorial/TableChip.kt:81-94`; §7.3).
+- A row with a control either wraps its label and grows its height
+  (`SettingsOverlay.kt:544-550`) or fits the label into the remaining slot
+  (`features/local/NewGameSetupOverlay.kt:621-635`). The hub's cycle row shrinks
+  the label but never the value (`features/online/hub/HubDraw.kt:188-208`).
+
+### 2d. Cached measurements
+
+A cached width or height must key on every input that can change the answer:
+
+- **available width** — a panel resize, not a scroll;
+- **locale / copy revision** — a translated header, status or rule line;
+- **font-metrics revision** — `Fonts.uiScale`, or a face rebuild;
+- **the declared data bound** — the snapshot total, not the page in hand.
+
+The keys are independent. Two locales in the same script profile (en ↔ ru)
+change copy without rebuilding a face (`Fonts.kt:190-200`), so "same face" does
+not mean "same text"; a face rebuild changes metrics without new copy. Paging is
+never a key.
+
+Match history keys on `Fonts.uiScale` and `L10n.currentLocale`; its widths come
+from formatter bounds, never the loaded pages
+(`features/history/MatchHistoryOverlay.kt:354-365`). `HandsTable` keys on the
+document list, width and `uiScale` but not the locale
+(`render/ui/HandsTable.kt:182-199`); the shadow-attempts table keys on the
+attempts and `uiScale` while measuring localized rules and status lines
+(`features/challenges/ShadowRankedAttemptsOverlay.kt:382-418`). A cache that
+survives a language switch with stale headers is the same defect as a column
+that moves on page two (§7.8).
+
+---
+
+## 3. The moves by surface
+
+This section records today's behavior. A move that is a gap is called out in §7
+rather than normalized here; the matrix is a map, not a prescription.
+
+### 3a. Chrome and cards
+
+| Surface | String | Move | Width anchor |
+|---|---|---|---|
+| Modal buttons | caption | fit to 0.6 | plate width |
+| Settings row | label | wrap | fixed body width |
+| New-game row | label | fit | row slot |
+| Menu identity | alias + rating | ellipsis the alias, keep the rating; whole-string ellipsis as last resort | badge budget |
+| Hub header | alias, latency, rating | ellipsis alias after latency; rating fit into a 52 dp cell | live values |
+| Hub body | prose | wrap | body width with gutter |
+| Quiz dock | button caption | natural width; equal share if the row overflows; caption may wrap | row width |
+| Card title | title | **raw** (no fit) | natural width |
+| Menu / TOC row | label | **raw** | panel / viewport |
+| Notification body | rich document | wrap + scroll | viewport minus gutter |
+
+The menu identity line is the only place where one string is split into "the
+part that may be cut" and "the part that must survive": ellipsize the alias to
+`maxWidth - ratingWidth`, rebuild `"name - rating"`, and only cut the rating when
+even the suffix cannot fit (`GameMenuOverlay.kt:1295-1318`).
+
+### 3b. Tables, documents, felt
+
+| Surface | Width source | Overflow | Re-measures when |
+|---|---|---|---|
+| Leaderboard | snapshot total + digit budgets + alias budget | name ellipsized; numbers right-aligned in fixed cells | never mid-view |
+| Match history | formatter bounds + locale | none by design; measurement is exhaustive | never mid-view |
+| Hands table | all docs in hand + headers + longest token | Patterns wraps; whole table zooms | a new doc adds a wider token |
+| Score breakdown | frozen hand-end snapshot | name absorbs slack; compact title fits/cuts | not within a hand |
+| Shadow attempts | loaded attempts | status/score wrap; first lines raw | a page arrives |
+| Shadow comparison | current comparison rows + header | caption wraps; columns scale when capped | rows change |
+| Reference / notices | viewport | wrap, then scroll | never mid-view |
+| Coach / quiz copy | copy band | wrap, then shrink to fit the band | never mid-view |
+| Seat label (bottom) | screen span minus safe edges | alias ellipsized; wind/score kept | every frame |
+| Seat label (side/opposite) | gutter height only | gutter scale; **no horizontal budget** | every frame |
+| Turn banner | 42 % of screen width | wrap, then height-fit to 0.6 | every frame |
+| Felt stamp | safe width | credit wraps via `LineBreaker` | every frame |
+| Tile tag | tile fraction | proportional fit; dropped below 3 px ink | every tile |
+
+Numbers are deliberately locale-free: ASCII digits, `+`, U+2212 by hand, and no
+grouping, so a rating never widens with a locale
+(`net/ShadowRankedFormat.kt:91-120`, `render/ui/HandsTable.kt:75`). The one
+deviation in wording is the score breakdown's `"..."` truncation
+(`features/score/ScoreBreakdownPainter.kt:218-227`); every other cut uses `…`.
+
+### 3c. Text and hit geometry
+
+A caption may shrink or be cut; the control does not. A plate button's tap
+target is its plate rect, not its ink: the caller publishes the same rect it
+hands the painter (`features/tutorial/QuizActionDock.kt:152-158`;
+`render/ui/OverlayChrome.kt:83-149` draws the plate). Inside a scrolled body,
+published control rects are intersected with the card viewport, so a tab pushed
+under the rim stops being tappable (`features/online/hub/OnlineHubComponent.kt:121-134`).
+A list row is resolved by stride from the scroll offset, not by measuring the
+painted label, so a label clipped at the viewport edge is still tappable on its
+row (`render/ui/ScrollableItemList.kt:258-275`).
+
+---
+
+## 4. Script, locale and translation length
+
+There are 18 complete bundles (`assets/i18n/ui*.properties`, 702 keys) and no
+length budget anywhere — not in the translator guide, not in the packer, not in
+the bundle tests. A missing key returns the key text and is logged once
+(`i18n/L10n.kt:207-216`); every base key is present in every pack today. The
+only length policy in the app is for player names
+(`net/AliasPolicy.kt:21-40`).
+
+Everything else is fit at paint. That works because:
+
+- **Script drives the face, not the key.** `ScriptProfile` gives Latin, Cyrillic
+  and Greek a Roboto primary, and `zh`/`ja` a CJK primary with Roboto as
+  fallback; a locale switch rebuilds faces only when the profile changes
+  (`render/fonts/ScriptProfile.kt:13-29`, `Fonts.kt:194-200`).
+- **CJK is not "three times shorter".** A Han glyph is full-width — two
+  East-Asian columns against one Latin column — while the CJK face is generated
+  at the same design size (`net/AliasPolicy.kt:95-111`, `Fonts.kt:653-665`). A
+  Chinese string is fewer characters, but each one spends about twice the
+  advance of a Latin glyph, so the character-count saving overstates the room.
+- **Translation growth is real and measurable.** Over 540 shared keys the
+  average character count is ×1.16 in German (max ×3.25), ×1.20 in Finnish
+  (max ×3.00), ×1.08 in Russian (max ×2.83), and ×0.37 in Chinese — the last is
+  the character saving, not the ink saving. `settings.tile_labels` grows
+  16 → 28 characters in German; `shadowRanked.description` 245 → 294 in German,
+  271 in Finnish.
+
+Use `python tools/i18n/width.py` before choosing a slot. It measures the real
+advance widths of the shipped Roboto/NotoSansSC stack, strips rich-text markup
+that occupies no ink, and reports em fractions (multiply by the face's design
+px). `--all` ranks keys by robust z-score, which is how to find the outlier
+translation rather than the longest source string.
+
+Examples from that audit:
+
+- `setup.chicken`: English 10.66 em; Greek 19.71 em (×1.85). At the `button`
+  face (18 design px) that is 192 px against 355 px.
+- `menu.title`: Serbian 10.29 em. At the 28 px title face that is 288 design px;
+  a 320 dp card's inner width is smaller, and the title is drawn raw, so it
+  clips at the rim.
+
+Two script limits are unfixed and worth knowing before designing a slot:
+
+- **No RTL.** No bidi reordering and no RTL locale; alignment is only
+  left/centre/right (`i18n/AppLocale.kt:19-133`, `RichTextLayout.kt:417-421`).
+- **Astral and combining code points are handled per code unit.** Ellipsis snaps
+  to code-point boundaries, not grapheme clusters, so a base + combining mark
+  can be cut apart; `FallbackText` judges an astral glyph by its surrogate
+  halves (`TextFit.kt:31-40`, `FallbackText.kt:104-120`).
+
+Locale is also a cache key, and it is not the same key as a face rebuild.
+`Fonts.applyLocale` disposes and rebuilds faces only when the script profile
+changes — en ↔ ru keeps the same faces and swaps the copy — and it notifies no
+measurement (`Fonts.kt:190-200`). Any cache that survives either event must key
+on `L10n.currentLocale` and `Fonts.uiScale`; §2d lists the full set. Match
+history and the tutorial coach do (`MatchHistoryOverlay.kt:354-365`,
+`features/tutorial/TutorialCoachOverlay.kt:737-751`).
+
+---
+
+## 5. Editable text is a separate contract
+
+A field holds the only live, authoritative string outside the model:
+`OverlayTextBuffer` owns text, caret and selection privately
+(`render/ui/OverlayTextBuffer.kt:21-29`). Its rules differ from painted text:
+
+- **Never shrink or ellipsize the value being edited.** The field scrolls
+  horizontally: `viewStart` is walked so the caret sits one pad inside the right
+  edge, then the visible slice is cut by measured width, not character count
+  (`render/ui/OverlayTextField.kt:249-271`). The window's `start`/`end` are
+  still UTF-16 indices, so an edge can split a surrogate pair or a combining
+  mark even when the buffer is intact.
+- **Caret, selection and deletion move by UTF-16 unit.** `moveLeft`/`moveRight`
+  add ±1, `backspace`/`deleteForward` remove one `Char`, and a paste past the
+  cap is cut with `substring(0, room)`
+  (`render/ui/OverlayTextBuffer.kt:75-128`, `:143-163`). A surrogate pair can be
+  split, which damages the value rather than only its paint (§7.1).
+- **Length is policed in three currencies.** Storage counts UTF-16 units
+  (`MAX_ALIAS = 96`, `MAX_SPECIAL_KEY = 128`, `net/AuthModels.kt:59-66`);
+  policy counts graphemes and East-Asian columns (write: 2–16 graphemes, ≤16
+  columns; read: 24 stored graphemes); paint has a width budget of the wider of
+  16 `W` and 8 `中` (`net/AliasPolicy.kt:21-40`,
+  `features/auth/AliasPaintLimit.kt:26-33`).
+- **A stored long name may be shortened but not grown.** `allowsEdit` accepts
+  edits inside the write limits, and outside them only edits that add neither a
+  grapheme nor a column (`AliasPolicy.kt:53-57`).
+- **The native prompt is a second implementation, with its own cap.** Android
+  applies an `InputFilter.LengthFilter` plus the same policy filter,
+  single-line, `IME_ACTION_DONE`, no suggestions, and receives
+  `Kind.maxLength` — 96 units for a name, 128 for the special key
+  (`android/src/main/kotlin/inego/zungjunggame/android/AndroidOverlayTextPrompt.kt:40-48`,
+  `:102-133`,
+  `features/auth/AliasPrompt.kt:82-86`, `:216-227`). The in-game card's buffer
+  is constructed with `MAX_SPECIAL_KEY` for every kind
+  (`features/auth/AliasCardOverlay.kt:58`), so the two editors do not agree on
+  the storage cap (§7.1).
+
+The card installs `AliasPaintLimit` at construction, and `edit()` replaces it
+with `AliasPolicy::allowsEdit` (`features/auth/AliasCardOverlay.kt:60`,
+`:101-107`, `features/auth/AliasPrompt.kt:93-97`). That is the right division:
+the paint budget is a face-dependent admission rule, and the editor already
+scrolls. Do not reinstate it to stop a legal string overflowing its visible
+window; the defects are the UTF-16 boundary handling and the two editors'
+different caps (§7.1), not the missing paint cap.
+
+---
+
+## 6. Invariants and edge cases
+
+- **Empty and non-positive slots.** `TextFit.ellipsize` returns `""`; `fitScale`
+  returns `1f` (full-size overflow) for `maxWidth <= 0`, not `0`. The two
+  primitives disagree on a degenerate slot; treat it as a layout defect, not as
+  a state to design around.
+- **The floor is a stopping point, not a fit guarantee.** At 0.6 the run is
+  drawn wider than its slot; a centred `FittedLabel` bleeds symmetrically. Do
+  not "fix" this by lowering the floor — treat it as a layout result: grow or
+  stack the control, use a short caption, or give prose more height or scroll.
+  Cut an identifier; never cut a control caption (§7.3).
+- **Cut is single-line and code-point aware.** It does not understand `\n`,
+  combining marks or grapheme clusters.
+- **Wrapping cannot split an atom.** Reserve extra width for URLs, compounds and
+  tile runs, or accept a visible overflow.
+- **Gutter is unconditional for text bodies.** Measuring with and painting
+  without the strip (or vice versa) re-wraps the column when the bar appears.
+- **A table's width comes from a stable input, not its rows.** The exceptions
+  are called out in §2b; they are deliberate, not precedent.
+- **Numbers get a column, not a fit.** Reserve the widest digit budget; do not
+  shrink a score to fit a slot it will outgrow at the next hand.
+- **A digit budget is not a bound.** A repeated-digit sample keeps a column
+  stable; it does not prove the column holds every value the server can send
+  (§2b, §7.4).
+- **Clip never substitutes for fit.** If a string reaches a scissor unfitted,
+  the user sees a mid-glyph cut with no ellipsis.
+
+---
+
+## 7. Where the model is not yet uniform
+
+These are observations about today's code, not rules. They are ordered by damage:
+1–4 can corrupt a value or leave a control unreadable or untappable; 5–8 are
+lower-severity gaps in specific surfaces, consistency, duplication and
+invalidation.
+
+1. **Editing can damage the value.** `OverlayTextBuffer` stores UTF-16 and moves
+   caret, selection and deletion by `Char`, not by code point or grapheme:
+   `moveLeft`/`moveRight` add ±1, `backspace`/`deleteForward` remove one `Char`,
+   and a paste past the cap is cut with `substring(0, room)`
+   (`render/ui/OverlayTextBuffer.kt:75-128`, `:143-163`). Deleting across a
+   surrogate pair or pasting across the cap can leave an unpaired surrogate,
+   and a cap cut can split a base from its combining mark, so the damage is to
+   the stored value, not just its paint. The two editors also
+   disagree on the cap: the in-game card is constructed with `MAX_SPECIAL_KEY`
+   (128 units) for every kind and never changes it
+   (`features/auth/AliasCardOverlay.kt:58`), while the native prompt takes
+   `Kind.maxLength` — 96 units for a name, 128 for a special key
+   (`features/auth/AliasPrompt.kt:82-86`, `:216-227`). Both apply
+   `AliasPolicy::allowsEdit` to a name, so typing is already bounded by
+   graphemes; the storage cap only matters for a paste, a legacy seed, or a
+   grapheme-dense name whose graphemes are many UTF-16 units.
+   **Next:** one field-kind policy for both editors, caps enforced at code-point
+   boundaries, and grapheme-aware caret, selection and deletion. Do not
+   reinstate a font-dependent paint cap to solve overflow — the editor already
+   scrolls (§5).
+2. **Layout, paint and hit geometry can describe different text.** Two faults
+   share this shape. First, raw paint skips the fallback face: the leaderboard
+   ellipsizes a name with the fallback-aware width and then paints it with
+   `itemFont.draw` (`features/leaderboard/LeaderboardOverlay.kt:601-614`), so
+   in a Latin locale a Han name is measured with the fallback and painted as
+   tofu. Match-history rows, segmented tabs, the TOC list, the turn banner and
+   the hub's wrapped prose paint raw as well, and match history's own
+   `textWidth` also measures raw, so its columns are sized for the primary
+   (`features/history/MatchHistoryOverlay.kt:425-428`, `:466-495`,
+   `render/ui/SegmentedTabs.kt:120-133`,
+   `render/ui/ScrollableItemList.kt:372-386`,
+   `render/table/TurnStatusBanner.kt:236-239`,
+   `features/online/hub/HubDraw.kt:248-269`); the quiz dock's action labels do
+   the same in both measure and paint (`features/tutorial/TableChip.kt:81-94`).
+   Second, rich text can lay out and paint at different scales or line heights:
+   line boxes reserve the primary line height while paint can use the taller
+   fallback, so a mixed-script body can clip vertically; and link hit boxes are
+   computed outside the draw-time document scale, so a scaled link is tappable
+   somewhere other than where it appears
+   (`render/richtext/GdxTextMeasurer.kt:19`,
+   `render/richtext/RichTextBlock.kt:150-156`). In each case the face or scale
+   that decided the geometry is not the one that paints, so the ink can leave
+   its box or a tap can miss the ink. **Next:** pair measure and draw helpers
+   for names and action labels; derive line metrics, painted positions and link
+   rectangles from one layout and one scale.
+3. **The fit floor has no next step.** The 0.6 floor is a readability decision,
+   not an overflow policy. The Greek `setup.chicken` caption is 19.71 em; at the
+   button face (18 design px) that is ~355 design px natural and ~213 design px
+   at the floor, before the checkbox disc, gap and info control
+   (`features/local/NewGameSetupOverlay.kt:368`, `:386-391`, `:621-635`;
+   `Fonts.kt:656`). A 320 dp card cannot give the label that much room, so the
+   floor decides only which neighbour it overlaps. A title drawn raw fails
+   without even the floor: Serbian `menu.title` is 10.29 em, 288 design px at
+   the 28 px face, and a 320 dp card clips it at the rim (§4). A fixed-height
+   plate whose caption wraps has no height outcome either: `TableChip` wraps
+   into a plate sized for one line (`features/tutorial/TableChip.kt:81-94`,
+   `tutorial/slide/layout/SlideChromeLayout.kt:156-196`). Rich text adds another
+   form: the coach's `fitBodyScale` has no legible floor and no truncation
+   fallback (`features/tutorial/CoachCopyText.kt:158-183`). Separately, no
+   breaker can split an unbreakable atom, so a long URL or compound overflows
+   rather than wrapping (§1d). **Next:** make "still
+   too wide at the floor" an explicit layout result handled before paint — grow
+   the row, stack the controls, use an approved short caption, or give prose
+   more height or scrolling. Ellipsize an identifier; never scroll a control
+   label (§1e).
+4. **Table widths can be unstable, or stable but insufficient.** Shadow
+   attempts, the comparison table and the hands table size columns from loaded
+   rows, so a later page or a longer pattern can reflow a table already on
+   screen (`features/challenges/ShadowRankedAttemptsOverlay.kt:382-418`,
+   `features/score/ShadowRankedComparisonTable.kt:276-310`,
+   `render/ui/HandsTable.kt:265-323`); that is the case `AGENTS.md:50-55`
+   forbids. Stable is not the same as sufficient: the leaderboard's rating
+   column is a four-digit sample and its count columns three, but the client
+   knows no server cap, so those are **display budgets, not bounds**
+   (`LeaderboardOverlay.kt:821-833`); a value wider than the sample — a
+   five-digit rating, for example — is right-aligned into a cell that cannot
+   hold it. `RatingChangesTable` and `ScoreBreakdownLayout`
+   take the wider of the loaded rows and a `"0000"` sample, so the sample never
+   proves a bound either (`features/score/RatingChangesTable.kt:90-94`,
+   `features/score/ScoreBreakdownLayout.kt:357-361`). The leaderboard's
+   degenerate branch adds another failure: a translated header can widen the
+   fixed columns past a narrow panel, and `scaled()` then shrinks the cells but
+   not the face, so numbers and header labels keep their natural ink and
+   overlap their neighbours (`LeaderboardOverlay.kt:764-797`). **Next:** size
+   numeric columns from the formatter or snapshot bound, sign and widest
+   permitted digits included; treat `W`/`中` alias samples as display budgets,
+   not proof that every legal alias fits; specify the compact layout for when
+   the budgets together exceed the safe width.
+5. **Some visible strings still get no move at all.** Card titles are drawn raw
+   in most overlays (`GameMenuOverlay.kt:860-864`,
+   `SettingsOverlay.kt:593-599`, `LeaderboardOverlay.kt:367-369`); TOC rows are
+   raw inside a scissor; left/right/opposite seat names have a gutter-scale but
+   no horizontal budget; the patternless notice only clamps its left edge
+   (`ScrollableItemList.kt:372-387`, `render/seats/SeatLabelDrawer.kt:136-138`,
+   `render/table/PatternlessNotice.kt:50-58`). The wall count and seat score
+   re-centre their whole run every frame instead of reserving a digit cell
+   (`render/table/LiveWallMarker.kt:131-150`, `SeatLabelDrawer.kt:198`). This
+   last one is mostly cosmetic — a count that gains a digit shifts the run, it
+   does not make it illegible — unlike items 1–4.
+6. **One visual role still has several answers.** A row label wraps in Settings,
+   fits in setup, shrinks-its-label-only in the hub, and is raw in the menu and
+   TOC; a button shrinks in `OverlayChrome`, wraps in `TableChip`, and
+   equal-shares then wraps in the quiz dock. The identity line is one ellipsized
+   string; the hub header is two cells with different moves.
+7. **Some primitives are duplicated.** The score breakdown hand-rolls `"..."`
+   truncation with `substring` (`ScoreBreakdownPainter.kt:218-227`); MC hint
+   labels mutate `font.data.setScale` directly, so a fallback face would not
+   follow (`render/hint/McHintLabels.kt:85-119`); four routes shrink a face
+   (`FittedLabel`, `fitScale` + `withFaceScale`, `withDocFontScale`, raw
+   `setScale`).
+8. **Cache invalidation is manual.** Only match history keys on both the locale
+   and `uiScale`; `HandsTable` and the shadow-attempts table key on scale and
+   data but not the locale. `Fonts.applyLocale` disposes faces without notifying
+   any cache, and two locales in the same script profile change the copy without
+   rebuilding a face (`MatchHistoryOverlay.kt:354-365`,
+   `features/reference/ReferenceBrowserOverlay.kt:498-519`,
+   `Fonts.kt:190-200`). §2d lists the inputs a cache must key on. Fetching
+   another page must change neither the column budget nor the position of
+   existing columns.
+
+---
+
+## 8. Where to look
+
+- **Toolbox:** `render/fonts/Fonts.kt`, `FallbackText.kt`, `LineBreaker.kt`,
+  `ScriptProfile.kt`; `render/ui/TextFit.kt`, `FittedLabel.kt`,
+  `OverlayChrome.kt`, `OverlayViewport.kt`, `OverlayBodyScroll.kt`.
+- **Documents:** `render/richtext/` (`RichDoc`, `RichMarkupParser`,
+  `RichTextLayout`, `RichTextView`, `RichTextBlock`, `RichTextLinkHit`);
+  `render/richtext/GdxTextMeasurer.kt`.
+- **Tables:** `features/leaderboard/LeaderboardOverlay.kt`,
+  `features/history/MatchHistoryOverlay.kt`, `render/ui/HandsTable.kt`,
+  `features/score/ScoreBreakdownLayout.kt`,
+  `features/challenges/ShadowRankedAttemptsOverlay.kt`.
+- **Felt:** `render/seats/SeatLabelDrawer.kt`, `render/table/TurnStatusBanner.kt`,
+  `render/tiles/TileLabelGeometry.kt`, `render/FeltStamps.kt`.
+- **Input:** `render/ui/OverlayTextBuffer.kt`, `OverlayTextField.kt`,
+  `features/auth/AliasPaintLimit.kt`, `net/AliasPolicy.kt`.
+- **Strings and script:** `i18n/`, `assets/i18n/`, `tools/i18n/width.py`.
+- **Tests that pin the mechanics:** `render/fonts/LineBreakerTest.kt`,
+  `render/richtext/RichTextLayoutTest.kt`, `RichMarkupParserTest.kt`,
+  `RichTextLinkHitTest.kt`, `render/ui/OverlayTextBufferTest.kt`,
+  `OverlayTextFieldTest.kt`, `net/MatchHistoryFormatTest.kt`.
+
+GL-dependent painting is outside the pure suite
+([`testing.md`](testing.md) §4), so fit regressions are verified by inspection
+and on-device, not by the unit tests. A width calculation can pass while the
+paint still fails, so check these on device:
+
+- 320 dp and a short landscape band;
+- every locale that is longest for the key (`width.py` finds it);
+- a stored 24-grapheme alias, a CJK alias, and a 5-digit rating;
+- a paste across the 96/128-unit cap, and a legacy over-limit alias shortened
+  in place, in both the in-game and native editors;
+- a Han name in a Latin locale (the leaderboard row is the reference failure);
+- the longest translated action caption on a 320 dp screen (the fit floor);
+- a scaled rich-text link tapped at its visible edges;
+- the exact point where a body starts to overflow (the scrollbar must not move
+  an edge or re-wrap a line);
+- a paged table after the second page arrives.

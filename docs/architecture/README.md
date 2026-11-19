@@ -11,6 +11,7 @@ ownership for UI changes.
 | [implementation.md](implementation.md) | The high-level map: app shape, dependency direction, and where every detail lives. |
 | [components.md](components.md) | The component contract: `Component`, `Frame`, `Layout`, space, context and the composition root. |
 | [widgets-and-state.md](widgets-and-state.md) | Widgets, scopes, ownership by construction, the three kinds of UI state, hosts. |
+| [text-in-space.md](text-in-space.md) | How variable-length text is measured, fitted, cut, wrapped, scrolled, and the prioritized places where the model is not uniform. |
 | [frame-loop.md](frame-loop.md) | The per-frame order from assemble to paint and flush. |
 | [stack.md](stack.md) | Routes, `LayerSpec`, `Router`, back vs generic dismissal, `StackState`. |
 | [state-and-persistence.md](state-and-persistence.md) | `StateStore`, schemas, backends, flush policy, keys, route UI store, cold start. |

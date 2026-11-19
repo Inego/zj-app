@@ -318,6 +318,9 @@ actions. `AppGraph` constructs the concrete overlay/widget and owns its scope.
   that knows a specific colour. It exports logical roles (surfaces, rims, ink,
   accent, totals, semantic colours, felt); components read those roles and
   never restate a hue. Change a token there, not at a call site.
+- Text fit: [`text-in-space.md`](text-in-space.md) — how variable-length
+  strings are measured, fitted, cut, wrapped and scrolled, and which inputs a
+  table may derive its columns from.
 - Canonical docs: [`principles.md`](principles.md) (rules),
   [`implementation.md`](implementation.md) (today's design and its detail docs),
   [`testing.md`](testing.md) (how to verify, restart matrix),
