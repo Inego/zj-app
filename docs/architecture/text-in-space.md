@@ -276,13 +276,13 @@ never a key.
 
 Match history keys on `Fonts.uiScale` and `L10n.currentLocale`; its widths come
 from formatter bounds, never the loaded pages
-(`features/history/MatchHistoryOverlay.kt:354-365`). `HandsTable` keys on the
+(`features/history/MatchHistoryOverlay.kt:354-365`). The attempts card keys its
+row layout on the list, the cell width, `uiScale`, the locale and the current
+minute — the minute because its date label is wall-clock-derived
+(`features/challenges/ShadowRankedAttemptsOverlay.kt`). `HandsTable` keys on the
 document list, width and `uiScale` but not the locale
-(`render/ui/HandsTable.kt:182-199`); the shadow-attempts table keys on the
-attempts and `uiScale` while measuring localized rules and status lines
-(`features/challenges/ShadowRankedAttemptsOverlay.kt:382-418`). A cache that
-survives a language switch with stale headers is the same defect as a column
-that moves on page two (§7.8).
+(`render/ui/HandsTable.kt:182-199`). A cache that survives a language switch
+with stale headers is the same defect as a column that moves on page two (§7.8).
 
 ---
 
@@ -302,7 +302,7 @@ rather than normalized here; the matrix is a map, not a prescription.
 | Hub header | alias, latency, rating | ellipsis alias after latency; rating fit into a 52 dp cell | live values |
 | Hub body | prose | wrap | body width with gutter |
 | Quiz dock | button caption | natural width; equal share if the row overflows; caption may wrap | row width |
-| Card title | title | **raw** (no fit) | natural width |
+| Card title | title | **raw** (no fit), except the attempts title, which fits its slot | natural width |
 | Menu / TOC row | label | **raw** | panel / viewport |
 | Notification body | rich document | wrap + scroll | viewport minus gutter |
 
@@ -319,7 +319,7 @@ even the suffix cannot fit (`GameMenuOverlay.kt:1295-1318`).
 | Match history | formatter bounds + locale | none by design; measurement is exhaustive | never mid-view |
 | Hands table | all docs in hand + headers + longest token | Patterns wraps; whole table zooms | a new doc adds a wider token |
 | Score breakdown | frozen hand-end snapshot | name absorbs slack; compact title fits/cuts | not within a hand |
-| Shadow attempts | loaded attempts | status/score wrap; first lines raw | a page arrives |
+| Shadow attempts | card floor + column headers + the rating's and code line's format budgets | code kept, metadata cut, rules/score wrap and grow the row | never mid-view |
 | Shadow comparison | current comparison rows + header | caption wraps; columns scale when capped | rows change |
 | Reference / notices | viewport | wrap, then scroll | never mid-view |
 | Coach / quiz copy | copy band | wrap, then shrink to fit the band | never mid-view |
@@ -565,11 +565,10 @@ abstraction; reuse the primitives they established (`text/Graphemes.kt`,
    the row, stack the controls, use an approved short caption, or give prose
    more height or scrolling. Ellipsize an identifier; never scroll a control
    label (§1e).
-4. **Table widths can be unstable, or stable but insufficient.** Shadow
-   attempts, the comparison table and the hands table size columns from loaded
-   rows, so a later page or a longer pattern can reflow a table already on
-   screen (`features/challenges/ShadowRankedAttemptsOverlay.kt:382-418`,
-   `features/score/ShadowRankedComparisonTable.kt:276-310`,
+4. **Table widths can be unstable, or stable but insufficient.** The comparison
+   table and the hands table size columns from loaded rows, so a later page or a
+   longer pattern can reflow a table already on screen
+   (`features/score/ShadowRankedComparisonTable.kt:276-310`,
    `render/ui/HandsTable.kt:265-323`); that is the case `AGENTS.md:50-55`
    forbids. Stable is not the same as sufficient: the leaderboard's rating
    column is a four-digit sample and its count columns three, but the client
@@ -610,9 +609,9 @@ abstraction; reuse the primitives they established (`text/Graphemes.kt`,
    follow (`render/hint/McHintLabels.kt:85-119`); four routes shrink a face
    (`FittedLabel`, `fitScale` + `withFaceScale`, `withDocFontScale`, raw
    `setScale`).
-8. **Cache invalidation is manual.** Only match history keys on both the locale
-   and `uiScale`; `HandsTable` and the shadow-attempts table key on scale and
-   data but not the locale. `Fonts.applyLocale` disposes faces without notifying
+8. **Cache invalidation is manual.** Match history and the attempts card key on
+   both the locale and `uiScale`; `HandsTable` keys on scale and data but not the
+   locale. `Fonts.applyLocale` disposes faces without notifying
    any cache, and two locales in the same script profile change the copy without
    rebuilding a face (`MatchHistoryOverlay.kt:354-365`,
    `features/reference/ReferenceBrowserOverlay.kt:498-519`,

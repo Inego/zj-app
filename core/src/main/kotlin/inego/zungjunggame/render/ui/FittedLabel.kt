@@ -26,6 +26,9 @@ object FittedLabel {
 
         /** Ink is centred in the slot — a plate caption. */
         Center,
+
+        /** Ink ends at the slot's right edge — a numeric column's header. */
+        Right,
     }
 
     /**
@@ -60,6 +63,7 @@ object FittedLabel {
             val x = when (align) {
                 Align.Left -> left
                 Align.Center -> left + (maxWidth - inkW) * 0.5f
+                Align.Right -> left + (maxWidth - inkW)
             }
             Fonts.drawText(batch, font, text, x, centerY + inkH * 0.5f, color)
         }

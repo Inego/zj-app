@@ -4,15 +4,16 @@ import com.badlogic.gdx.graphics.Camera
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.BitmapFont
-import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.utils.Align
 import com.badlogic.gdx.utils.Disposable
+import inego.zungjunggame.i18n.AppLocale
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.net.*
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.ui.CloseButton
+import inego.zungjunggame.render.ui.FittedLabel
 import inego.zungjunggame.render.ui.OverlayBodyScroll
 import inego.zungjunggame.render.ui.OverlayChrome
 import inego.zungjunggame.render.ui.OverlayViewport
@@ -33,12 +34,20 @@ data class ShadowRankedAttemptsGeometry(
 /**
  * The signed-in account's Shadow Ranked attempts, in their own card above the hub.
  *
- * The list is a window, not a wall: only the rows the card actually shows are laid
- * out and painted (the rest are culled by the scissor range), so a thousand
- * attempts cost the same as ten.
+ * The card is a **table with two columns** (the challenge cell and the rating):
+ * their widths come from budgets that cannot move while the card is open — the
+ * headers, the rating's formatter shape, the code line's format budget and the
+ * card's readable floor — never from the attempts currently in hand, so a second
+ * page cannot resize the card or move a column already on screen. Each row then measures its own lines at
+ * the cell width it will paint at, and those measured heights are the row's
+ * stride: a wrapped rules or score line grows the row instead of painting over
+ * the next one.
+ *
+ * The list is a window, not a wall: only the rows the card actually shows are
+ * painted (the rest are culled by the scissor range), so a thousand attempts
+ * cost the same as ten.
  */
 class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
-    private val glyphLayout = GlyphLayout()
     private val closeButton = CloseButton()
     private val body = OverlayBodyScroll()
 
@@ -60,12 +69,38 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
     /** The finished attempt rows the last render laid out; a release resolves one. */
     private var rowHits: List<RowHit> = emptyList()
 
-    // The rows' natural content width, memoized by list identity + UI scale so a
-    // long list measures its widest left column once, not every frame.
+    // The rows' measured layout, memoized by the list identity and every input
+    // that can change a measurement: the cell width, the font metrics, the locale
+    // (the rules, status and day words are translated) and the wall clock (the
+    // inline meta says Today/Yesterday). Paging changes none of them, so a later
+    // page appends rows without moving a column already on screen.
     private var measuredAttempts: List<ChallengeEntry>? = null
+    private var measuredCellW = Float.NaN
     private var measuredUiScale = Float.NaN
-    private var measuredLeftMax = 0f
-    private var measuredRatingW = 0f
+    private var measuredLocale: AppLocale? = null
+    private var measuredMinute = Long.MIN_VALUE
+    private var measuredRows: List<AttemptRow> = emptyList()
+
+    /**
+     * One attempt as it will paint: the strings already fitted to the challenge
+     * cell, the width of the code, and the height each line needs there.
+     *
+     * The heights are this layout's own output — [drawAttempt] stacks the same
+     * boxes, never re-derives one — so measurement and paint cannot disagree
+     * about whether a line wrapped.
+     */
+    private data class AttemptRow(
+        val entry: ChallengeEntry,
+        val id: String,
+        val idW: Float,
+        val meta: String,
+        val rules: String,
+        val score: String?,
+        val line1H: Float,
+        val rulesH: Float,
+        val scoreH: Float,
+        val height: Float,
+    )
 
     private data class RowHit(val hit: Hit, val publicId: String)
 
@@ -199,9 +234,6 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
 
         val lineGap = Fonts.px(4f)
         val attemptPadY = Fonts.px(10f)
-        val scoreLineH = labelFont.lineHeight
-        val baseRowH = attemptPadY + itemFont.lineHeight + lineGap + labelFont.lineHeight + attemptPadY
-        val scoreRowH = baseRowH + lineGap + scoreLineH
 
         val statusText = when {
             error != null && attempts.isEmpty() -> error
@@ -223,36 +255,65 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         val headerChallenge = L10n.get("shadowRanked.attempts.col_challenge")
         val headerRating = L10n.get("shadowRanked.attempts.col_rating")
 
-        // Hug the content: the card is as wide as its widest cell, clamped to a
-        // readable floor and the viewport — the same "never wider than it must be"
-        // policy the hands-table viewer uses for its panel.
-        val (rowsLeftMax, rowsRatingW) = measureRows(attempts, itemFont, labelFont, inlineGap, nowMs)
-        val leftMax = max(rowsLeftMax, if (showHeader) Fonts.textWidth(headerFont, headerChallenge) else 0f)
-        val ratingW = max(rowsRatingW, if (showHeader) Fonts.textWidth(headerFont, headerRating) else 0f)
-        val statusW = statusText?.let { Fonts.textWidth(labelFont, it) } ?: 0f
-        val loadMoreW = if (showLoadMore) Fonts.textWidth(itemFont, loadMoreLabel) else 0f
-        val contentW = rowPad * 2f + maxOf(leftMax + colGap + ratingW, statusW, loadMoreW)
+        // Column budgets. Neither column is measured from the rows in hand: the
+        // rating comes from the formatter's own shape, the challenge cell from the
+        // card's readable floor, the column headers, and the code line's format
+        // budget (a code, a date and a two-digit player count). That is what keeps
+        // a second page from resizing the card or moving a column mid-view.
+        val reservedGutter = VerticalScrollbar.gutterWidth()
+        val ratingW = max(
+            max(
+                Fonts.textWidth(itemFont, RATING_BUDGET_POSITIVE),
+                Fonts.textWidth(itemFont, RATING_BUDGET_NEGATIVE),
+            ),
+            Fonts.textWidth(headerFont, headerRating),
+        )
+        val floorCellW = (
+            Fonts.px(320f) - pad * 2f - reservedGutter - rowPad * 2f - colGap - ratingW
+            ).coerceAtLeast(Fonts.px(96f))
+        val codeLineBudget = Fonts.textWidth(itemFont, ID_BUDGET) + inlineGap +
+            Fonts.textWidth(
+                itemFont,
+                META_BUDGET_PREFIX + ShadowRankedFormat.playersLabel(PLAYERS_BUDGET),
+            )
+        val challengeDesire = max(
+            max(floorCellW, Fonts.textWidth(headerFont, headerChallenge)),
+            codeLineBudget,
+        )
+        val contentW =
+            pad * 2f + reservedGutter + rowPad * 2f + challengeDesire + colGap + ratingW
 
-        val rowHeights = attempts.map { if (it.hasScore()) scoreRowH else baseRowH }
+        val avail = OverlayViewport.available(screenW, screenH)
+        val minPanelW = min(avail.width, Fonts.px(320f))
+        panelW = contentW.coerceIn(minPanelW, avail.width)
+
+        val innerW = (panelW - pad * 2f).coerceAtLeast(0f)
+        // The scrollbar strip is reserved whether or not this list overflows, so
+        // the cell width cannot change the moment the bar appears.
+        val rowsW = (innerW - reservedGutter).coerceAtLeast(0f)
+        val challengeW = (rowsW - rowPad * 2f - colGap - ratingW).coerceAtLeast(Fonts.px(32f))
+        val rows = layoutRows(
+            attempts, itemFont, labelFont, challengeW,
+            attemptPadY, lineGap, inlineGap, nowMs,
+        )
+        val statusH = statusText?.let {
+            Fonts.wrappedHeight(labelFont, it, rowsW, Align.center)
+        } ?: 0f
         val bodyContentH = if (attempts.isEmpty()) {
-            Fonts.px(120f)
+            max(Fonts.px(120f), statusH + Fonts.px(48f))
         } else {
-            rowHeights.sum() + extraFooterH
+            rows.fold(0f) { sum, row -> sum + row.height } + extraFooterH
         }
 
-        val titleRowH = max(closeButton.side, titleFont.lineHeight)
+        val closeSide = CloseButton.defaultSide()
+        val titleRowH = max(closeSide, titleFont.lineHeight)
         val headerH = max(Fonts.px(24f), headerFont.lineHeight + Fonts.px(6f))
         val titleGap = Fonts.px(8f)
         val headerGap = Fonts.px(6f)
         val headerBlockH = if (showHeader) headerH + headerGap else 0f
 
-        val avail = OverlayViewport.available(screenW, screenH)
         val chromeH = closeInset + titleRowH + titleGap + headerBlockH + pad
         val fit = OverlayViewport.fitSticky(avail.height, chromeH, bodyContentH)
-        val gutter = if (fit.maxScrollY > 0f) VerticalScrollbar.gutterWidth() else 0f
-
-        val minPanelW = min(avail.width, Fonts.px(320f))
-        panelW = (contentW + pad * 2f + gutter).coerceIn(minPanelW, avail.width)
         panelH = fit.cardH
         val placed = OverlayViewport.placeCentered(panelW, panelH, avail)
         panelLeft = placed.first
@@ -268,44 +329,47 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         closeButton.layoutTopRight(panelLeft, panelBottom, panelW, panelH, closeInset)
         closeButton.render(batch, px, pointerWorldX, pointerWorldY)
 
+        // The title owns the band left of the close control and fits it: a long
+        // translation shrinks to the readability floor instead of clipping at the
+        // rim (the same move a plate caption gets).
         val title = L10n.get("shadowRanked.attempts.title")
-        val titleBaseline = panelBottom + panelH - closeInset -
-            (closeButton.side - Fonts.textHeight(titleFont, title)) * 0.5f
-        Fonts.drawText(batch, titleFont, title, panelLeft + pad, titleBaseline, titleFont.color)
+        val titleSlot = (closeButton.leftX - CloseButton.siblingGap() - (panelLeft + pad))
+            .coerceAtLeast(0f)
+        FittedLabel.draw(
+            batch, titleFont, title,
+            panelLeft + pad,
+            panelBottom + panelH - closeInset - closeSide * 0.5f,
+            titleSlot,
+            titleFont.color,
+        )
 
         val titleBottom = panelBottom + panelH - closeInset - titleRowH
         val headerTop = titleBottom - titleGap
         val headerBottom = headerTop - headerH
         val listTop = if (showHeader) headerBottom - headerGap else titleBottom - titleGap
         listLeft = panelLeft + pad
-        listW = panelW - pad * 2f
+        listW = innerW
         listBottom = panelBottom + pad
         listH = max(Fonts.px(48f), listTop - listBottom)
 
         body.layout(listLeft, listBottom, listW, listH, bodyContentH, scrollY)
-        val rowsW = listW - body.gutter
 
         if (showHeader) {
             drawHeader(
                 batch, headerFont, listLeft, headerBottom, rowsW, headerH,
-                headerChallenge, headerRating, rowPad,
+                headerChallenge, headerRating, rowPad, challengeW, ratingW,
             )
             drawRule(batch, px, listLeft, headerBottom, rowsW)
         }
 
         if (statusText != null) {
-            labelFont.color = AppPalette.inkMuted
-            glyphLayout.setText(labelFont, statusText, labelFont.color, rowsW, Align.center, true)
-            labelFont.draw(
-                batch,
-                statusText,
-                listLeft,
-                listBottom + listH * 0.5f + glyphLayout.height * 0.5f,
-                rowsW,
-                Align.center,
-                true,
+            // Centred in the body: the block's top is half its measured height
+            // above the centre, the same box the empty-state height reserved.
+            Fonts.drawWrapped(
+                batch, labelFont, statusText,
+                listLeft, listBottom + listH * 0.5f + statusH * 0.5f,
+                rowsW, Align.center, AppPalette.inkMuted,
             )
-            labelFont.color = Color.WHITE
             return
         }
 
@@ -314,17 +378,17 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
 
         body.drawBody(batch, camera, px, hoverX, hoverY) {
             var yTop = body.contentTop
-            attempts.forEachIndexed { index, entry ->
-                val h = rowHeights[index]
-                val rowBottom = yTop - h
+            rows.forEach { row ->
+                val rowBottom = yTop - row.height
                 if (rowBottom < body.bottom + body.height && yTop > body.bottom) {
                     // Stripe, same as a leaderboard row. hoverX/hoverY are blank
                     // during a drag; hitsContent ignores the header and the scrollbar.
                     val hovered = body.hitsContent(hoverX, hoverY) &&
                         hoverY >= rowBottom && hoverY < yTop
                     drawAttempt(
-                        batch, px, labelFont, itemFont, entry,
-                        listLeft, rowBottom, rowsW, h, nowMs, hovered,
+                        batch, px, labelFont, itemFont, row,
+                        listLeft, rowBottom, rowsW, challengeW, ratingW,
+                        attemptPadY, lineGap, inlineGap, hovered,
                     )
                 }
                 yTop = rowBottom
@@ -364,15 +428,21 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         challenge: String,
         rating: String,
         padX: Float,
+        challengeW: Float,
+        ratingW: Float,
     ) {
-        val baseline = bottom + (height + Fonts.textHeight(font, challenge)) * 0.5f
-        Fonts.drawText(batch, font, challenge, left + padX, baseline, AppPalette.ink)
-        Fonts.drawText(
-            batch, font, rating,
-            left + width - padX - Fonts.textWidth(font, rating), baseline,
-            AppPalette.ink,
+        val centerY = bottom + height * 0.5f
+        // Each caption owns the same column its cells do, so a translation widens
+        // its column (the width budgets measure it) instead of being clipped.
+        FittedLabel.draw(
+            batch, font, challenge,
+            left + padX, centerY, challengeW, AppPalette.ink,
         )
-        font.color = Color.WHITE
+        FittedLabel.draw(
+            batch, font, rating,
+            left + width - padX - ratingW, centerY, ratingW, AppPalette.ink,
+            align = FittedLabel.Align.Right,
+        )
     }
 
     private fun drawRule(batch: SpriteBatch, px: Texture, left: Float, y: Float, width: Float) {
@@ -382,41 +452,80 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
     }
 
     /**
-     * The widest left-column and rating-column text across [attempts], memoized by
-     * list identity + UI scale. Measuring all rows (not just the visible ones) keeps
-     * the card from resizing as the player scrolls.
+     * Every attempt fitted to [cellW] and measured at it: the code, the metadata
+     * that survives beside it, the rules line and the score line, with the height
+     * each needs. Memoized by list identity, cell width, face metrics, locale and
+     * the current minute — the inputs that can change an answer.
      */
-    private fun measureRows(
+    private fun layoutRows(
         attempts: List<ChallengeEntry>,
         itemFont: BitmapFont,
         labelFont: BitmapFont,
+        cellW: Float,
+        padY: Float,
+        lineGap: Float,
         inlineGap: Float,
         nowMs: Long,
-    ): Pair<Float, Float> {
-        if (measuredAttempts === attempts && measuredUiScale == Fonts.uiScale) {
-            return measuredLeftMax to measuredRatingW
+    ): List<AttemptRow> {
+        val locale = L10n.currentLocale
+        val minute = nowMs / MINUTE_MS
+        if (measuredAttempts === attempts &&
+            measuredCellW == cellW &&
+            measuredUiScale == Fonts.uiScale &&
+            measuredLocale == locale &&
+            measuredMinute == minute
+        ) {
+            return measuredRows
         }
-        var leftMax = 0f
-        var ratingW = 0f
-        for (entry in attempts) {
-            ratingW = max(ratingW, Fonts.textWidth(itemFont, ShadowRankedFormat.signedRating(entry.ratingDelta)))
-            // The code line: the challenge code, then the date and player count.
-            val codeLine = Fonts.textWidth(itemFont, entry.publicId) +
-                inlineGap + Fonts.textWidth(itemFont, attemptInlineMeta(entry, nowMs))
-            leftMax = max(leftMax, codeLine)
-            leftMax = max(
-                leftMax,
-                Fonts.textWidth(labelFont, ShadowRankedFormat.rulesLabel(entry.rounds, entry.allowChicken)),
+
+        val rows = attempts.map { entry ->
+            // The code is the row's identity: it keeps the cell, and the metadata
+            // beside it is what gets cut when the cell cannot hold both.
+            val id = TextFit.ellipsize(itemFont, entry.publicId, cellW)
+            val idW = Fonts.textWidth(itemFont, id)
+            val meta = TextFit.ellipsize(
+                itemFont,
+                attemptInlineMeta(entry, nowMs),
+                cellW - idW - inlineGap,
             )
-            if (entry.hasScore()) {
-                leftMax = max(leftMax, Fonts.textWidth(labelFont, ShadowRankedFormat.scoreLine(entry.scores)))
+            val rules = ShadowRankedFormat.rulesLabel(entry.rounds, entry.allowChicken)
+            val rulesH = Fonts.wrappedHeight(labelFont, rules, cellW, Align.left)
+            val score = if (entry.hasScore()) {
+                ShadowRankedFormat.scoreLine(entry.scores)
+            } else {
+                null
             }
+            val scoreH = if (score != null) {
+                Fonts.wrappedHeight(labelFont, score, cellW, Align.left)
+            } else {
+                0f
+            }
+            val line1H = max(
+                Fonts.textHeight(itemFont, id),
+                Fonts.textHeight(itemFont, meta),
+            )
+            AttemptRow(
+                entry = entry,
+                id = id,
+                idW = idW,
+                meta = meta,
+                rules = rules,
+                score = score,
+                line1H = line1H,
+                rulesH = rulesH,
+                scoreH = scoreH,
+                height = padY + line1H + lineGap + rulesH +
+                    (if (score != null) lineGap + scoreH else 0f) + padY,
+            )
         }
+
         measuredAttempts = attempts
+        measuredCellW = cellW
         measuredUiScale = Fonts.uiScale
-        measuredLeftMax = leftMax
-        measuredRatingW = ratingW
-        return leftMax to ratingW
+        measuredLocale = locale
+        measuredMinute = minute
+        measuredRows = rows
+        return rows
     }
 
     internal fun seedLayoutForTest(
@@ -475,73 +584,74 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         rowHits = rowHits + RowHit(Hit(left, bottom, w, h), publicId)
     }
 
+    /**
+     * Paints one row from the layout that measured it. Every block starts at the
+     * top [AttemptRow] reserved for it, so a wrapped line consumes the height it
+     * was measured at and the next line starts below it — never over it.
+     */
     private fun drawAttempt(
         batch: SpriteBatch,
         px: Texture,
         labelFont: BitmapFont,
         itemFont: BitmapFont,
-        entry: ChallengeEntry,
+        row: AttemptRow,
         left: Float,
         bottom: Float,
         width: Float,
-        height: Float,
-        nowMs: Long,
+        challengeW: Float,
+        ratingW: Float,
+        padY: Float,
+        lineGap: Float,
+        inlineGap: Float,
         hovered: Boolean,
     ) {
-        val gap = Fonts.px(4f)
         val padX = Fonts.px(10f)
-        val inlineGap = Fonts.px(12f)
 
         batch.setColor(
             if (hovered) OverlayChrome.rowFill(hovered = true)
             else AppPalette.tint(AppPalette.plateDeep, 0.55f),
         )
-        batch.draw(px, left, bottom + Fonts.px(2f), width, height - Fonts.px(4f))
+        batch.draw(px, left, bottom + Fonts.px(2f), width, row.height - Fonts.px(4f))
         batch.setColor(Color.WHITE)
 
-        // Code line: the challenge code, then its date and player count, with the
-        // rating right-aligned. Every run goes through the primary + fallback
-        // pair: a score line carries an opponent's own name, which is often in a
-        // script the primary face has no glyph for.
-        val line1 = bottom + height - Fonts.px(10f)
-        val idW = Fonts.textWidth(itemFont, entry.publicId)
-        Fonts.drawText(batch, itemFont, entry.publicId, left + padX, line1, AppPalette.accent)
-        Fonts.drawText(
-            batch, itemFont, attemptInlineMeta(entry, nowMs),
-            left + padX + idW + inlineGap, line1, AppPalette.inkMuted,
-        )
+        // Code line: the challenge code, then the metadata that survived beside
+        // it, with the rating right-aligned in its own column. [Fonts.drawText]
+        // carries the primary + fallback pair, and the code and meta widths come
+        // from the same fit that cut the meta.
+        var top = bottom + row.height - padY
+        Fonts.drawText(batch, itemFont, row.id, left + padX, top, AppPalette.accent)
+        if (row.meta.isNotEmpty()) {
+            Fonts.drawText(
+                batch, itemFont, row.meta,
+                left + padX + row.idW + inlineGap, top, AppPalette.inkMuted,
+            )
+        }
 
-        val rating = ShadowRankedFormat.signedRating(entry.ratingDelta)
+        val rating = ShadowRankedFormat.signedRating(row.entry.ratingDelta)
         Fonts.drawText(
             batch, itemFont, rating,
-            left + width - padX - Fonts.textWidth(itemFont, rating), line1,
-            ratingColor(entry.ratingDelta),
+            left + width - padX - Fonts.textWidth(itemFont, rating), top,
+            ratingColor(row.entry.ratingDelta),
         )
 
-        val line2 = line1 - itemFont.lineHeight - gap
-        Fonts.drawText(
-            batch, labelFont,
-            ShadowRankedFormat.rulesLabel(entry.rounds, entry.allowChicken),
-            left + padX, line2, AppPalette.inkMuted,
+        top -= row.line1H + lineGap
+        Fonts.drawWrapped(
+            batch, labelFont, row.rules,
+            left + padX, top, challengeW, Align.left, AppPalette.inkMuted,
         )
 
-        if (entry.hasScore()) {
-            // One row per score, so the line is cut rather than wrapped: the row
-            // height reserves exactly one line.
-            val line3 = line2 - labelFont.lineHeight - gap
-            val score = TextFit.ellipsize(
-                labelFont,
-                ShadowRankedFormat.scoreLine(entry.scores),
-                width - padX * 2f,
+        if (row.score != null) {
+            top -= row.rulesH + lineGap
+            Fonts.drawWrapped(
+                batch, labelFont, row.score,
+                left + padX, top, challengeW, Align.left, AppPalette.inkWarm,
             )
-            Fonts.drawText(batch, labelFont, score, left + padX, line3, AppPalette.inkWarm)
         }
-        labelFont.color = Color.WHITE
-        itemFont.color = Color.WHITE
-        if (entry.isFinished()) {
+
+        if (row.entry.isFinished()) {
             rowHits = rowHits + RowHit(
-                Hit(left, bottom + Fonts.px(2f), width, height - Fonts.px(4f)),
-                entry.publicId,
+                Hit(left, bottom + Fonts.px(2f), width, row.height - Fonts.px(4f)),
+                row.entry.publicId,
             )
         }
     }
@@ -556,6 +666,29 @@ class ShadowRankedAttemptsOverlay : Disposable, GestureSurface<ModalVerdict> {
         body.cancel()
     }
 }
+
+/**
+ * The rating column's display budget: a sign, two whole digits and the two
+ * decimals [ShadowRankedFormat.signedRating] always writes. Both signs are
+ * sampled because they need not share a width. The server declares no rating
+ * bound, so this is a budget, not a proof — a wider value is right-aligned out
+ * of the cell rather than moving the column.
+ */
+private const val RATING_BUDGET_POSITIVE = "+00.00"
+private const val RATING_BUDGET_NEGATIVE = "\u221200.00"
+
+/**
+ * The code line's format budget: the challenge code, then the inline meta at its
+ * widest fixed shape — a ten-digit date and a two-digit player count. The date
+ * can also read Today/Yesterday, which is shorter in every bundle; the status a
+ * live attempt appends is the part that gets cut when a translation outgrows it.
+ */
+private const val ID_BUDGET = "XXXX-XXXX"
+private const val META_BUDGET_PREFIX = "0000-00-00 \u00B7 "
+private const val PLAYERS_BUDGET = 99
+
+/** The inline meta's day label is a function of wall time; one re-measure a minute. */
+private const val MINUTE_MS = 60_000L
 
 private fun ChallengeEntry.isFinished(): Boolean = status == ChallengeStatus.Finished
 
