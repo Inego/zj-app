@@ -3,7 +3,6 @@
 package inego.zungjunggame.lwjgl3
 
 import com.badlogic.gdx.Files
-import com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application
 import com.badlogic.gdx.backends.lwjgl3.Lwjgl3ApplicationConfiguration
 import inego.zungjunggame.Main
 import inego.zungjunggame.i18n.AppLocale
@@ -92,7 +91,7 @@ fun main(args: Array<String>) {
     val windowController = DesktopWindowController(StateSlot(windowStore, WindowStateKey))
 
     try {
-        Lwjgl3Application(
+        ZjLwjgl3Application(
             DesktopLog.guard(windowController.wrap(Main())),
             Lwjgl3ApplicationConfiguration().apply {
         setTitle("Zung Jung Mahjong")

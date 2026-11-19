@@ -52,4 +52,32 @@ class TextEditTest {
         assertNull(TextEdit.replacement(marked, 1, 2, "", MAX_ALIAS, { _, _ -> true }))
         assertEquals("", TextEdit.replacement(marked, 0, 2, "", MAX_ALIAS, { _, _ -> true }))
     }
+
+    @Test
+    fun aPrivateUseCodePointNeverEntersTheValue() {
+        // U+F60A is what the desktop backend produced for U+1F60A before the
+        // character callback kept the full code point.
+        assertNull(TextEdit.replacement("A", 1, 1, "\uF60A", MAX_ALIAS, { _, _ -> true }))
+        assertEquals(
+            "B",
+            TextEdit.replacement("A", 1, 1, "B\uF60A", MAX_ALIAS, { _, _ -> true }),
+        )
+    }
+
+    @Test
+    fun aLegacyValueThatHoldsAPrivateUseCodePointCanStillBeShortened() {
+        val legacy = "e" + "\u0301".repeat(100) + "\uF60A"
+        val replacement = "y" + "\u0301".repeat(39)
+
+        val take = TextEdit.replacement(
+            text = legacy,
+            start = 0,
+            end = legacy.length,
+            incoming = replacement,
+            maxLength = MAX_ALIAS,
+            acceptEdit = AliasPolicy::allowsEdit,
+        )
+
+        assertEquals(replacement, take)
+    }
 }

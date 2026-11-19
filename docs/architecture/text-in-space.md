@@ -75,23 +75,26 @@ layout**.
 `Fonts.textWidth` scans the string, lazily opens the fallback face when a
 character needs it, then delegates to `FallbackText`, which walks UTF-16 code
 units, picks primary or fallback per glyph, and sums the runs
-(`render/fonts/Fonts.kt:446-472`, `render/fonts/FallbackText.kt:21-53`).
+(`render/fonts/Fonts.kt:446-472`, `render/fonts/FallbackText.kt:30-55`).
 Cross-face kerning is deliberately dropped (`FallbackText.kt:12-14`).
 
 - The fallback is **direction-flipped by locale**: Roboto fills Latin for a CJK
   primary; a CJK face fills Han for a Latin primary
   (`render/fonts/FontFaceResolver.kt:75-104`, `render/fonts/ScriptProfile.kt:13-29`).
-- A glyph in neither face falls back to the **primary**, i.e. tofu rather than
-  omission (`FallbackText.kt:119`).
+- A grapheme cluster neither face can draw becomes **one substitute glyph** before
+  measure or paint — `□` when a face has it, else `�`, else `?` — so a name can
+  never hold an invisible zero-width character (`FallbackText.kt`, §5). One box
+  per cluster, so a flag or an emoji sequence is a single stand-in.
 - Height uses the whole-string fallback line box, so one Han character in a
-  Latin run adopts the CJK line height (`FallbackText.kt:47-53`).
+  Latin run adopts the CJK line height (`FallbackText.kt:57-64`).
 - Design pixels become world pixels through `uiScale = density` (phone web
   ×`160/96`), clamped to `[1, 3]`; faces are rasterized at
   `designSize × uiScale` (`Fonts.kt:743-751`, `:873`).
 
 A raw `BitmapFont.draw`, or a private `GlyphLayout.setText`, bypasses this
 split. It measures or paints the primary alone — correct for a fixed tag,
-wrong for a name or a translation.
+wrong for a name or a translation — and it does not get the substitute glyph
+either, so an undrawable character there is still invisible (§7.1).
 
 ### 1b. Fit has a readability floor, not a fit guarantee
 
@@ -419,10 +422,20 @@ A field holds the only live, authoritative string outside the model:
   `Graphemes` is the shared boundary walker (`text/Graphemes.kt`):
   `moveLeft`/`moveRight`, `backspace`/`deleteForward` and word jumps stop on a
   cluster edge, while `MAX_ALIAS`/`MAX_SPECIAL_KEY` still bound the stored
-  units. A caret set into the middle of a cluster snaps to its start. Typed
-  input arrives one UTF-16 unit at a time, so a high surrogate is held until
-  its low half arrives; any other action abandons it rather than storing half a
-  code point.
+  units. A caret set into the middle of a cluster snaps to its start.
+- **Typed input carries the code point it was typed with.** Desktop replaces
+  libGDX's character callback (`lwjgl3/src/main/kotlin/inego/zungjunggame/lwjgl3/CodepointInput.kt`)
+  because the default casts every GLFW code point to `char`: 😊 (U+1F60A)
+  becomes the private-use U+F60A, and a supplementary Han code point can become
+  a *different* BMP character. The full code point is split into UTF-16 units on
+  the render thread. Where a backend hands over UTF-16 units one at a time, the
+  buffer holds a high surrogate until its low half arrives, and any other action
+  abandons it rather than storing half a code point.
+- **Private use never enters a value.** `TextEdit` drops every cluster that
+  contains a private-use code point before the cap or the policy sees it
+  (`text/TextEdit.kt`). No face can draw one, and a truncated code point is the
+  only way such a character reaches the field. A value that already holds one
+  still opens whole and can be shortened.
 - **Length is policed in two currencies.** Storage counts UTF-16 units
   (`MAX_ALIAS = 96`, `MAX_SPECIAL_KEY = 128`, `net/AuthModels.kt`);
   policy counts graphemes and East-Asian columns (write: 2–16 graphemes, ≤16
@@ -484,14 +497,17 @@ These are observations about today's code, not rules. They are ordered by damage
 already on screen; 5–8 are lower-severity gaps in specific surfaces,
 consistency, duplication and invalidation.
 
-Three cases now pass end to end and are the pattern for the rest. **Editing**
+Four cases now pass end to end and are the pattern for the rest. **Editing**
 (§5) stores UTF-16 units, edits on grapheme boundaries, and gives both editors
 one per-kind cap. The **leaderboard name** is measured, ellipsized and painted
 with the same primary + fallback pair. The **`setup.chicken` row** measures a
 wrapped caption before paint, grows the row to hold it, and derives the toggle
-and info rects from that grown row. Do not re-solve those three with a new
-abstraction; reuse the primitives they established (`text/Graphemes.kt`,
-`text/TextEdit.kt`, `Fonts.drawText`, `GlyphLayout` before `fitAndPlace`).
+and info rects from that grown row. **Undrawable text** becomes one substitute
+glyph before measure and paint, and desktop typed input keeps its code point, so
+a name can no longer hide an invisible character or store a truncated one. Do
+not re-solve those with a new abstraction; reuse the primitives they established
+(`text/Graphemes.kt`, `text/TextEdit.kt`, `Fonts.drawText`,
+`FallbackText.substituteUndrawable`, `GlyphLayout` before `fitAndPlace`).
 
 1. **Raw paint still skips the fallback face.** The leaderboard row now paints
    through `Fonts.drawText` (`features/leaderboard/LeaderboardOverlay.kt`), but
@@ -505,8 +521,10 @@ abstraction; reuse the primitives they established (`text/Graphemes.kt`,
    `features/online/hub/HubDraw.kt:248-269`); the quiz dock's action labels do
    the same in both measure and paint (`features/tutorial/TableChip.kt:81-94`).
    In a Latin locale a Han name or translation is then measured with the
-   fallback and painted as tofu. **Next:** pair measure and draw helpers per
-   surface, taking `Fonts.textWidth`/`Fonts.drawText` as the reference pair.
+   fallback and painted as tofu, and an undrawable code point stays invisible
+   instead of showing the substitute glyph `FallbackText` would give it.
+   **Next:** pair measure and draw helpers per surface, taking
+   `Fonts.textWidth`/`Fonts.drawText` as the reference pair.
 2. **Rich text can lay out and paint at different scales or line heights.** Line
    boxes reserve the primary line height while paint can use the taller
    fallback, so a mixed-script body can clip vertically; and link hit boxes are
@@ -609,13 +627,14 @@ abstraction; reuse the primitives they established (`text/Graphemes.kt`,
 - **Input:** `render/ui/OverlayTextBuffer.kt`, `OverlayTextField.kt`,
   `text/Graphemes.kt`, `text/TextEdit.kt`, `net/AliasPolicy.kt`,
   `features/auth/AliasCardOverlay.kt`, `features/auth/AliasPrompt.kt`,
-  `android/src/main/kotlin/inego/zungjunggame/android/AndroidOverlayTextPrompt.kt`.
+  `android/src/main/kotlin/inego/zungjunggame/android/AndroidOverlayTextPrompt.kt`,
+  `lwjgl3/src/main/kotlin/inego/zungjunggame/lwjgl3/CodepointInput.kt`.
 - **Strings and script:** `i18n/`, `assets/i18n/`, `tools/i18n/width.py`.
 - **Tests that pin the mechanics:** `render/fonts/LineBreakerTest.kt`,
-  `render/richtext/RichTextLayoutTest.kt`, `RichMarkupParserTest.kt`,
-  `RichTextLinkHitTest.kt`, `render/ui/OverlayTextBufferTest.kt`,
-  `OverlayTextFieldTest.kt`, `text/TextEditTest.kt`,
-  `net/MatchHistoryFormatTest.kt`.
+  `FallbackTextTest.kt`, `render/richtext/RichTextLayoutTest.kt`,
+  `RichMarkupParserTest.kt`, `RichTextLinkHitTest.kt`,
+  `render/ui/OverlayTextBufferTest.kt`, `OverlayTextFieldTest.kt`,
+  `text/TextEditTest.kt`, `net/MatchHistoryFormatTest.kt`.
 
 GL-dependent painting is outside the pure suite
 ([`testing.md`](testing.md) §4), so fit regressions are verified by inspection
@@ -627,6 +646,8 @@ paint still fails, so check these on device:
 - a stored 24-grapheme alias, a CJK alias, and a 5-digit rating;
 - a paste across the 96/128-unit cap, and a legacy over-limit alias shortened
   in place, in both the in-game and native editors;
+- a pasted emoji (one substitute glyph, not an invisible gap) and a typed
+  supplementary Han character, on desktop and on the phone;
 - a Han name in a Latin locale (the leaderboard row is the reference; the
   remaining raw-paint rows are the ones to check);
 - the longest translated action caption on a 320 dp screen (the fit floor);
