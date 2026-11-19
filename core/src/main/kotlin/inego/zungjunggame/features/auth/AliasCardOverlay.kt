@@ -57,7 +57,6 @@ class AliasCardOverlay : Disposable, GestureSurface<ModalVerdict> {
 
     private val aliasField = OverlayTextField(MAX_SPECIAL_KEY).apply {
         promptTitle = { L10n.get(kind.fieldKey) }
-        acceptEdit = AliasPaintLimit::allows
     }
 
     val aliasText: String
@@ -100,6 +99,7 @@ class AliasCardOverlay : Disposable, GestureSurface<ModalVerdict> {
      */
     fun edit(kind: AliasPrompt.Kind, seed: String) {
         this.kind = kind
+        aliasField.setMaxLength(kind.maxLength)
         aliasField.acceptEdit = kind.acceptEdit ?: { _, _ -> true }
         aliasField.setExact(seed)
         aliasField.enabled = true

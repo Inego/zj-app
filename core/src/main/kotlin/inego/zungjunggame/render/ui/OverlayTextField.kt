@@ -10,6 +10,7 @@ import inego.zungjunggame.platform.LineRequest
 import inego.zungjunggame.platform.OverlayClipboard
 import inego.zungjunggame.platform.OverlayTextPrompt
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.text.Graphemes
 import kotlin.math.max
 
 /**
@@ -117,8 +118,17 @@ class OverlayTextField(
     }
 
     /**
+     * Set the UTF-16 storage cap for later edits. The value already in the
+     * field stays whole; this is how a card for one field kind acquires that
+     * kind's cap after construction.
+     */
+    fun setMaxLength(value: Int) {
+        buffer.setMaxLength(value)
+    }
+
+    /**
      * Extra gate on typing and paste, after the length cap. The alias card
-     * installs the grapheme, column, and paint limits.
+     * installs the grapheme and column limits.
      */
     var acceptEdit: (before: String, after: String) -> Boolean
         get() = buffer.acceptEdit
@@ -257,17 +267,24 @@ class OverlayTextField(
         } else {
             // Scroll just enough that the caret sits one pad inside the right edge,
             // without scrolling past the point where the remaining text fills the
-            // field.
+            // field. A boundary is a whole grapheme: the window never starts in
+            // the middle of a surrogate pair or a base-and-mark cluster.
             val maxStartW = (caretW - available + pad)
                 .coerceIn(0f, (totalW - available).coerceAtLeast(0f))
-            var start = viewStart.coerceIn(0, display.length)
-            while (start > 0 && prefix[start] > maxStartW) start--
-            while (start < display.length && prefix[start + 1] <= maxStartW) start++
+            var start = Graphemes.atOrBefore(display, viewStart.coerceIn(0, display.length))
+            while (start > 0 && prefix[start] > maxStartW) start = Graphemes.prev(display, start)
+            while (start < display.length && prefix[Graphemes.next(display, start)] <= maxStartW) {
+                start = Graphemes.next(display, start)
+            }
             viewStart = start
         }
-        val start = viewStart.coerceAtMost(display.length)
+        val start = Graphemes.atOrBefore(display, viewStart.coerceIn(0, display.length))
         var end = start
-        while (end < display.length && prefix[end + 1] - prefix[start] <= available) end++
+        while (end < display.length) {
+            val next = Graphemes.next(display, end)
+            if (prefix[next] - prefix[start] > available) break
+            end = next
+        }
         val visible = display.substring(start, end)
         val lineH = Fonts.textHeight(font, visible)
 
@@ -310,16 +327,30 @@ class OverlayTextField(
         val display = buffer.text
         if (display.isEmpty()) return 0
         val pad = Fonts.px(12f)
-        val start = viewStart.coerceIn(0, display.length)
-        val x = worldX - left - pad + prefixWidth(font, display, start)
-        if (x <= 0f) return start
-        var prevW = 0f
-        for (i in 1..display.length) {
-            val currW = Fonts.textWidth(font, display.substring(0, i))
-            if (x < (prevW + currW) * 0.5f) return (i - 1).coerceAtLeast(start)
-            prevW = currW
+        val start = Graphemes.atOrBefore(display, viewStart.coerceIn(0, display.length))
+        val startW = prefixWidth(font, display, start)
+        val x = worldX - left - pad + startW
+        if (x <= startW) return start
+
+        // A caret placed by a tap stays inside the slice the field is showing.
+        val available = (width - pad * 2f).coerceAtLeast(1f)
+        var end = start
+        while (end < display.length) {
+            val next = Graphemes.next(display, end)
+            if (prefixWidth(font, display, next) - startW > available) break
+            end = next
         }
-        return display.length
+
+        var i = start
+        var prevW = startW
+        while (i < end) {
+            val next = Graphemes.next(display, i)
+            val currW = prefixWidth(font, display, next)
+            if (x < (prevW + currW) * 0.5f) return i
+            prevW = currW
+            i = next
+        }
+        return end
     }
 
     private fun copySelection() {

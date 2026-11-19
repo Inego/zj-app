@@ -1,20 +1,34 @@
 package inego.zungjunggame.render.ui
 
+import inego.zungjunggame.text.Graphemes
+import inego.zungjunggame.text.TextEdit
+
 /**
  * Single-line text buffer for overlay fields: caret, selection, insert/replace,
  * word jumps, and clipboard-shaped mutations. No GL, no libGDX input.
  *
- * Indices are Kotlin [Char] offsets (UTF-16), matching [String.substring].
+ * Indices are Kotlin [Char] offsets (UTF-16), matching [String.substring], but
+ * a caret, selection edge or deletion always sits on a grapheme boundary: a
+ * surrogate pair or a base with its combining marks moves and deletes as one
+ * step. Storage limits still count UTF-16 units, so a sticky value is not
+ * rewritten just because the cap changed.
  */
 class OverlayTextBuffer(
-    val maxLength: Int,
+    maxLength: Int,
     val rejectWhitespace: Boolean = false,
 ) {
     /**
+     * UTF-16 units an edit may hold. A value set with [setExact] may be longer;
+     * [setMaxLength] never truncates the value already in the buffer.
+     */
+    var maxLength: Int = maxLength
+        private set
+
+    /**
      * Whether [after] may replace [before]. The default accepts anything that
-     * fits [maxLength]. Alias editing installs the grapheme, column, and paint
-     * limits here; a stored name longer than those limits is set with [setExact]
-     * and can still be shortened.
+     * fits [maxLength]. Alias editing installs the grapheme and column limits
+     * here; a stored name longer than those limits is set with [setExact] and
+     * can still be shortened.
      */
     var acceptEdit: (before: String, after: String) -> Boolean = { _, _ -> true }
 
@@ -27,6 +41,14 @@ class OverlayTextBuffer(
     /** Inclusive selection origin, or null when there is no selection. */
     var selectionAnchor: Int? = null
         private set
+
+    /**
+     * The high half of a surrogate pair typed as two [typeChar] events. libGDX
+     * delivers one [Char] per event, so the pair is only inserted when the low
+     * half arrives; any other action abandons it instead of storing half a code
+     * point.
+     */
+    private var pendingHighSurrogate: Char? = null
 
     val hasSelection: Boolean
         get() {
@@ -50,6 +72,7 @@ class OverlayTextBuffer(
         get() = if (hasSelection) text.substring(selectionStart, selectionEnd) else ""
 
     fun replaceAll(value: String) {
+        pendingHighSurrogate = null
         text = ""
         caret = 0
         selectionAnchor = null
@@ -62,111 +85,123 @@ class OverlayTextBuffer(
      * write limits. Later keystrokes still go through [insert].
      */
     fun setExact(value: String) {
+        pendingHighSurrogate = null
         text = value
         caret = value.length
         selectionAnchor = null
     }
 
+    /**
+     * Change the storage cap without touching [text]. Lowering it below the
+     * current value keeps the value whole; later edits may only shorten it
+     * until it is back under the cap.
+     */
+    fun setMaxLength(value: Int) {
+        maxLength = value.coerceAtLeast(0)
+    }
+
     fun typeChar(ch: Char) {
+        if (ch.isHighSurrogate()) {
+            pendingHighSurrogate = ch
+            return
+        }
+        if (ch.isLowSurrogate()) {
+            val high = pendingHighSurrogate ?: return
+            pendingHighSurrogate = null
+            insert("$high$ch")
+            return
+        }
+        pendingHighSurrogate = null
         if (!isInsertable(ch)) return
         insert(ch.toString())
     }
 
     fun insert(raw: String) {
+        pendingHighSurrogate = null
         val filtered = filterInsert(raw)
         if (filtered.isEmpty()) return
         val start = selectionStart
         val end = selectionEnd
-        val prefix = text.substring(0, start)
-        val suffix = text.substring(end)
-        val room = (maxLength - prefix.length - suffix.length).coerceAtLeast(0)
-        val limited = if (filtered.length > room) filtered.substring(0, room) else filtered
-        if (limited.isEmpty()) return
-        val take = longestAccepted(text, prefix, limited, suffix)
+        val take = TextEdit.replacement(text, start, end, filtered, maxLength, acceptEdit) ?: return
         if (take.isEmpty()) return
-        text = prefix + take + suffix
-        caret = prefix.length + take.length
+        text = text.substring(0, start) + take + text.substring(end)
+        caret = start + take.length
         selectionAnchor = null
     }
 
-    /** Longest prefix of [incoming] that [acceptEdit] allows. Empty rejects the edit. */
-    private fun longestAccepted(before: String, prefix: String, incoming: String, suffix: String): String {
-        var take = incoming
-        while (take.isNotEmpty() && !acceptEdit(before, prefix + take + suffix)) {
-            take = dropLastCodePoint(take)
-        }
-        return take
-    }
-
-    private fun dropLastCodePoint(value: String): String {
-        if (value.isEmpty()) return value
-        val last = value.length - 1
-        val end = if (last > 0 && value[last].isLowSurrogate() && value[last - 1].isHighSurrogate()) {
-            last - 1
-        } else {
-            last
-        }
-        return value.substring(0, end)
-    }
-
     fun backspace() {
+        if (pendingHighSurrogate != null) {
+            pendingHighSurrogate = null
+            return
+        }
         if (hasSelection) {
             deleteSelection()
             return
         }
         if (caret <= 0) return
-        text = text.removeRange(caret - 1, caret)
-        caret -= 1
+        val from = Graphemes.prev(text, caret)
+        text = text.removeRange(from, caret)
+        caret = from
     }
 
     fun deleteForward() {
+        if (pendingHighSurrogate != null) {
+            pendingHighSurrogate = null
+            return
+        }
         if (hasSelection) {
             deleteSelection()
             return
         }
         if (caret >= text.length) return
-        text = text.removeRange(caret, caret + 1)
+        text = text.removeRange(caret, Graphemes.next(text, caret))
     }
 
     /** Selection, else from the previous word boundary to the caret. */
     fun deletePrevWord() {
+        pendingHighSurrogate = null
         if (hasSelection) {
             deleteSelection()
             return
         }
-        val from = prevWordIndex(text, caret)
+        val from = Graphemes.atOrBefore(text, prevWordIndex(text, caret))
         if (from >= caret) return
         text = text.removeRange(from, caret)
         caret = from
     }
 
     fun moveLeft(extend: Boolean) {
+        pendingHighSurrogate = null
         if (!extend && hasSelection) {
             caret = selectionStart
             selectionAnchor = null
             return
         }
-        setCaret(caret - 1, extend)
+        setCaret(Graphemes.prev(text, caret), extend)
     }
 
     fun moveRight(extend: Boolean) {
+        pendingHighSurrogate = null
         if (!extend && hasSelection) {
             caret = selectionEnd
             selectionAnchor = null
             return
         }
-        setCaret(caret + 1, extend)
+        setCaret(Graphemes.next(text, caret), extend)
     }
 
     fun moveHome(extend: Boolean) = setCaret(0, extend)
 
     fun moveEnd(extend: Boolean) = setCaret(text.length, extend)
 
-    fun movePrevWord(extend: Boolean) = setCaret(prevWordIndex(text, caret), extend)
+    fun movePrevWord(extend: Boolean) =
+        setCaret(Graphemes.atOrBefore(text, prevWordIndex(text, caret)), extend)
 
-    fun moveNextWord(extend: Boolean) = setCaret(nextWordIndex(text, caret), extend)
+    fun moveNextWord(extend: Boolean) =
+        setCaret(Graphemes.atOrAfter(text, nextWordIndex(text, caret)), extend)
 
     fun selectAll() {
+        pendingHighSurrogate = null
         if (text.isEmpty()) {
             caret = 0
             selectionAnchor = null
@@ -177,7 +212,8 @@ class OverlayTextBuffer(
     }
 
     fun setCaret(index: Int, extend: Boolean) {
-        val clamped = index.coerceIn(0, text.length)
+        pendingHighSurrogate = null
+        val clamped = Graphemes.atOrBefore(text, index.coerceIn(0, text.length))
         if (extend) {
             if (selectionAnchor == null) selectionAnchor = caret
         } else {
@@ -189,6 +225,7 @@ class OverlayTextBuffer(
     }
 
     fun cutText(): String {
+        pendingHighSurrogate = null
         if (!hasSelection) return ""
         val selected = selectedText
         deleteSelection()
@@ -218,17 +255,26 @@ class OverlayTextBuffer(
     private fun filterInsert(raw: String): String {
         if (raw.isEmpty()) return ""
         val out = StringBuilder(raw.length)
-        for (ch in raw) {
-            if (isInsertable(ch)) out.append(ch)
+        var i = 0
+        while (i < raw.length) {
+            val cp = raw.codePointAt(i)
+            val units = Character.charCount(cp)
+            // A high or low surrogate on its own is not a character; pasting
+            // one must not put half a code point into the stored value.
+            val paired = units == 2 || !Character.isSurrogate(cp.toChar())
+            if (paired && isInsertable(cp)) out.appendCodePoint(cp)
+            i += units
         }
         return out.toString()
     }
 
-    private fun isInsertable(ch: Char): Boolean {
-        if (ch.code < 32 || ch == '\u007f') return false
-        if (rejectWhitespace && ch.isWhitespace()) return false
+    private fun isInsertable(cp: Int): Boolean {
+        if (cp < 32 || cp == 0x7F) return false
+        if (rejectWhitespace && Character.isWhitespace(cp)) return false
         return true
     }
+
+    private fun isInsertable(ch: Char): Boolean = isInsertable(ch.code)
 
     companion object {
         fun firstLine(raw: String): String {

@@ -2,6 +2,7 @@ package inego.zungjunggame.features.auth
 
 import inego.zungjunggame.input.Intent
 import inego.zungjunggame.net.MAX_ALIAS
+import inego.zungjunggame.net.MAX_SPECIAL_KEY
 import inego.zungjunggame.platform.MemoryOverlayTextPrompt
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -28,6 +29,17 @@ class AliasPromptTest {
         os.complete("Alice")
         assertEquals("Alice", prompt.text(AliasPrompt.Kind.ChangeName))
         assertEquals(Intent.SaveDisplayName, emitted.single())
+    }
+
+    @Test
+    fun nativeSpecialKeyUsesItsOwnLongerCap() {
+        val os = MemoryOverlayTextPrompt(replacesKeyboard = true)
+        val prompt = NativeAliasPrompt(os, emit = {})
+
+        prompt.show(AliasPrompt.Kind.SpecialKey, "")
+
+        assertEquals(MAX_SPECIAL_KEY, os.lastRequest?.maxLength)
+        assertEquals(null, os.lastRequest?.acceptEdit)
     }
 
     @Test

@@ -1,6 +1,8 @@
 package inego.zungjunggame.features.auth
 
 import inego.zungjunggame.input.Intent
+import inego.zungjunggame.net.MAX_ALIAS
+import inego.zungjunggame.net.MAX_SPECIAL_KEY
 import inego.zungjunggame.runtime.FeatureRegistry
 import inego.zungjunggame.runtime.RouteIds
 import inego.zungjunggame.ui.ComponentAction
@@ -128,6 +130,23 @@ class AliasCardFeatureTest {
         // A caret key belongs to the field and emits nothing.
         component.onKeyDown(Input.Keys.LEFT, frame)
         assertEquals(1, emitted.size)
+
+        overlay.dispose()
+    }
+
+    @Test
+    fun theCardUsesTheFieldKindsStorageCap() {
+        val overlay = AliasCardOverlay()
+
+        overlay.edit(AliasPrompt.Kind.ChangeName, "")
+        overlay.keyTyped('a')
+        repeat(200) { overlay.keyTyped('\u0301') }
+        assertEquals(MAX_ALIAS, overlay.aliasText.length)
+
+        overlay.edit(AliasPrompt.Kind.SpecialKey, "")
+        overlay.keyTyped('a')
+        repeat(200) { overlay.keyTyped('\u0301') }
+        assertEquals(MAX_SPECIAL_KEY, overlay.aliasText.length)
 
         overlay.dispose()
     }

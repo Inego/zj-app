@@ -1,5 +1,7 @@
 package inego.zungjunggame.net
 
+import inego.zungjunggame.text.Graphemes
+
 /**
  * Display-name write limits shared by the in-app editor, the OS name dialog,
  * and the save path.
@@ -56,41 +58,7 @@ object AliasPolicy {
             columnWidth(after) <= columnWidth(before)
     }
 
-    /**
-     * Longest prefix of [incoming] for which [allows] accepts
-     * `prefix + take + suffix`. Empty when nothing, including a bare deletion
-     * of the selection, is acceptable.
-     */
-    fun longestAccepted(
-        before: String,
-        prefix: String,
-        incoming: String,
-        suffix: String,
-        allows: (String, String) -> Boolean = ::allowsEdit,
-    ): String {
-        var take = incoming
-        while (take.isNotEmpty() && !allows(before, prefix + take + suffix)) {
-            take = dropLastCodePoint(take)
-        }
-        return take
-    }
-
-    fun graphemeCount(text: String): Int {
-        if (text.isEmpty()) return 0
-        var count = 0
-        var i = 0
-        while (i < text.length) {
-            val cp = text.codePointAt(i)
-            i += Character.charCount(cp)
-            count++
-            while (i < text.length) {
-                val next = text.codePointAt(i)
-                if (!isGraphemeExtend(next)) break
-                i += Character.charCount(next)
-            }
-        }
-        return count
-    }
+    fun graphemeCount(text: String): Int = Graphemes.count(text)
 
     fun columnWidth(text: String): Int {
         var width = 0
@@ -105,33 +73,9 @@ object AliasPolicy {
 
     private fun columnOf(cp: Int): Int = when {
         cp < 0x20 || cp == 0x7F -> 0
-        isGraphemeExtend(cp) -> 0
+        Graphemes.isExtend(cp) -> 0
         isWide(cp) -> 2
         else -> 1
-    }
-
-    /** Marks that ride on the preceding grapheme and add no column. */
-    private fun isGraphemeExtend(cp: Int): Boolean = when {
-        cp in 0x0300..0x036F -> true
-        cp in 0x0483..0x0489 -> true
-        cp in 0x0591..0x05BD -> true
-        cp == 0x05BF || cp == 0x05C1 || cp == 0x05C2 || cp == 0x05C4 || cp == 0x05C5 || cp == 0x05C7 -> true
-        cp in 0x0610..0x061A -> true
-        cp in 0x064B..0x065F -> true
-        cp == 0x0670 -> true
-        cp in 0x06D6..0x06ED -> true
-        cp in 0x0730..0x074A -> true
-        cp in 0x07A6..0x07B0 -> true
-        cp in 0x07EB..0x07F3 -> true
-        cp == 0x3099 || cp == 0x309A -> true
-        cp in 0x1AB0..0x1AFF -> true
-        cp in 0x1DC0..0x1DFF -> true
-        cp in 0x20D0..0x20FF -> true
-        cp in 0xFE00..0xFE0F -> true
-        cp in 0xFE20..0xFE2F -> true
-        cp in 0x1F3FB..0x1F3FF -> true
-        cp in 0xE0100..0xE01EF -> true
-        else -> false
     }
 
     /** East Asian Width Wide or Fullwidth. Ambiguous code points stay width 1. */
@@ -149,17 +93,6 @@ object AliasPolicy {
             }
         }
         return false
-    }
-
-    private fun dropLastCodePoint(value: String): String {
-        if (value.isEmpty()) return value
-        val last = value.length - 1
-        val end = if (last > 0 && value[last].isLowSurrogate() && value[last - 1].isHighSurrogate()) {
-            last - 1
-        } else {
-            last
-        }
-        return value.substring(0, end)
     }
 
     /**

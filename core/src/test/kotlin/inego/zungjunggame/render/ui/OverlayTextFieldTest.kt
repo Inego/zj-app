@@ -1,6 +1,8 @@
 package inego.zungjunggame.render.ui
 
 import com.badlogic.gdx.Input
+import inego.zungjunggame.net.AliasPolicy
+import inego.zungjunggame.net.MAX_ALIAS
 import inego.zungjunggame.platform.MemoryOverlayClipboard
 import inego.zungjunggame.platform.MemoryOverlayTextPrompt
 import inego.zungjunggame.platform.OverlayClipboard
@@ -198,6 +200,31 @@ class OverlayTextFieldTest {
         assertTrue(keysField.pointerDown(10f, 10f, extend = false))
         assertEquals(0, keys.requestCount)
         assertEquals("abcd", keysField.text)
+    }
+
+    @Test
+    fun aLegacyNameOpensWholeAndStillShortensInPlace() {
+        val first = "e" + "\u0301".repeat(60)
+        val legacy = first + "x" + "\u0301".repeat(40)
+        assertEquals(102, legacy.length)
+
+        val field = field(maxLength = MAX_ALIAS)
+        field.acceptEdit = AliasPolicy::allowsEdit
+        field.setExact(legacy)
+        assertEquals(legacy, field.text, "opening the editor must not truncate the stored name")
+
+        // Replace the second cluster with a shorter one. The result is still
+        // above the 96-unit storage cap, but it is shorter than the value that
+        // was opened and still inside the write policy.
+        field.buffer.setCaret(first.length, extend = false)
+        field.buffer.setCaret(legacy.length, extend = true)
+        val replacement = "y" + "\u0301".repeat(39)
+        field.buffer.insert(replacement)
+
+        assertEquals(first + replacement, field.text)
+        assertEquals(101, field.text.length)
+        assertTrue(field.text.length > MAX_ALIAS)
+        assertTrue(AliasPolicy.allowsEdit(legacy, field.text))
     }
 
     @Test

@@ -9,10 +9,10 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import com.badlogic.gdx.backends.android.AndroidApplication
-import inego.zungjunggame.net.AliasPolicy
 import inego.zungjunggame.platform.LineRequest
 import inego.zungjunggame.platform.OverlayTextPrompt
 import inego.zungjunggame.platform.postToAppThread
+import inego.zungjunggame.text.TextEdit
 
 /**
  * System one-line dialog with the IME shown and the seed selected so typing
@@ -102,30 +102,33 @@ class AndroidOverlayTextPrompt(
     /**
      * Length cap, then [LineRequest.acceptEdit]. The seed is already in the
      * field, so a stored name longer than the policy stays visible; the filter
-     * only sees later edits. A paste that overshoots is cut to the longest
-     * prefix the policy accepts.
+     * only sees later edits. A paste that overshoots is cut at a grapheme
+     * boundary to the longest prefix the policy accepts. A value already over
+     * the cap can still be shortened: [TextEdit] holds its current length as
+     * the ceiling instead of refusing every replacement above the cap.
      */
     private fun inputFilters(request: LineRequest): Array<InputFilter> {
-        val filters = ArrayList<InputFilter>(2)
-        if (request.maxLength in 1 until Int.MAX_VALUE) {
-            filters += InputFilter.LengthFilter(request.maxLength)
-        }
+        val filters = ArrayList<InputFilter>(1)
         val policy = request.acceptEdit
-        if (policy != null) {
+        if (request.maxLength in 1 until Int.MAX_VALUE || policy != null) {
             filters += InputFilter { source, start, end, dest, dstart, dend ->
-                val prefix = dest.subSequence(0, dstart).toString()
-                val suffix = dest.subSequence(dend, dest.length).toString()
                 val incoming = source.subSequence(start, end).toString()
                 val before = dest.toString()
-                if (policy(before, prefix + incoming + suffix)) {
+                val take = TextEdit.replacement(
+                    text = before,
+                    start = dstart,
+                    end = dend,
+                    incoming = incoming,
+                    maxLength = request.maxLength,
+                    acceptEdit = policy ?: { _, _ -> true },
+                )
+                if (take == null) {
+                    // Refuse the edit without erasing the selected slice.
+                    dest.subSequence(dstart, dend)
+                } else if (take == incoming) {
                     null
                 } else {
-                    val take = AliasPolicy.longestAccepted(before, prefix, incoming, suffix, policy)
-                    // An empty replacement deletes [dstart, dend). Keep that slice
-                    // when no prefix of the paste is legal, so a rejected edit
-                    // does not erase the selection. A pure deletion has an empty
-                    // incoming and was accepted above when the policy allows it.
-                    if (take.isEmpty()) dest.subSequence(dstart, dend) else take
+                    take
                 }
             }
         }

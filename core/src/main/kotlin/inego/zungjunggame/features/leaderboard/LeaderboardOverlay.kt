@@ -600,8 +600,14 @@ class LeaderboardOverlay : Disposable, GestureSurface<ModalVerdict> {
         itemFont.color = accent
         itemFont.draw(batch, row.place.toString(), c.placeLeft, baseline)
 
-        itemFont.color = ivory
-        itemFont.draw(batch, TextFit.ellipsize(itemFont, row.displayName, c.nameW), c.nameLeft, baseline)
+        Fonts.drawText(
+            batch,
+            itemFont,
+            TextFit.ellipsize(itemFont, row.displayName, c.nameW),
+            c.nameLeft,
+            baseline,
+            ivory,
+        )
 
         itemFont.color = accent
         itemFont.draw(

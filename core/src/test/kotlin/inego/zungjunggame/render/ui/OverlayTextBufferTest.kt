@@ -238,4 +238,100 @@ class OverlayTextBufferTest {
         b.insert("\t")
         assertEquals("a", b.text)
     }
+
+    @Test
+    fun backspaceDeletesAWholeSurrogatePair() {
+        val b = buffer("A\uD83D\uDE00")
+        b.moveEnd(extend = false)
+
+        b.backspace()
+
+        assertEquals("A", b.text)
+        assertEquals(1, b.caret)
+    }
+
+    @Test
+    fun pasteThatDoesNotFitNeverInsertsHalfACodePoint() {
+        val emoji = "\uD83D\uDE00"
+        val b = buffer("A", maxLength = 2)
+        b.moveEnd(extend = false)
+
+        b.paste(emoji)
+        assertEquals("A", b.text)
+        assertEquals(1, b.caret)
+
+        b.setMaxLength(3)
+        b.paste(emoji)
+        assertEquals("A$emoji", b.text)
+    }
+
+    @Test
+    fun combiningMarkMovesSelectsAndDeletesAsOneGrapheme() {
+        val cluster = "e\u0301"
+        val b = buffer(cluster + "x")
+        b.moveEnd(extend = false)
+
+        b.moveLeft(extend = false)
+        assertEquals(2, b.caret)
+        b.moveLeft(extend = false)
+        assertEquals(0, b.caret, "the base and its mark are one caret step")
+        b.moveRight(extend = false)
+        assertEquals(2, b.caret)
+
+        // A caret inside the cluster snaps back to its start.
+        b.setCaret(1, extend = false)
+        assertEquals(0, b.caret)
+
+        b.moveRight(extend = true)
+        assertEquals(cluster, b.selectedText)
+        b.backspace()
+        assertEquals("x", b.text)
+    }
+
+    @Test
+    fun combiningMarkDeletesAsOneGrapheme() {
+        val cluster = "e\u0301"
+        val b = buffer(cluster + "x")
+        b.moveEnd(extend = false)
+
+        b.backspace()
+        assertEquals(cluster, b.text)
+        b.backspace()
+        assertEquals("", b.text)
+
+        val forward = buffer(cluster + "x")
+        forward.setCaret(0, extend = false)
+        forward.deleteForward()
+        assertEquals("x", forward.text)
+    }
+
+    @Test
+    fun aSurrogatePairTypedAsTwoKeysBecomesOneCodePoint() {
+        val b = buffer()
+
+        b.typeChar('\uD83D')
+        assertEquals("", b.text, "half a code point is not stored")
+        b.typeChar('\uDE00')
+
+        assertEquals("\uD83D\uDE00", b.text)
+        assertEquals(2, b.caret)
+    }
+
+    @Test
+    fun anInterruptedSurrogateIsNeverStored() {
+        val b = buffer("A")
+        b.moveEnd(extend = false)
+
+        b.typeChar('\uD83D')
+        b.backspace()
+        assertEquals("A", b.text)
+        assertEquals(1, b.caret)
+
+        b.typeChar('\uD83D')
+        b.typeChar('x')
+        assertEquals("Ax", b.text)
+        b.typeChar('\uDE00')
+        assertEquals("Ax", b.text)
+        assertTrue(b.text.none { Character.isSurrogate(it) })
+    }
 }

@@ -5,6 +5,7 @@ import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
+import com.badlogic.gdx.utils.Align
 import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.engine.GameConfig
 import inego.zungjunggame.i18n.L10n
@@ -406,10 +407,27 @@ class NewGameSetupOverlay(
         panelW = max(minPanelW, contentW + padX * 2f).coerceAtMost(maxPanelW)
         panelW = panelW.coerceAtMost(avail.width)
 
+        // The chicken caption shares its row with the checkbox and the info
+        // control, so its slot is narrower than the card. Measure it here, before
+        // the body height or paint: a translation that cannot fit the slot at
+        // the readable floor wraps and grows the row instead of shrinking past
+        // the floor or running under the info button. Use the body's stable
+        // width, with the scrollbar strip already removed: this runs before
+        // fitAndPlace knows whether the body will overflow, and the row height
+        // must not shrink when the bar appears.
+        val stableContentW = body.measureWidth(panelW, padX * 2f)
+        val stableCheckRowW = (stableContentW - infoSide - infoGap).coerceAtLeast(Fonts.px(120f))
+        val checkLabelInset = Fonts.px(4f) + Fonts.px(22f) + Fonts.px(14f)
+        val checkLabelW = (stableCheckRowW - checkLabelInset).coerceAtLeast(1f)
+        glyphLayout.setText(
+            sectionFont, labelChicken, Color.WHITE, checkLabelW, Align.left, true,
+        )
+        val chickenRowH = max(checkH, glyphLayout.height + Fonts.px(18f))
+
         val divH = max(1f, Fonts.px(1.5f))
         val chromeH = padY + titleFont.lineHeight + titleGap + blockGap + btnH + padY
         val bodyContentH = sectionFont.lineHeight + sectionLabelGap + listH +
-            blockGap + divH + dividerGap + checkH
+            blockGap + divH + dividerGap + chickenRowH
         val bodyInset = padY + btnH + blockGap
         val fitted = body.fitAndPlace(
             avail = avail,
@@ -424,7 +442,11 @@ class NewGameSetupOverlay(
         panelBottom = fitted.bottom
 
         val contentLeft = panelLeft + padX
+        // Current frame's content width, after fitAndPlace has decided whether
+        // the body overflows. The caption's height was reserved against the
+        // stable width, so a wider slot here can only give it fewer lines.
         val contentWInner = body.contentWidth(panelW, padX * 2f, Fonts.px(48f))
+        val checkRowW = (contentWInner - infoSide - infoGap).coerceAtLeast(Fonts.px(120f))
 
         // Card.
         OverlayChrome.drawPanel(
@@ -473,8 +495,7 @@ class NewGameSetupOverlay(
             batch.setColor(Color.WHITE)
             yTop -= divH + dividerGap
 
-            val chickenBottom = yTop - checkH
-            val checkRowW = (contentWInner - infoSide - infoGap).coerceAtLeast(Fonts.px(120f))
+            val chickenBottom = yTop - chickenRowH
             drawCheckRow(
                 batch = batch,
                 px = px,
@@ -483,13 +504,13 @@ class NewGameSetupOverlay(
                 left = contentLeft,
                 bottom = chickenBottom,
                 w = checkRowW,
-                h = checkH,
+                h = chickenRowH,
                 kind = HitKind.ChickenToggle,
                 pointerX = hoverX,
                 pointerY = hoverY,
             )
             val infoLeft = contentLeft + checkRowW + infoGap
-            val infoBottom = chickenBottom + (checkH - infoSide) * 0.5f
+            val infoBottom = chickenBottom + (chickenRowH - infoSide) * 0.5f
             chickenInfo.layoutAt(
                 left = infoLeft,
                 bottom = infoBottom,
@@ -683,14 +704,14 @@ class NewGameSetupOverlay(
 
         val font = Fonts.button
         val textLeft = boxLeft + box + Fonts.px(14f)
-        FittedLabel.draw(
-            batch = batch,
-            font = font,
-            text = label,
-            left = textLeft,
-            centerY = bottom + h * 0.5f,
-            maxWidth = (left + w - textLeft).coerceAtLeast(1f),
-            color = if (hovered) AppPalette.inkStrong else AppPalette.ink,
+        val labelW = (left + w - textLeft).coerceAtLeast(1f)
+        val ink = if (hovered) AppPalette.inkStrong else AppPalette.ink
+        glyphLayout.setText(font, label, ink, labelW, Align.left, true)
+        font.draw(
+            batch,
+            glyphLayout,
+            textLeft,
+            bottom + (h + glyphLayout.height) * 0.5f,
         )
     }
 
