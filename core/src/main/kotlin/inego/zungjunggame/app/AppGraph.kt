@@ -836,14 +836,15 @@ class AppGraph(
                 // No board is registered for the menu context; nothing to adorn.
                 SessionKind.Menu -> Unit
 
-                SessionKind.FreePlay, SessionKind.Online ->
+                SessionKind.FreePlay, SessionKind.Online -> {
+                    val felt = table.feltChrome(c.worldWidth, c.worldHeight)
                     freePlayPresenter.renderHandStatusBadge(
                         batch = canvas.batch,
-                        screenW = c.worldWidth,
                         screenH = c.worldHeight,
+                        rightBandInnerX = felt.rightBandInnerX,
                         sessionKind = snapshot.kind,
                         boardHosted = true,
-                        labelScale = table.chromeScaleFor(c.worldWidth, c.worldHeight),
+                        labelScale = felt.labelScale,
                         playHost = sessionRegistry.playHost,
                         latencyMs = if (snapshot.kind == SessionKind.Online) {
                             onlineCoordinator.presenceClient.lastRttMs
@@ -851,6 +852,7 @@ class AppGraph(
                             null
                         },
                     )
+                }
 
                 SessionKind.Tutorial -> Unit
             }

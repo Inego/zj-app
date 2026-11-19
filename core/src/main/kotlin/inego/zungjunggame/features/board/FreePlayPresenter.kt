@@ -159,19 +159,31 @@ class FreePlayPresenter(
      * Top-right status: "N/M" when finite (the template carries the numbers
      * alone — no "Hand"/"Раздача" — so the mobile HUD stays narrow), "Hand N"
      * when unlimited, where a lone number has no denominator to explain it.
-     * Tutorial shows a fixed label. Online adds a ping line under the badge from
-     * existing heartbeat RTT.
+     * Tutorial shows a fixed label.
+     *
+     * The session detail — the online ping, or the restart clock once a shutdown
+     * is announced — and the counter share **one line**, so the whole badge sits
+     * in the free strip above the Opposite hand. It is right-aligned to
+     * [rightBandInnerX], the Right seat's nominal tile band's inner face, not to
+     * the menu button: the button is density-scaled chrome in the corner, while
+     * the column is a short-side proportion, and anchoring to the button put the
+     * digits on the outermost meld of the Right hand.
+     *
+     * The detail comes **first** and the counter last, flush against the anchor.
+     * The ping is volatile (2↔3 digits), the hand number is not; putting the
+     * counter on the right keeps it from sliding horizontally as the ping
+     * changes.
      *
      * [labelScale] is the table's shared felt-label scale (see
-     * [inego.zungjunggame.render.table.PlayTableView.chromeScaleFor]). Every HUD
-     * line uses it, so the rule badge, hand counter, ping and shutdown clock
-     * shrink with the tiles and the seat labels instead of keeping their desktop
-     * size in a narrow window.
+     * [inego.zungjunggame.render.table.PlayTableView.feltChrome]). Every HUD
+     * line uses it, so the rule badge, hand counter and detail shrink with the
+     * tiles and the seat labels instead of keeping their desktop size in a
+     * narrow window.
      */
     fun renderHandStatusBadge(
         batch: SpriteBatch,
-        screenW: Float,
         screenH: Float,
+        rightBandInnerX: Float,
         sessionKind: SessionKind,
         boardHosted: Boolean,
         labelScale: Float,
@@ -185,8 +197,9 @@ class FreePlayPresenter(
         val safe = SafeArea.current()
         val topPad = kotlin.math.max(pad, safe.top + pad)
         val leftPad = kotlin.math.max(pad, safe.left + pad)
-        // The board menu button owns the far top-right; text stacks left of it.
-        val hudRight = BoardMenuChrome.hudRightEdge(screenW, screenH, safe)
+        // Stop a gap short of the tile column, on the felt side. The column's face
+        // is nominal geometry, so a claim does not move this anchor.
+        val hudRight = rightBandInnerX - Fonts.px(10f)
         val handBaselineY = screenH - topPad
 
         // Top-left rule badge: "Patternless OK" or "Min. 5 pts"
@@ -199,49 +212,75 @@ class FreePlayPresenter(
             maxHands = playHost?.maxHands ?: session.gameConfig.maxHands,
         )
 
+        // The restart clock outranks the ping: both share the detail slot, and an
+        // announced restart is the one the player must see.
+        var detailText: String? = null
+        var detailColor: Color? = null
+        val shutdownPhase = playHost?.shutdownPhase
+        val shutdownRemainingMs = playHost?.shutdownRemainingMs
+        if (sessionKind == SessionKind.Online) {
+            if (shutdownPhase != null && shutdownRemainingMs != null) {
+                val totalSeconds = (shutdownRemainingMs / 1000L).coerceAtLeast(0L)
+                val timeStr = "%d:%02d".format(totalSeconds / 60L, totalSeconds % 60L)
+                detailText = L10n.format("online.shutdown_label", timeStr)
+                detailColor = if (shutdownPhase == "final") {
+                    AppPalette.danger
+                } else {
+                    AppPalette.warning
+                }
+            } else if (latencyMs != null) {
+                detailText = LatencyLabel.text(latencyMs)
+                detailColor = LatencyLabel.color(latencyMs)
+            }
+        }
+
         Fonts.withFaceScale(font, labelScale) {
             ruleGlyph.setText(font, ruleText)
             Fonts.drawText(batch, font, ruleText, leftPad, handBaselineY, font.color)
 
             statusGlyph.setText(font, label)
-            val statusX = hudRight - statusGlyph.width
-            Fonts.drawText(batch, font, label, statusX, handBaselineY, font.color)
         }
+        val labelW = statusGlyph.width
+        val ruleRight = leftPad + ruleGlyph.width + Fonts.px(12f)
 
-        var nextBaselineY = handBaselineY - statusGlyph.height
-        val gapPx = Fonts.px(4f)
-        if (sessionKind == SessionKind.Online && latencyMs != null) {
-            val ping = LatencyLabel.text(latencyMs)
-            val pingFont = Fonts.small
-            val pingBaselineY = nextBaselineY - gapPx
-            val pingH = Fonts.withFaceScale(pingFont, labelScale) {
-                val pingW = Fonts.textWidth(pingFont, ping)
-                val left = (hudRight - pingW).coerceAtLeast(pad)
-                Fonts.drawText(batch, pingFont, ping, left, pingBaselineY, LatencyLabel.color(latencyMs))
-                Fonts.textHeight(pingFont, ping)
+        val detail = detailText
+        val detailFont = Fonts.small
+        val lineGap = Fonts.px(8f)
+        val detailW = if (detail != null) {
+            Fonts.withFaceScale(detailFont, labelScale) {
+                Fonts.textWidth(detailFont, detail)
             }
-            nextBaselineY = pingBaselineY - pingH
+        } else {
+            0f
         }
+        // Drop the detail before it crowds the rule badge; the counter is the
+        // primary readout. With the band anchor this only happens on a pane too
+        // narrow for the whole line to fit.
+        val detailLine = detail?.takeIf {
+            detailW + lineGap + labelW <= hudRight - ruleRight
+        }
+        val lineW = if (detailLine != null) detailW + lineGap + labelW else labelW
+        val lineLeft = (hudRight - lineW).coerceAtLeast(ruleRight)
+        // The counter is last and flush with the anchor, so the volatile ping
+        // changing digit count moves the detail's left edge, never the counter.
+        val statusLeft = lineLeft + lineW - labelW
 
-        val phase = playHost?.shutdownPhase
-        val remainingMs = playHost?.shutdownRemainingMs
-        if (sessionKind == SessionKind.Online && phase != null && remainingMs != null) {
-            val totalSeconds = (remainingMs / 1000L).coerceAtLeast(0L)
-            val mm = totalSeconds / 60L
-            val ss = totalSeconds % 60L
-            val timeStr = "%d:%02d".format(mm, ss)
-            val shutdownText = L10n.format("online.shutdown_label", timeStr)
-            val shutdownFont = Fonts.small
-            val shutdownBaselineY = nextBaselineY - gapPx
-            val color = if (phase == "final") {
-                AppPalette.danger
-            } else {
-                AppPalette.warning
-            }
-            Fonts.withFaceScale(shutdownFont, labelScale) {
-                val shutdownW = Fonts.textWidth(shutdownFont, shutdownText)
-                val left = (hudRight - shutdownW).coerceAtLeast(pad)
-                Fonts.drawText(batch, shutdownFont, shutdownText, left, shutdownBaselineY, color)
+        Fonts.withFaceScale(font, labelScale) {
+            Fonts.drawText(batch, font, label, statusLeft, handBaselineY, font.color)
+        }
+        if (detailLine != null) {
+            // The detail face is smaller; share the counter's baseline (the draw
+            // y is the cap top, so the difference of cap heights is the offset).
+            val detailY = handBaselineY - (font.capHeight - detailFont.capHeight) * labelScale
+            Fonts.withFaceScale(detailFont, labelScale) {
+                Fonts.drawText(
+                    batch,
+                    detailFont,
+                    detailLine,
+                    lineLeft,
+                    detailY,
+                    detailColor ?: font.color,
+                )
             }
         }
     }

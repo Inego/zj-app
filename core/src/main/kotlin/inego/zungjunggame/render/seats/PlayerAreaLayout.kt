@@ -152,7 +152,8 @@ object PlayerAreaLayout {
      * [screenAlong] / [screenOrtho]: width & height for bottom/top, height & width
      * for left/right. [alongFloor] is chrome reserved at the low end of this edge
      * (the tutorial coach's Back / Next band under a live board); a side seat must
-     * end above it, not slide into it.
+     * end above it, not slide into it. [alongCeiling] is the matching reserve at
+     * the high end (the corner menu where it reaches into a side hand).
      */
     fun availableAlongEdgeSpan(
         screenAlong: Float,
@@ -161,12 +162,13 @@ object PlayerAreaLayout {
         farEdge: Float,
         pad: Float = 0f,
         alongFloor: Float = 0f,
+        alongCeiling: Float = 0f,
     ): EdgeSpan {
         // Shorter side keeps the edge down to the space above reserved chrome;
         // the longer side yields to the hands at both ends.
         if (screenAlong < screenOrtho) {
             val lo = (alongFloor + pad).coerceIn(0f, screenAlong)
-            val hi = (screenAlong - pad).coerceAtLeast(lo + 1f)
+            val hi = (screenAlong - max(pad, alongCeiling)).coerceAtLeast(lo + 1f)
             return EdgeSpan(
                 half = ((hi - lo) * 0.5f).coerceAtLeast(1f),
                 center = (lo + hi) * 0.5f,

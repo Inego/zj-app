@@ -1232,6 +1232,13 @@ class PlayTableView(
          * Zero outside that coach.
          */
         val bottomLabelReserve: Float,
+        /**
+         * Band the Right seat's row must clear at the high end of its edge: the
+         * corner menu's square where it reaches into the tile column past the
+         * plate's rim. Zero where the menu fits (or only grazes) the seat gutter,
+         * or none paints.
+         */
+        val topRightChromeReserve: Float,
     ) {
         fun edgeInsetFor(side: SeatSide): Float = when (side) {
             SeatSide.Bottom -> edgeInsetBottom
@@ -1281,19 +1288,47 @@ class PlayTableView(
      */
     var safeInsets: SafeArea.Insets? = null
 
+    /**
+     * The floating top-right control's square, measured from the safe corner
+     * (`inset + side`), or 0 where no control floats there.
+     *
+     * The table reserves this square at the high end of the Right seat's edge
+     * only when its depth would reach into that seat's tile column past a small
+     * graze band: the button's size follows the UI density while the gutter
+     * follows the short side, so on a narrow landscape window the two overlap.
+     * Where the square fits the gutter — or only grazes it — no reserve is made
+     * and the Right hand keeps its size.
+     */
+    var topRightChromePx: Float = 0f
+
     private fun safeInsetSnapshot(): SafeArea.Insets = safeInsets ?: SafeArea.current()
 
     /**
-     * The shared felt-label scale for a table laid out at [screenW] x [screenH].
+     * Nominal felt geometry for chrome that paints around the table, at
+     * [screenW] x [screenH].
      *
-     * Callers outside the paint path (the free-play HUD badge) use this instead of
-     * their own size rule, so every label on the felt shrinks together. It is the
-     * scale the seat labels paint at for this layout — hand-tile cap and gutter fit
-     * included — not just the tile cap, which stays at 1 until the window is nearly
-     * at its narrowest.
+     * [labelScale] is the shared felt-label scale: callers outside the paint path
+     * (the free-play HUD badge) use it instead of their own size rule, so every
+     * label on the felt shrinks together. It is the scale the seat labels paint at
+     * for this layout — hand-tile cap and gutter fit included — not just the tile
+     * cap, which stays at 1 until the window is nearly at its narrowest.
+     *
+     * [rightBandInnerX] is the screen x of the Right seat's **nominal** tile
+     * band's inner face, derived from the edge inset and the hand height rather
+     * than from the fitted placements. The row is always fit-scaled while a hand
+     * is live, so its visible bounds move when a meld is claimed; this anchor
+     * does not. Chrome that stops here is clear of the Right column, and the
+     * Opposite row never reaches past it.
      */
-    fun chromeScaleFor(screenW: Float, screenH: Float): Float =
-        computeTableLayout(screenW, screenH).chromeScale
+    data class FeltChrome(val labelScale: Float, val rightBandInnerX: Float)
+
+    fun feltChrome(screenW: Float, screenH: Float): FeltChrome {
+        val layout = computeTableLayout(screenW, screenH)
+        return FeltChrome(
+            labelScale = layout.chromeScale,
+            rightBandInnerX = screenW - (layout.edgeInsetRight + layout.handH * 0.5f),
+        )
+    }
 
     private fun computeTableLayout(screenW: Float, screenH: Float): TableLayout {
         val shortSide = min(screenW, screenH)
@@ -1340,6 +1375,23 @@ class PlayTableView(
         // label fits that gutter; only the coach adds a strip below.
         val edgeInsetBottom =
             max(baseSide, safe.bottom + bottomReserve + handH * 0.5f + minGutter)
+
+        // The corner menu is density-scaled chrome; the seat gutter is a
+        // short-side proportion. Where the square is deeper than the gutter it
+        // sits over the Right column, and the Right row starts below it. Where it
+        // fits the gutter, the corner is spare and the row keeps its size. A
+        // square that crosses the column by only a few dp is not visible over the
+        // tile art's own margin, so that graze does not shrink the hand — a
+        // maximized 1080p window lands exactly there (52 dp square, 49.7 dp
+        // gutter).
+        val rightGutter = (edgeInsetRight - safe.right - handH * 0.5f).coerceAtLeast(0f)
+        val cornerGrazing = Fonts.px(3f)
+        val topRightChromeReserve =
+            if (topRightChromePx - rightGutter > cornerGrazing) {
+                safe.top + topRightChromePx + Fonts.px(8f)
+            } else {
+                0f
+            }
 
         val maxReachTowardCenter = shortSide * 0.28f
         val firstDiscardRowY = handH * 0.5f + rowGap + discardH * 0.5f
@@ -1388,6 +1440,7 @@ class PlayTableView(
             ),
             alongEdgePad = shortSide * 0.02f,
             bottomLabelReserve = bottomReserve,
+            topRightChromeReserve = topRightChromeReserve,
         )
     }
 
@@ -1452,6 +1505,10 @@ class PlayTableView(
                     SeatSide.Left, SeatSide.Right -> layout.bottomLabelReserve
                     SeatSide.Bottom, SeatSide.Opposite -> 0f
                 },
+                // Only the Right edge shares its high end with the corner menu.
+                // On the longer-side branch (portrait) this is a no-op: tableInsets
+                // has already held the whole board below the button.
+                alongCeiling = if (side == SeatSide.Right) layout.topRightChromeReserve else 0f,
             )
             seatMetas += SeatMeta(seat, side, span.center)
             val edgeInset = layout.edgeInsetFor(side)

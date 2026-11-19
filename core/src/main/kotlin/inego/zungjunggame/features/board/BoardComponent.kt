@@ -155,6 +155,7 @@ class BoardComponent(
         val snapshot = view.session
         val menuPresent = BoardMenuChrome.presentIn(snapshot.kind)
         table().bottomReservePx = area.bottomReserve
+        table().topRightChromePx = boardMenuFootprint(menuPresent)
         table().safeInsets = BoardMenuChrome.tableInsets(
             area.width,
             area.height,
@@ -263,6 +264,7 @@ class BoardComponent(
                 val safe = boardSafeInsets(frame)
                 val board = table()
                 board.bottomReservePx = area.bottomReserve
+                board.topRightChromePx = boardMenuFootprint(menuPresent)
                 board.safeInsets = BoardMenuChrome.tableInsets(
                     area.width,
                     area.height,
@@ -350,6 +352,14 @@ internal fun boardTableView(snapshot: SessionSnapshot, revealedSeats: Set<Int>):
 private fun menuOverlapsTable(area: SlideChromeLayout.BoardArea, spaceHeight: Float): Boolean =
     area.height >= spaceHeight - 0.5f
 
+/**
+ * The corner menu's square for the table's high-end reserve, or 0 where no menu
+ * paints. The table adds its own breathing gap and only reserves where the
+ * square would reach into the Right seat's column.
+ */
+private fun boardMenuFootprint(menuPresent: Boolean): Float =
+    if (menuPresent) BoardMenuChrome.footprint() else 0f
+
 /** A hand tile's world box as a layout anchor. */
 private fun HandHit.toAnchorRect(): Rect =
     Rect(worldX - w * 0.5f, worldY - h * 0.5f, w, h)
@@ -381,6 +391,7 @@ object DefaultBoardMeasure : BoardMeasure {
         val menuPresent = BoardMenuChrome.presentIn(session.kind)
         val board = table()
         board.bottomReservePx = area.bottomReserve
+        board.topRightChromePx = boardMenuFootprint(menuPresent)
         board.safeInsets = BoardMenuChrome.tableInsets(
             area.width,
             area.height,

@@ -20,7 +20,8 @@ import kotlin.math.max
  * system-back path reaches.
  *
  * Geometry lives here so the hit region and the painted square cannot disagree,
- * and so the HUD can reserve the same space without measuring the button itself.
+ * and so the table can reserve the same square without measuring the button
+ * itself.
  */
 internal object BoardMenuChrome {
 
@@ -53,12 +54,15 @@ internal object BoardMenuChrome {
     }
 
     /**
-     * Right edge for HUD text that shares the button's row. It stops a gap short
-     * of the button, so the hand counter and the online ping never sit under it.
+     * The square the button covers, measured from the safe corner: its inset plus
+     * its side. The table compares this with the seat gutter and reserves the
+     * corner for it where the gutter is too narrow to hold it. It does not include
+     * a breathing gap, so a button that merely sits close to the tiles — as it
+     * does at 1080p on desktop — does not shrink the Right hand.
      */
-    fun hudRightEdge(width: Float, height: Float, safe: SafeArea.Insets): Float {
+    fun footprint(): Float {
         Fonts.ensureCreated()
-        return rect(width, height, safe).left - Fonts.px(10f)
+        return CloseButton.cornerInset() + buttonSide()
     }
 
     /**
