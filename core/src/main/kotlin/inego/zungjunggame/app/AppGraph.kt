@@ -847,7 +847,7 @@ class AppGraph(
                         labelScale = felt.labelScale,
                         playHost = sessionRegistry.playHost,
                         latencyMs = if (snapshot.kind == SessionKind.Online) {
-                            onlineCoordinator.presenceClient.lastRttMs
+                            onlineCoordinator.presenceClient.freshRttMs(TimeUtils.millis())
                         } else {
                             null
                         },
@@ -965,7 +965,7 @@ class AppGraph(
                 chicken = onlineCoordinator.presenceClient.queueChicken,
                 snapshot = snap,
                 stale = onlineCoordinator.presenceClient.isStale(nowMs),
-                latencyMs = onlineCoordinator.presenceClient.lastRttMs,
+                latencyMs = onlineCoordinator.presenceClient.freshRttMs(nowMs),
                 prefsFrozen = waiting || seatedAt != null,
                 nowMs = nowMs,
                 notice = homeNoticeText(),
@@ -1037,7 +1037,9 @@ class AppGraph(
                         failure = host?.connectionFailure,
                     )
                 },
-                onlineConnectLatencyMs = { onlineCoordinator.presenceClient.lastRttMs },
+                onlineConnectLatencyMs = {
+                    onlineCoordinator.presenceClient.freshRttMs(TimeUtils.millis())
+                },
                 onlineConnectSnapshot = { onlineCoordinator.presenceClient.snapshot },
                 aliasCardOverlay = { aliasCardOverlay },
                 startingLevelOverlay = { startingLevelOverlay },

@@ -54,7 +54,9 @@ class PresenceClient(
      * Round-trip of the last successful heartbeat, in milliseconds.
      *
      * Measured on existing `/presence/heartbeat` traffic — no extra request.
-     * Null until the first 200 of this presence session.
+     * Null until the first 200 of this presence session. This is the raw
+     * measurement and survives a failure; surfaces print [freshRttMs], which
+     * withholds it once it is older than [STALE_AFTER_MS].
      */
     var lastRttMs: Int? = null
         private set
@@ -339,6 +341,18 @@ class PresenceClient(
         }
         return nowMs - lastSuccessAtMs >= STALE_AFTER_MS
     }
+
+    /**
+     * The value a surface may print at [nowMs]: [lastRttMs] while its success is
+     * younger than [STALE_AFTER_MS], otherwise null.
+     *
+     * [lastRttMs] is the measurement and survives a non-401 failure, so without
+     * this projection a dropped connection leaves a healthy-looking number on
+     * screen indefinitely. The hub, the connect card and the live-table HUD all
+     * read this one rule instead of judging age themselves.
+     */
+    fun freshRttMs(nowMs: Long): Int? =
+        lastRttMs?.takeIf { nowMs - lastSuccessAtMs < STALE_AFTER_MS }
 
     private fun defaultActivity(): PresenceActivity =
         if (waitingEnabled) PresenceActivity.Waiting else PresenceActivity.Idle

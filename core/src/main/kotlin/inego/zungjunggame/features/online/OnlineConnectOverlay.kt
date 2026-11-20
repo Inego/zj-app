@@ -187,7 +187,7 @@ class OnlineConnectOverlay : Disposable, GestureSurface<OnlineConnectOverlay.Poi
             ?.takeIf { status != Status.AuthExpired && status != Status.TableGone }
             ?.let { PopulationLabel.text(it) }
             .orEmpty()
-        val latencyText = latencyMs?.let { LatencyLabel.text(it) }.orEmpty()
+        val latencyText = LatencyLabel.text(latencyMs)
         val actionSpecs = actionSpecs()
 
         val portrait = screenH > screenW
@@ -269,18 +269,16 @@ class OnlineConnectOverlay : Disposable, GestureSurface<OnlineConnectOverlay.Poi
             infoFont.color = Color.WHITE
             infoTop -= glyphLayout.height + lineGap
         }
-        if (latencyText.isNotEmpty()) {
-            val ink = latencyMs?.let { LatencyLabel.color(it) } ?: Color.WHITE
-            infoFont.color = ink
-            glyphLayout.setText(infoFont, latencyText)
-            infoFont.draw(
-                batch,
-                latencyText,
-                panelLeft + (panelW - glyphLayout.width) * 0.5f,
-                infoTop,
-            )
-            infoFont.color = Color.WHITE
-        }
+        val ink = LatencyLabel.color(latencyMs)
+        infoFont.color = ink
+        glyphLayout.setText(infoFont, latencyText)
+        infoFont.draw(
+            batch,
+            latencyText,
+            panelLeft + (panelW - glyphLayout.width) * 0.5f,
+            infoTop,
+        )
+        infoFont.color = Color.WHITE
 
         buttonHits.clear()
         val t = OverlayChrome.buttonRimPx()

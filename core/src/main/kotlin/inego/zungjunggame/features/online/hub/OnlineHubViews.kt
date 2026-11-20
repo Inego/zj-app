@@ -33,6 +33,7 @@ data class OnlineHubView(
     val chicken: QueueChicken = QueueChicken.Either,
     val snapshot: PresenceSnapshot? = null,
     val stale: Boolean = false,
+    /** The ping the header prints; null prints the no-sample dash, not a blank. */
     val latencyMs: Int? = null,
     val prefsFrozen: Boolean = false,
     val nowMs: Long = System.currentTimeMillis(),

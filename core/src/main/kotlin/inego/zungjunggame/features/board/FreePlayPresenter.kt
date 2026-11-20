@@ -228,7 +228,9 @@ class FreePlayPresenter(
                 } else {
                     AppPalette.warning
                 }
-            } else if (latencyMs != null) {
+            } else {
+                // No sample is a dash in the same slot, not a vanished line: the
+                // detail keeps its place while presence is between readings.
                 detailText = LatencyLabel.text(latencyMs)
                 detailColor = LatencyLabel.color(latencyMs)
             }

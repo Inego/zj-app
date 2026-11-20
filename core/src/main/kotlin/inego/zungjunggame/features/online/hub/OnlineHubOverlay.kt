@@ -398,16 +398,14 @@ class OnlineHubOverlay(
             ?.let { L10n.format("online.live.signed_in_as", it) }
             .orEmpty()
         val ratingText = ratingLine(view.eloRating)
-        val latencyText = view.latencyMs?.let { LatencyLabel.text(it) }.orEmpty()
+        // A dash when there is no fresh sample, so the slot never disappears.
+        val latencyText = LatencyLabel.text(view.latencyMs)
         val rightEdge = close.left - Fonts.px(10f)
 
-        // The ping is measured, not reserved: its label is translated, so the
-        // alias is fitted to the ink actually there.
-        var latencyWidth = 0f
-        if (latencyText.isNotEmpty()) {
-            glyphLayout.setText(smallFont, latencyText)
-            latencyWidth = glyphLayout.width
-        }
+        // The ping is measured, not reserved: its label is translated and may be
+        // the no-sample dash, so the alias is fitted to the ink actually there.
+        glyphLayout.setText(smallFont, latencyText)
+        val latencyWidth = glyphLayout.width
 
         if (identityText.isNotEmpty()) {
             val budget = (rightEdge - latencyWidth - Fonts.px(12f) - identityRow.left)
@@ -437,15 +435,11 @@ class OnlineHubOverlay(
             )
         }
 
-        if (latencyText.isNotEmpty()) {
-            val pingY = identityRow.centerY + smallFont.capHeight * 0.5f
-            val latencyX = rightEdge - latencyWidth
-            val latencyInk = view.latencyMs?.let { LatencyLabel.color(it) }
-                ?: AppPalette.inkWarmMuted
-            smallFont.color = latencyInk
-            smallFont.draw(batch, latencyText, latencyX, pingY)
-            smallFont.color = Color.WHITE
-        }
+        val pingY = identityRow.centerY + smallFont.capHeight * 0.5f
+        val latencyX = rightEdge - latencyWidth
+        smallFont.color = LatencyLabel.color(view.latencyMs)
+        smallFont.draw(batch, latencyText, latencyX, pingY)
+        smallFont.color = Color.WHITE
     }
 
     private fun drawTab(
