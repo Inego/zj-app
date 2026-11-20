@@ -96,9 +96,10 @@ sealed interface Intent {
 
     /**
      * Open the rating-history chart for [target]: the viewer's own history from
-     * the hub, or a listed player's from a tapped Leaderboard row. The target is
-     * the route's own state, so the effect writes it before the push and the
-     * screen (and a restore of it) reads one value.
+     * the hub or the root menu's account drawer, or a listed player's from a
+     * tapped Leaderboard row. The target is the route's own state, so the effect
+     * writes it before the push and the screen (and a restore of it) reads one
+     * value.
      */
     data class OpenRatingHistory(val target: RatingHistoryTarget) : Intent
 

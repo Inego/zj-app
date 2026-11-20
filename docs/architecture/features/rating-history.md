@@ -194,10 +194,10 @@ app update.
 ## Chrome and lifecycle
 
 The chart is a **full-screen surface**, not a floating card: its plate fills the window edge
-to edge and the route is presented `Opaque`, so the hub or leaderboard it was opened from is
-not modelled or painted beneath it (and the version stamp steps aside). A chart is read across
-time, so the scarce resource is pixels; every piece of chrome is arranged around the plot
-instead of the plot being fitted into a card. The plate bleeds under the display cutout while
+to edge and the route is presented `Opaque`, so the surface it was opened from (the hub, the
+leaderboard, or the root menu) is not modelled or painted beneath it (and the version stamp
+steps aside). A chart is read across time, so the scarce resource is pixels; every piece of
+chrome is arranged around the plot instead of the plot being fitted into a card. The plate bleeds under the display cutout while
 the chrome lays out inside `SafeArea` with one design pad, so a camera hole or a rounded corner
 never covers a control, the name or a tick label. The title band carries
 `publication.display_name` when it names one, the zoom / All Time controls beside it when the

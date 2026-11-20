@@ -229,6 +229,31 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
 
     private val dropdownItems = ArrayList<DropdownRow>()
 
+    /**
+     * The account drawer's rows, top first. Signed in it offers the account
+     * panel, the player's own rating history, and log out; signed out it offers
+     * the two sign-in methods.
+     */
+    private fun dropdownEntries(signedInLabel: String?, signIn: MenuSignIn): List<DropdownEntry> =
+        if (signedInLabel != null) {
+            listOf(
+                DropdownEntry(Action.Account, L10n.get("menu.account")),
+                DropdownEntry(Action.RatingHistory, L10n.get("menu.rating_history")),
+                DropdownEntry(Action.LogOut, L10n.get("menu.log_out")),
+            )
+        } else {
+            listOf(
+                DropdownEntry(
+                    Action.LogIn,
+                    L10n.get("menu.log_in_google"),
+                    // The special-key row stays usable when this build has no
+                    // Google: a review device may have nothing else.
+                    enabled = signIn != MenuSignIn.Unavailable,
+                ),
+                DropdownEntry(Action.LogInSpecialKey, L10n.get("menu.log_in_special_key")),
+            )
+        }
+
     private var pressTarget: PressTarget = PressTarget.None
 
     private enum class PressTarget { None, Body, Chrome, Identity, DropdownItem, OutsideDropdown, Notices, Close }
@@ -257,6 +282,8 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         LogOut,
         /** Open the Account panel (name, Change name, Delete account). */
         Account,
+        /** Open the signed-in player's own rating-history chart. */
+        RatingHistory,
         /** Open the player's notice inbox. */
         Notices,
         /** Opens the unified Online hub from the root menu; needs a signed-in account. */
@@ -960,23 +987,7 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
             identityBadgeW = badgeW
             identityBadgeH = badgeH
 
-            val entries = if (signedInLabel != null) {
-                listOf(
-                    DropdownEntry(Action.Account, L10n.get("menu.account")),
-                    DropdownEntry(Action.LogOut, L10n.get("menu.log_out")),
-                )
-            } else {
-                listOf(
-                    DropdownEntry(
-                        Action.LogIn,
-                        L10n.get("menu.log_in_google"),
-                        // The special-key row stays usable when this build has no
-                        // Google: a review device may have nothing else.
-                        enabled = signIn != MenuSignIn.Unavailable,
-                    ),
-                    DropdownEntry(Action.LogInSpecialKey, L10n.get("menu.log_in_special_key")),
-                )
-            }
+            val entries = dropdownEntries(signedInLabel, signIn)
             var maxItemW = 0f
             for (entry in entries) {
                 glyphLayout.setText(itemFont, entry.label)
@@ -1225,23 +1236,17 @@ class GameMenuOverlay : Disposable, GestureSurface<GameMenuVerdict> {
         dropdownRectBottom = dBottom
         dropdownRectW = dropdownWidth
         dropdownRectH = dropdownHeight
-        // Two rows, top first. Signed in: Account panel, then log out.
-        // Signed out: Google account, then the special key.
+        // Top first: signed in, Account panel, rating history, then log out;
+        // signed out, Google account, then the special key.
         dropdownItems.clear()
-        val rowH = dropdownHeight / 2f
-        val entries = if (signedInLabel != null) {
-            listOf(
-                DropdownEntry(Action.Account, L10n.get("menu.account")),
-                DropdownEntry(Action.LogOut, L10n.get("menu.log_out")),
-            )
-        } else {
-            listOf(
-                DropdownEntry(Action.LogIn, L10n.get("menu.log_in_google")),
-                DropdownEntry(Action.LogInSpecialKey, L10n.get("menu.log_in_special_key")),
+        val entries = dropdownEntries(signedInLabel, MenuSignIn.Ready)
+        val rowH = dropdownHeight / entries.size
+        entries.forEachIndexed { index, entry ->
+            dropdownItems += DropdownRow(
+                entry,
+                Rect(dLeft, dBottom + rowH * (entries.size - 1 - index), dropdownWidth, rowH),
             )
         }
-        dropdownItems += DropdownRow(entries[0], Rect(dLeft, dBottom + rowH, dropdownWidth, rowH))
-        dropdownItems += DropdownRow(entries[1], Rect(dLeft, dBottom, dropdownWidth, rowH))
     }
 
     internal fun seedNoticesForTest(

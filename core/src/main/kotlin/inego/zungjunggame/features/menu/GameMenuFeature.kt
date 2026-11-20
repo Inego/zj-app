@@ -11,6 +11,7 @@ import inego.zungjunggame.runtime.RouteIds
 import inego.zungjunggame.runtime.RouteSpecs
 import inego.zungjunggame.ui.ComponentAction
 import inego.zungjunggame.ui.RouteUiState
+import inego.zungjunggame.ui.stack.RatingHistoryTarget
 import inego.zungjunggame.ui.stack.Route
 
 /**
@@ -79,7 +80,8 @@ object GameMenuFeature {
  * showed; the signed-out account dropdown maps its Google row to [Intent.LogIn]
  * and its special-key row to [Intent.LogInSpecialKey]. A signed-in badge only
  * toggles the card's own account drawer, which is the route's UI state, not a
- * feature action; the drawer's **Account…** row opens the account panel.
+ * feature action; the drawer's **Account…** row opens the account panel and its
+ * **Rating history** row opens the viewer's chart.
  */
 object GameMenuActions : RouteActions {
     const val SCORE_TABLE = "menu.scoreTable"
@@ -102,6 +104,7 @@ object GameMenuActions : RouteActions {
     const val CLOSE = "menu.close"
     const val IDENTITY = "menu.identity"
     const val DROPDOWN_ACCOUNT = "menu.dropdown.account"
+    const val DROPDOWN_RATING_HISTORY = "menu.dropdown.ratingHistory"
     const val DROPDOWN_LOG_OUT = "menu.dropdown.logOut"
     const val NOTICES = "menu.notices"
 
@@ -120,6 +123,7 @@ object GameMenuActions : RouteActions {
         GameMenuOverlay.Action.LogInSpecialKey -> LOG_IN_SPECIAL_KEY
         GameMenuOverlay.Action.LogOut -> LOG_OUT
         GameMenuOverlay.Action.Account -> DROPDOWN_ACCOUNT
+        GameMenuOverlay.Action.RatingHistory -> DROPDOWN_RATING_HISTORY
         GameMenuOverlay.Action.Players -> PLAYERS
         GameMenuOverlay.Action.Forfeit -> FORFEIT
         GameMenuOverlay.Action.ExitToMainMenu -> EXIT_TO_MAIN_MENU
@@ -165,6 +169,7 @@ object GameMenuActions : RouteActions {
         EXIT -> Intent.ExitApp
         IDENTITY -> Intent.LogIn
         DROPDOWN_ACCOUNT -> Intent.OpenAccount
+        DROPDOWN_RATING_HISTORY -> Intent.OpenRatingHistory(RatingHistoryTarget.Self)
         DROPDOWN_LOG_OUT -> Intent.LogOut
         NOTICES -> Intent.ViewNotices
         else -> null

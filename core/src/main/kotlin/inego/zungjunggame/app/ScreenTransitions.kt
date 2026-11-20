@@ -97,11 +97,12 @@ internal class ScreenTransitions(
     /**
      * The rating-history chart, above the surface it was opened from.
      *
-     * Both entry points open it over what is already up — the hub's own control
-     * over the hub, a Leaderboard row over the leaderboard — so back reveals that
-     * surface exactly as it was: the leaderboard keeps its entry, and with it the
-     * pinned reading (its generation) and the route-state scroll offset, because
-     * nothing here removes or re-pushes it.
+     * Every entry point opens it over what is already up — the hub's own control
+     * over the hub, the root menu's account drawer over the menu, a Leaderboard
+     * row over the leaderboard — so back reveals that surface exactly as it was:
+     * the leaderboard keeps its entry, and with it the pinned reading (its
+     * generation) and the route-state scroll offset, because nothing here removes
+     * or re-pushes it.
      */
     fun onlineRatingHistory() {
         routes.pushIfAbsent(Route.Modal(RouteIds.RATING_HISTORY))

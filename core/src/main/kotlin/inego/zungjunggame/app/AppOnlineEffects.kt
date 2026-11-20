@@ -529,8 +529,9 @@ internal class AppOnlineEffects(
     }
 
     override fun ratingHistoryDismiss() {
-        // The chart sits above the hub or the leaderboard it was opened from, so
-        // popping it reveals that surface exactly as it was.
+        // The chart sits above the surface it was opened from (the hub, the
+        // leaderboard, or the root menu), so popping it reveals that surface
+        // exactly as it was.
         routes.popModal(RouteIds.RATING_HISTORY)
     }
 
