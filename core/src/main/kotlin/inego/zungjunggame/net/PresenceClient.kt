@@ -80,6 +80,12 @@ class PresenceClient(
     private var leaveOnDone: (() -> Unit)? = null
     private var leaveRefreshSnapshot: Boolean = false
     private var lastAttemptAt: Long = 0L
+    /**
+     * The activity the loop has accounted for: the value carried by the last
+     * dispatched heartbeat, or by the Idle report [cancelAndLeave] leaves to
+     * its leave-and-refresh sequence. [tick] compares the live activity
+     * against this to decide whether a report is still owed.
+     */
     private var lastAttemptedActivity: PresenceActivity? = null
     private var lastAttemptedMinOtherHumans: Int? = null
     private var lastAttemptedRounds: QueueRounds? = null
@@ -240,6 +246,9 @@ class PresenceClient(
         waitingEnabled = false
         searchStartedAtMs = null
         lastTickActivity = PresenceActivity.Idle
+        // The leave's refresh beat is this cancel's Idle report. Claim it here
+        // so the same frame's tick does not report the change a second time.
+        lastAttemptedActivity = PresenceActivity.Idle
         suppressSeatedSnapshot = true
         dropLocalSeat()
         val token = activeToken
