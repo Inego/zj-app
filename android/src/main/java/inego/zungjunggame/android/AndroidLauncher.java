@@ -27,6 +27,7 @@ import inego.zungjunggame.platform.AndroidGpuContexts;
 import inego.zungjunggame.platform.GoogleAuthProvider;
 import inego.zungjunggame.platform.GpuContextPolicy;
 import inego.zungjunggame.platform.OverlayTextPrompt;
+import inego.zungjunggame.platform.PresenceScheduler;
 import inego.zungjunggame.platform.WebSocketClient;
 import inego.zungjunggame.platform.ColdStartGate;
 import inego.zungjunggame.i18n.PlatformLanguages;
@@ -133,6 +134,11 @@ public class AndroidLauncher extends AndroidApplication {
         WebSocketClient.Companion.setFactory(AndroidWebSocketClient::new);
         GoogleAuthProvider.Companion.setFactory(() -> new AndroidGoogleAuthProvider(this));
         OverlayTextPrompt.Companion.setFactory(() -> new AndroidOverlayTextPrompt(this));
+        // Continuous rendering is off, so a settled screen presents no frame. The
+        // runtime's one-second presence tick therefore needs a platform clock on
+        // Android as it has on desktop and Wasm; without it a still signed-in
+        // screen stops heartbeating and the server expires its presence.
+        PresenceScheduler.Companion.setFactory(AndroidPresenceScheduler::new);
         // Stage C: Android is durable, and this is the web's shape rather than a
         // third guess. `AndroidGpuContexts` declares `contextsAreDurable = true`
         // because libGDX calls `view.setPreserveEGLContextOnPause(true)` in the
