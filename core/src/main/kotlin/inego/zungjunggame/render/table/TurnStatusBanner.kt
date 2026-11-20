@@ -8,7 +8,6 @@ import inego.zungjunggame.engine.DecisionType
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.seats.PlayerLabels
-import inego.zungjunggame.session.DecisionTimerTrace
 import inego.zungjunggame.session.hosts.ConnectionStatus
 import inego.zungjunggame.session.table.TableViewState
 import kotlin.math.ceil
@@ -251,9 +250,6 @@ object TurnStatusBanner {
             min = Fonts.MIN_FIT_SCALE,
         )
         val scale = min(labelScale * STATUS_FACE_FACTOR, bandFit)
-        if (decisionTimeLeftMs != null && lines.contains('\n')) {
-            DecisionTimerTrace.onClockPaint(lines.substringAfter('\n'))
-        }
         Fonts.withFaceScale(font, scale) {
             val blockH = wrappedHeight(font, lines, wrapW)
             Fonts.drawWrapped(

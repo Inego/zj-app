@@ -23,7 +23,6 @@ import inego.zungjunggame.net.TableTicketApi
 import inego.zungjunggame.net.TableTicketException
 import inego.zungjunggame.net.WireJson
 import inego.zungjunggame.platform.WebSocketClient
-import inego.zungjunggame.session.DecisionTimerTrace
 import inego.zungjunggame.session.hosts.ActionableDecision
 import inego.zungjunggame.session.hosts.ConnectionStatus
 import inego.zungjunggame.session.hosts.PlayHost
@@ -739,16 +738,6 @@ class OnlinePlayHost(
             }
             is ServerMessageWire.DecisionPrompt -> {
                 currentDecisionId = msg.decisionId
-                DecisionTimerTrace.onPrompt(
-                    decisionId = msg.decisionId,
-                    decisionType = msg.decisionType,
-                    deadlineMs = msg.deadlineMs,
-                    slackMs = msg.slackMs,
-                    baseMs = msg.baseMs,
-                    hasDiscard = msg.choices.any {
-                        it.kind == "Discard" || it.kind == "discard"
-                    },
-                )
                 val decision = msg.toActionableDecision()
                 authoritativeDecision = decision
                 submittedDecision = null
@@ -782,7 +771,6 @@ class OnlinePlayHost(
                     msg.decisionId == decisionClockId &&
                     decisionTimeLeftMs != null
                 ) {
-                    DecisionTimerTrace.onCorrection(msg.decisionId, msg.remainingMs)
                     if (decisionExpiresAtNs == null) {
                         decisionTimeLeftMs =
                             minOf(decisionTimeLeftMs ?: Long.MAX_VALUE, msg.remainingMs.coerceAtLeast(0L))
