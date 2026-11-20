@@ -13,6 +13,8 @@ data class TableSnapshot(
     val tableView: TableViewState?,
     val decision: ActionableDecision?,
     val decisionTimeLeftMs: Long?,
+    /** True while the visible think clock is still in its presentation grace. */
+    val decisionPreparing: Boolean = false,
     val connectionStatus: ConnectionStatus,
     val humanSeat: Int,
     val currentHandNumber: Int,
@@ -45,6 +47,7 @@ data class TableSnapshot(
             tableView = host.tableView,
             decision = host.myDecision,
             decisionTimeLeftMs = host.decisionTimeLeftMs,
+            decisionPreparing = host.decisionPreparing,
             connectionStatus = host.connectionStatus,
             humanSeat = host.humanSeat,
             currentHandNumber = host.currentHandNumber,

@@ -792,6 +792,7 @@ class PlayTableView(
         decisionTimeLeftMs: Long? = null,
         decisionSlackMs: Long? = null,
         decisionBaseMs: Long? = null,
+        decisionPreparing: Boolean = false,
         connectionStatus: ConnectionStatus = ConnectionStatus.Local,
         statusFeedback: String? = null,
         shutdownPhase: String? = null,
@@ -1084,6 +1085,7 @@ class PlayTableView(
                 decisionTimeLeftMs = decisionTimeLeftMs,
                 decisionSlackMs = decisionSlackMs,
                 decisionBaseMs = decisionBaseMs,
+                preparing = decisionPreparing,
             )
         }
 
@@ -1154,6 +1156,7 @@ class PlayTableView(
                 decisionTimeLeftMs = decisionTimeLeftMs,
                 decisionSlackMs = decisionSlackMs,
                 decisionBaseMs = decisionBaseMs,
+                decisionPreparing = decisionPreparing,
                 connectionStatus = connectionStatus,
                 feedback = statusFeedback,
                 shutdownPhase = shutdownPhase,

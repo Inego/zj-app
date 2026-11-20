@@ -43,6 +43,12 @@ interface PlayHost {
     val tableView: TableViewState?
     val myDecision: ActionableDecision?
     val decisionTimeLeftMs: Long?
+    /**
+     * True while the decision window is open but its visible think clock has not
+     * started yet. Renderers show "Preparing..." instead of a number; the choices
+     * are interactive throughout. False whenever [decisionTimeLeftMs] is null.
+     */
+    val decisionPreparing: Boolean get() = false
     /** Remaining per-hand slack bank at prompt time; null when the seat is untimed. */
     val decisionSlackMs: Long? get() = null
     /** Free think time for the open decision; null when the seat is untimed. */

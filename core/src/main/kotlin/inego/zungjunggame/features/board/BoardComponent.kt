@@ -295,6 +295,7 @@ class BoardComponent(
                     decisionTimeLeftMs = snapshot.table?.decisionTimeLeftMs,
                     decisionSlackMs = input.decisionSlackMs,
                     decisionBaseMs = input.decisionBaseMs,
+                    decisionPreparing = snapshot.table?.decisionPreparing ?: false,
                     connectionStatus = snapshot.table?.connectionStatus ?: ConnectionStatus.Local,
                     statusFeedback = input.statusFeedback,
                     shutdownPhase = snapshot.table?.shutdownPhase,

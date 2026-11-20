@@ -172,6 +172,8 @@ sealed class ServerMessageWire {
         val deadlineMs: Long?,
         val slackMs: Long? = null,
         val baseMs: Long? = null,
+        val msUntilThinkStarts: Long? = null,
+        val msUntilTimeout: Long? = null,
     ) : ServerMessageWire()
 
     data class DecisionTimeLeft(

@@ -205,6 +205,7 @@ class ClaimActionPanel(
         decisionTimeLeftMs: Long? = null,
         decisionSlackMs: Long? = null,
         decisionBaseMs: Long? = null,
+        preparing: Boolean = false,
     ) {
         val claimed = if (view.isPendingDiscard) view.lastDiscarded else -1
         render(
@@ -226,6 +227,7 @@ class ClaimActionPanel(
             decisionTimeLeftMs = decisionTimeLeftMs,
             decisionSlackMs = decisionSlackMs,
             decisionBaseMs = decisionBaseMs,
+            preparing = preparing,
         )
     }
 
@@ -248,6 +250,7 @@ class ClaimActionPanel(
         decisionTimeLeftMs: Long? = null,
         decisionSlackMs: Long? = null,
         decisionBaseMs: Long? = null,
+        preparing: Boolean = false,
     ) {
         val claimed =
             if (state.decisionType == DecisionType.ReactToDiscard &&
@@ -276,6 +279,7 @@ class ClaimActionPanel(
             decisionTimeLeftMs = decisionTimeLeftMs,
             decisionSlackMs = decisionSlackMs,
             decisionBaseMs = decisionBaseMs,
+            preparing = preparing,
         )
     }
 
@@ -436,6 +440,7 @@ class ClaimActionPanel(
         decisionTimeLeftMs: Long? = null,
         decisionSlackMs: Long? = null,
         decisionBaseMs: Long? = null,
+        preparing: Boolean = false,
     ) {
         hits.clear()
         hoveredIndex = -1
@@ -453,19 +458,19 @@ class ClaimActionPanel(
 
         if (decisionTimeLeftMs != null && interactive) {
             val seconds = ceil(decisionTimeLeftMs.coerceAtLeast(0L) / 1000.0).toInt()
-            val timerText = TurnStatusBanner.formatClock(decisionTimeLeftMs, decisionSlackMs, decisionBaseMs)
+            val timerText = TurnStatusBanner.clockText(
+                preparing = preparing,
+                remainingMs = decisionTimeLeftMs,
+                slackMs = decisionSlackMs,
+                baseMs = decisionBaseMs,
+            )
             val timerFont = Fonts.small
             val previousColor = timerFont.color.cpy()
-            timerFont.color = when (seconds) {
-                in 1..3 -> {
-                    AppPalette.dangerInkStrong
-                }
-                in 4..5 -> {
-                    AppPalette.warningInk
-                }
-                else -> {
-                    Color.WHITE
-                }
+            timerFont.color = when {
+                preparing -> Color.WHITE
+                seconds in 1..3 -> AppPalette.dangerInkStrong
+                seconds in 4..5 -> AppPalette.warningInk
+                else -> Color.WHITE
             }
             glyphLayout.setText(timerFont, timerText)
             timerFont.draw(batch, timerText, row.left + row.width * 0.5f - glyphLayout.width * 0.5f, row.rowCy + row.height * 0.5f + Fonts.px(18f))

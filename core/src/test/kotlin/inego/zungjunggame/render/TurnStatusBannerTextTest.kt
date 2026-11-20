@@ -123,6 +123,37 @@ class TurnStatusBannerTextTest {
     }
 
     @Test
+    fun clockLinePreparesUntilTheThinkTimeStarts() {
+        assertEquals(
+            "Preparing...",
+            TurnStatusBanner.clockText(
+                preparing = true,
+                remainingMs = 40_000L,
+                slackMs = 30_000L,
+                baseMs = 7_000L,
+            ),
+        )
+        assertEquals(
+            "7s + 30s",
+            TurnStatusBanner.clockText(
+                preparing = false,
+                remainingMs = 37_000L,
+                slackMs = 30_000L,
+                baseMs = 7_000L,
+            ),
+        )
+        assertEquals(
+            "6s + 30s",
+            TurnStatusBanner.clockText(
+                preparing = false,
+                remainingMs = 36_000L,
+                slackMs = 30_000L,
+                baseMs = 7_000L,
+            ),
+        )
+    }
+
+    @Test
     fun shutdownWarningBannerShowsLocalizedTemplateInWarningPhase() {
         val view = onlineView(currentPlayer = 0)
         val text = TurnStatusBanner.statusText(

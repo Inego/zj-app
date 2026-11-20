@@ -1,6 +1,7 @@
 package inego.zungjunggame.session.online
 
 import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.utils.TimeUtils
 import inego.zungjunggame.audio.SoundCue
 import inego.zungjunggame.audio.TimerStage
 import inego.zungjunggame.engine.Choice
@@ -22,6 +23,7 @@ import inego.zungjunggame.net.TableTicketApi
 import inego.zungjunggame.net.TableTicketException
 import inego.zungjunggame.net.WireJson
 import inego.zungjunggame.platform.WebSocketClient
+import inego.zungjunggame.session.DecisionTimerTrace
 import inego.zungjunggame.session.hosts.ActionableDecision
 import inego.zungjunggame.session.hosts.ConnectionStatus
 import inego.zungjunggame.session.hosts.PlayHost
@@ -58,6 +60,12 @@ class OnlinePlayHost(
     /** Live access JWT. Reconnect after refresh must not use a captured token. */
     private val resolveToken: () -> String? = { token },
     val initialAway: Boolean = false,
+    /**
+     * Monotonic clock used to turn the prompt's schedule into instants. One
+     * reading is taken at receipt, and every frame reads the same clock; a fake
+     * source can therefore drive the countdown without frames or ticks.
+     */
+    private val nowNanos: () -> Long = { TimeUtils.nanoTime() },
 ) : PlayHost {
 
     /**
@@ -165,6 +173,9 @@ class OnlinePlayHost(
     override var decisionTimeLeftMs: Long? = null
         private set
 
+    override var decisionPreparing: Boolean = false
+        private set
+
     override var decisionSlackMs: Long? = null
         private set
 
@@ -174,13 +185,23 @@ class OnlinePlayHost(
     private var decisionClockId: Long? = null
 
     /**
+     * The prompt's schedule on the client monotonic clock. Both are null on the
+     * legacy path (a prompt without `ms_until_think_starts`/`ms_until_timeout`),
+     * which keeps decrementing [decisionTimeLeftMs] by the frame delta.
+     */
+    private var decisionThinkStartsAtNs: Long? = null
+    private var decisionExpiresAtNs: Long? = null
+
+    /**
      * After reconnect, the next empty-events snapshot is an authoritative
      * resync rather than a live transition to animate.
      */
     private var presentationResync: Boolean = false
 
     override fun advance(deltaSec: Float) {
-        if (deltaSec > 0f &&
+        if (decisionExpiresAtNs != null) {
+            refreshDecisionClock(nowNanos())
+        } else if (deltaSec > 0f &&
             authoritativeDecision != null &&
             decisionClockId == currentDecisionId &&
             sequencer.isCaughtUp
@@ -193,7 +214,9 @@ class OnlinePlayHost(
                     ?.coerceAtLeast(0L)
             }
         }
-        if (deltaSec > 0f) recordTimerStage(decisionTimeLeftMs)
+        if (deltaSec > 0f) {
+            recordTimerStage(if (decisionPreparing) null else decisionTimeLeftMs)
+        }
         if (deltaSec > 0f && reconnectScheduled) {
             reconnectInSec -= deltaSec
             if (reconnectInSec <= 0f) {
@@ -214,6 +237,30 @@ class OnlinePlayHost(
                 ?.minus((deltaSec * 1000f).toLong())
                 ?.coerceAtLeast(0L)
         }
+    }
+
+    /**
+     * Recomputes the visible clock from the prompt's schedule. The prompt carries
+     * one reading of the server's remaining time; the instants derived from it are
+     * the display's only input, so neither packet cadence nor frame cadence can
+     * move the countdown.
+     */
+    private fun refreshDecisionClock(nowNs: Long) {
+        val expiresAtNs = decisionExpiresAtNs ?: return
+        decisionTimeLeftMs = (expiresAtNs - nowNs).coerceAtLeast(0L) / NANOS_PER_MS
+        val thinkStartsAtNs = decisionThinkStartsAtNs
+        decisionPreparing = thinkStartsAtNs != null && nowNs < thinkStartsAtNs
+    }
+
+    /** Clears every per-decision clock field, scheduled or legacy. */
+    private fun clearDecisionClock() {
+        decisionTimeLeftMs = null
+        decisionSlackMs = null
+        decisionBaseMs = null
+        decisionClockId = null
+        decisionThinkStartsAtNs = null
+        decisionExpiresAtNs = null
+        decisionPreparing = false
     }
 
     /**
@@ -671,10 +718,7 @@ class OnlinePlayHost(
                 }
                 if (msg.snapshot.isTerminal) {
                     authoritativeDecision = null
-                    decisionTimeLeftMs = null
-                    decisionSlackMs = null
-                    decisionBaseMs = null
-                    decisionClockId = null
+                    clearDecisionClock()
                     isWaitingForOthers = false
                     sequencer.clearPrompt()
                 }
@@ -695,14 +739,41 @@ class OnlinePlayHost(
             }
             is ServerMessageWire.DecisionPrompt -> {
                 currentDecisionId = msg.decisionId
+                DecisionTimerTrace.onPrompt(
+                    decisionId = msg.decisionId,
+                    decisionType = msg.decisionType,
+                    deadlineMs = msg.deadlineMs,
+                    slackMs = msg.slackMs,
+                    baseMs = msg.baseMs,
+                    hasDiscard = msg.choices.any {
+                        it.kind == "Discard" || it.kind == "discard"
+                    },
+                )
                 val decision = msg.toActionableDecision()
                 authoritativeDecision = decision
                 submittedDecision = null
                 lastRejectedReason = null
-                decisionTimeLeftMs = msg.deadlineMs?.coerceAtLeast(0L)
                 decisionSlackMs = msg.deadlineMs?.let { msg.slackMs?.coerceAtLeast(0L) }
                 decisionBaseMs = msg.deadlineMs?.let { msg.baseMs?.coerceAtLeast(0L) }
                 decisionClockId = msg.deadlineMs?.let { msg.decisionId }
+                val untilThink = msg.msUntilThinkStarts
+                val untilTimeout = msg.msUntilTimeout
+                if (msg.deadlineMs != null && untilThink != null && untilTimeout != null) {
+                    // One reading anchors the server's schedule; every later value is
+                    // read off these instants, never accumulated from frames or ticks.
+                    val receivedAtNs = nowNanos()
+                    decisionThinkStartsAtNs =
+                        receivedAtNs + untilThink.coerceAtLeast(0L) * NANOS_PER_MS
+                    decisionExpiresAtNs =
+                        receivedAtNs + untilTimeout.coerceAtLeast(0L) * NANOS_PER_MS
+                    refreshDecisionClock(receivedAtNs)
+                } else {
+                    val cappedLeft = msg.deadlineMs?.coerceAtLeast(0L)
+                    decisionThinkStartsAtNs = null
+                    decisionExpiresAtNs = null
+                    decisionPreparing = false
+                    decisionTimeLeftMs = cappedLeft
+                }
                 isWaitingForOthers = false
                 sequencer.enqueuePrompt(decision)
             }
@@ -711,7 +782,14 @@ class OnlinePlayHost(
                     msg.decisionId == decisionClockId &&
                     decisionTimeLeftMs != null
                 ) {
-                    decisionTimeLeftMs = minOf(decisionTimeLeftMs ?: Long.MAX_VALUE, msg.remainingMs.coerceAtLeast(0L))
+                    DecisionTimerTrace.onCorrection(msg.decisionId, msg.remainingMs)
+                    if (decisionExpiresAtNs == null) {
+                        decisionTimeLeftMs =
+                            minOf(decisionTimeLeftMs ?: Long.MAX_VALUE, msg.remainingMs.coerceAtLeast(0L))
+                    }
+                    // With a schedule the prompt owns the display; a correction is
+                    // advisory and would only add packet jitter. It stays on the wire
+                    // for clients that only know the legacy deadline.
                 }
             }
             is ServerMessageWire.ChoiceAcknowledged -> {
@@ -734,10 +812,7 @@ class OnlinePlayHost(
                     nextHandTimeLeftMs = null
                 }
                 authoritativeDecision = null
-                decisionTimeLeftMs = null
-                decisionSlackMs = null
-                decisionBaseMs = null
-                decisionClockId = null
+                clearDecisionClock()
                 isWaitingForOthers = false
                 sequencer.clearPrompt()
                 val winner = msg.winnerSeat ?: -1
@@ -789,10 +864,7 @@ class OnlinePlayHost(
                 matchStartedAt = msg.startedAt
                 matchFinishedAt = msg.finishedAt
                 authoritativeDecision = null
-                decisionTimeLeftMs = null
-                decisionSlackMs = null
-                decisionBaseMs = null
-                decisionClockId = null
+                clearDecisionClock()
                 isWaitingForOthers = false
                 readyForNextHand = false
                 nextHandTimeLeftMs = null
@@ -809,10 +881,7 @@ class OnlinePlayHost(
                 endMatch(MatchPhase.Aborted)
                 abortReason = msg.reason
                 authoritativeDecision = null
-                decisionTimeLeftMs = null
-                decisionSlackMs = null
-                decisionBaseMs = null
-                decisionClockId = null
+                clearDecisionClock()
                 isWaitingForOthers = false
                 readyForNextHand = false
                 nextHandTimeLeftMs = null
@@ -919,10 +988,7 @@ class OnlinePlayHost(
 
         authoritativeDecision = null
         submittedDecision = decision
-        decisionTimeLeftMs = null
-        decisionSlackMs = null
-        decisionBaseMs = null
-        decisionClockId = null
+        clearDecisionClock()
         isWaitingForOthers = true
         sequencer.clearPrompt(isWaitingForOthers = true)
 
@@ -992,6 +1058,8 @@ class OnlinePlayHost(
         /** Countdown thresholds that raise a [SoundCue.Timer], in milliseconds. */
         private const val WARN_MS = 10_000L
         private const val URGENT_MS = 3_000L
+
+        private const val NANOS_PER_MS = 1_000_000L
 
         /**
          * The only seat that lost points, for a settlement whose snapshot did not name

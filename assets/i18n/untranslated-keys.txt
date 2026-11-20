@@ -10,3 +10,5 @@
 # Add a new key here when you add an English string that is not translated yet.
 # Remove it once every shipped locale declares it; a fully translated entry
 # left behind fails the stale-entry guard.
+
+turn.preparing

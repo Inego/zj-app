@@ -406,6 +406,81 @@ class OnlinePlayHostTest {
     }
 
     @Test
+    fun `prompt schedule drives the clock without correction packets`() {
+        val fakeWs = FakeWebSocketClient()
+        var nowNs = 1_000_000_000L
+        val host = OnlinePlayHost(
+            tableId = "tbl-123",
+            token = "jwt-abc",
+            wsClient = fakeWs,
+            nowNanos = { nowNs },
+        )
+        host.connectWithTicket(TableTicket("ticket-xyz", "tbl-123", seat = 0))
+        host.handleServerMessage(ServerMessageWire.SeatSnapshotMsg(makeSampleSnapshot(0)))
+        host.handleServerMessage(
+            ServerMessageWire.DecisionPrompt(
+                decisionId = 91L,
+                decisionType = "ActOnHand",
+                choices = listOf(ChoiceWire("Discard", 10)),
+                deadlineMs = 37_000L,
+                slackMs = 30_000L,
+                baseMs = 7_000L,
+                msUntilThinkStarts = 3_000L,
+                msUntilTimeout = 40_000L,
+            ),
+        )
+
+        assertTrue(host.decisionPreparing)
+        assertEquals(40_000L, host.decisionTimeLeftMs)
+
+        nowNs += 2_999_000_000L
+        host.advance(0.016f)
+        assertTrue(host.decisionPreparing)
+
+        nowNs += 1_000_000L
+        host.advance(0.016f)
+        assertFalse(host.decisionPreparing)
+        assertEquals(37_000L, host.decisionTimeLeftMs)
+
+        nowNs += 1_000_000_000L
+        host.advance(0.016f)
+        assertEquals(36_000L, host.decisionTimeLeftMs)
+    }
+
+    @Test
+    fun `first frame at four seconds already shows the running clock`() {
+        val fakeWs = FakeWebSocketClient()
+        var nowNs = 1_000_000_000L
+        val host = OnlinePlayHost(
+            tableId = "tbl-123",
+            token = "jwt-abc",
+            wsClient = fakeWs,
+            nowNanos = { nowNs },
+        )
+        host.connectWithTicket(TableTicket("ticket-xyz", "tbl-123", seat = 0))
+        host.handleServerMessage(ServerMessageWire.SeatSnapshotMsg(makeSampleSnapshot(0)))
+        host.handleServerMessage(
+            ServerMessageWire.DecisionPrompt(
+                decisionId = 92L,
+                decisionType = "ActOnHand",
+                choices = listOf(ChoiceWire("Discard", 10)),
+                deadlineMs = 37_000L,
+                slackMs = 30_000L,
+                baseMs = 7_000L,
+                msUntilThinkStarts = 3_000L,
+                msUntilTimeout = 40_000L,
+            ),
+        )
+
+        // No advance between receipt and four seconds: the frame clock must not
+        // be what carries the countdown.
+        nowNs += 4_000_000_000L
+        host.advance(0.016f)
+        assertFalse(host.decisionPreparing)
+        assertEquals(36_000L, host.decisionTimeLeftMs)
+    }
+
+    @Test
     fun `pending discard is shown on an otherwise empty river`() {
         val fakeWs = FakeWebSocketClient()
         val host = OnlinePlayHost(

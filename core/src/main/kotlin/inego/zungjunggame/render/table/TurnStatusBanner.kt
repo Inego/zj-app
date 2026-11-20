@@ -8,6 +8,7 @@ import inego.zungjunggame.engine.DecisionType
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.seats.PlayerLabels
+import inego.zungjunggame.session.DecisionTimerTrace
 import inego.zungjunggame.session.hosts.ConnectionStatus
 import inego.zungjunggame.session.table.TableViewState
 import kotlin.math.ceil
@@ -65,6 +66,22 @@ object TurnStatusBanner {
         val baseSec = ceil(baseLeft / 1000.0).toInt()
         val slackSec = ceil(slackLeft / 1000.0).toInt()
         return L10n.format("turn.time_left_slack", baseSec, slackSec)
+    }
+
+    /**
+     * The clock line's copy for the current phase: the prep cue while the
+     * presentation grace is still running, otherwise the countdown. [preparing]
+     * is false whenever there is no clock at all.
+     */
+    fun clockText(
+        preparing: Boolean,
+        remainingMs: Long,
+        slackMs: Long?,
+        baseMs: Long? = null,
+    ): String = if (preparing) {
+        L10n.get("turn.preparing")
+    } else {
+        formatClock(remainingMs, slackMs, baseMs)
     }
 
     /**
@@ -126,6 +143,7 @@ object TurnStatusBanner {
         decisionTimeLeftMs: Long? = null,
         decisionSlackMs: Long? = null,
         decisionBaseMs: Long? = null,
+        decisionPreparing: Boolean = false,
         connectionStatus: ConnectionStatus = ConnectionStatus.Local,
         feedback: String? = null,
         shutdownPhase: String? = null,
@@ -146,7 +164,7 @@ object TurnStatusBanner {
             decisionTimeLeftMs != null &&
                 !view.isWaitingForOthers &&
                 (humanDiscarding || humanClaiming || view.isHumanActOnHandPanel) -> {
-                "$status\n${formatClock(decisionTimeLeftMs, decisionSlackMs, decisionBaseMs)}"
+                "$status\n${clockText(decisionPreparing, decisionTimeLeftMs, decisionSlackMs, decisionBaseMs)}"
             }
             shutdownPhase == "warning" && shutdownRemainingMs != null -> {
                 "$status\n${formatClock(shutdownRemainingMs, null)}"
@@ -194,6 +212,7 @@ object TurnStatusBanner {
         decisionTimeLeftMs: Long? = null,
         decisionSlackMs: Long? = null,
         decisionBaseMs: Long? = null,
+        decisionPreparing: Boolean = false,
         connectionStatus: ConnectionStatus = ConnectionStatus.Local,
         feedback: String? = null,
         shutdownPhase: String? = null,
@@ -212,6 +231,7 @@ object TurnStatusBanner {
             decisionTimeLeftMs = decisionTimeLeftMs,
             decisionSlackMs = decisionSlackMs,
             decisionBaseMs = decisionBaseMs,
+            decisionPreparing = decisionPreparing,
             connectionStatus = connectionStatus,
             feedback = feedback,
             shutdownPhase = shutdownPhase,
@@ -231,6 +251,9 @@ object TurnStatusBanner {
             min = Fonts.MIN_FIT_SCALE,
         )
         val scale = min(labelScale * STATUS_FACE_FACTOR, bandFit)
+        if (decisionTimeLeftMs != null && lines.contains('\n')) {
+            DecisionTimerTrace.onClockPaint(lines.substringAfter('\n'))
+        }
         Fonts.withFaceScale(font, scale) {
             val blockH = wrappedHeight(font, lines, wrapW)
             Fonts.drawWrapped(

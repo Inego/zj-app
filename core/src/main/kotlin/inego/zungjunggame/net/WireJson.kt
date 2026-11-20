@@ -71,6 +71,17 @@ object WireJson {
                 } else {
                     null
                 }
+                val msUntilThinkStarts =
+                    if (root.has("ms_until_think_starts") && !root.get("ms_until_think_starts").isNull) {
+                        root.getLong("ms_until_think_starts")
+                    } else {
+                        null
+                    }
+                val msUntilTimeout = if (root.has("ms_until_timeout") && !root.get("ms_until_timeout").isNull) {
+                    root.getLong("ms_until_timeout")
+                } else {
+                    null
+                }
                 ServerMessageWire.DecisionPrompt(
                     decisionId = root.getLong("decision_id"),
                     decisionType = root.getString("decision_type"),
@@ -78,6 +89,8 @@ object WireJson {
                     deadlineMs = deadlineMs,
                     slackMs = slackMs,
                     baseMs = baseMs,
+                    msUntilThinkStarts = msUntilThinkStarts,
+                    msUntilTimeout = msUntilTimeout,
                 )
             }
             "decision_time_left" -> ServerMessageWire.DecisionTimeLeft(
