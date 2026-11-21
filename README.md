@@ -95,6 +95,32 @@ For a field-diagnostics build with readable Wasm stack traces, use the debug tog
 
 A black canvas after the splash is not one bug. The preload screen clears to black, and a dropped animation frame, a TeaVM fiber trap, or the preload loop being replaced all look the same. See [docs/guides/wasm-startup.md](docs/guides/wasm-startup.md).
 
+## Releasing
+
+Tag the commit a release was built from, so the version baked into the artifact
+maps back to a commit:
+
+```bash
+./gradlew.bat tagRelease            # annotated tag ver-1.0.1005 on a clean main tip
+git push origin ver-1.0.1005
+```
+
+`tagRelease` stamps HEAD only when the tree is clean (untracked files included,
+because staging packs them) and HEAD is a tip of `main` or `origin/main`. It
+refuses to move an existing tag, and the tag stays local until pushed. The tag
+is the `ver-` prefix plus the version: `ver-1.0.1005`.
+
+Every commit on `main` already has a unique version (its commit count plus
+`projectBuildOffset`), so even an untagged release version names a commit:
+
+```bash
+git rev-list --reverse main | sed -n "$((1005 - 975))p"   # version 1.0.1005
+```
+
+Tags make that mapping explicit, survive an offset change, and feed
+`git describe --tags --match 'ver-*'`, which names the last release and the
+distance from it.
+
 ## Game and hand
 
 A **game** is a configured sequence of **hands**. Default is **4 rounds × 4 hands = 16 hands**; you can also choose **1** or **2** rounds, or **Unlimited**. On a fresh launch (no restored session), the **main menu** opens first. Choose **New game** to open setup:

@@ -129,4 +129,91 @@ subprojects {
   }
 }
 
+/*
+ * Stamp the release commit with the version baked into the artifact: tag
+ * `ver-1.0.1005` on HEAD means "the build labelled 1.0.1005 came from this
+ * commit". Annotated tags also let `git describe --tags` name the previous
+ * release and the distance from it.
+ *
+ * The task refuses to lie:
+ *  - a dirty tree, untracked files included (stageAssets packs them into the
+ *    APK/web dist),
+ *  - HEAD that is not a tip of main (local or origin),
+ *  - an existing tag pointing at another commit: a release tag is never moved.
+ *
+ * Only the tag is created, locally. Pushing it is explicit; a tag nobody
+ * pushed records nothing for anyone else.
+ */
+tasks.register('tagRelease') {
+  group = 'release'
+  description = 'Tags HEAD as ver-<full version> (e.g. ver-1.0.1005) when it is a clean main tip.'
+
+  doLast {
+    def version = project.zjVersionName as String
+    def tag = "ver-${version}"
+
+    if (project.hasProperty('buildNumber')) {
+      throw new GradleException(
+          'tagRelease derives the tag from git; do not pass -PbuildNumber.')
+    }
+
+    def status = zjGit(['status', '--porcelain'])
+    if (status.exit != 0) {
+      throw new GradleException("tagRelease: git status failed: ${status.out}")
+    }
+    if (!(status.out as String).isEmpty()) {
+      throw new GradleException(
+          "tagRelease: working tree is not clean; commit or stash first:\n${status.out}")
+    }
+
+    def headResult = zjGit(['rev-parse', 'HEAD'])
+    if (headResult.exit != 0) {
+      throw new GradleException("tagRelease: cannot resolve HEAD: ${headResult.out}")
+    }
+    def head = headResult.out as String
+
+    def mainRefs = ['refs/heads/main', 'refs/remotes/origin/main']
+    def mainTips = [:]
+    mainRefs.each { ref ->
+      def tip = zjGit(['rev-parse', '--verify', '--quiet', ref])
+      if (tip.exit == 0) mainTips[ref] = tip.out as String
+    }
+    if (mainTips.isEmpty()) {
+      throw new GradleException(
+          'tagRelease: no main branch found (looked for refs/heads/main and refs/remotes/origin/main).')
+    }
+    if (!mainTips.values().contains(head)) {
+      def tips = mainTips.collect { ref, sha -> "${ref} is ${sha.take(12)}" }.join(', ')
+      throw new GradleException(
+          "tagRelease: HEAD ${head.take(12)} is not a main tip (${tips}). " +
+          'Check out main and fast-forward it before tagging a release.')
+    }
+
+    def tagRef = "refs/tags/${tag}"
+    def existing = zjGit(['rev-parse', '--verify', '--quiet', tagRef])
+    if (existing.exit == 0) {
+      // An annotated tag's own SHA is not its commit's SHA; peel before comparing.
+      def existingCommit = zjGit(['rev-parse', '--verify', '--quiet', "${tagRef}^{commit}"])
+      if (existingCommit.exit != 0) {
+        throw new GradleException(
+            "tagRelease: ${tag} exists but does not point at a commit; inspect it with `git show ${tag}`.")
+      }
+      if (existingCommit.out == head) {
+        logger.lifecycle("tagRelease: ${tag} already tags ${head.take(12)}; nothing to do.")
+        return
+      }
+      throw new GradleException(
+          "tagRelease: ${tag} already exists at ${(existingCommit.out as String).take(12)}, not " +
+          "${head.take(12)}. Refusing to move a release tag; inspect it with `git show ${tag}`.")
+    }
+
+    def created = zjGit(['tag', '-a', tag, '-m', "zj-game ${version}", head])
+    if (created.exit != 0) {
+      throw new GradleException("tagRelease: git tag failed: ${created.out}")
+    }
+    logger.lifecycle("tagRelease: tagged ${head.take(12)} as ${tag}")
+    logger.lifecycle("Push it with: git push origin ${tag}")
+  }
+}
+
 eclipse.project.name = 'zj-game' + '-parent'
