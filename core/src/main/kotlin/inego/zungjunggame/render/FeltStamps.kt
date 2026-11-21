@@ -22,7 +22,8 @@ import kotlin.math.max
  * yields to it ([OverlayViewport.placeBeside]); the block never reads a card, so
  * no frame's paint depends on another frame's measurement.
  *
- * Drawn on the board layer, behind every overlay card. Not a hit target.
+ * Painted with the felt whenever the felt is on screen, behind every overlay card:
+ * a card may cover the block, while the menu card yields to it. Not a hit target.
  */
 internal object FeltStamps {
     private const val CREDIT_KEY = "menu.rules_credit"

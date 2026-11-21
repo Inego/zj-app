@@ -88,10 +88,8 @@ object RouteSpecs {
 
     /**
      * Roots and contexts whose own content *is* the game-menu card. No card is
-     * pushed over these: the menu would be drawn twice. They are also the only
-     * surfaces that show the felt's corner stamps: the menu card arranges itself
-     * around the block, so the runtime paints the marks whole on a menu surface
-     * and not at all under a card that would cover them.
+     * pushed over these: the menu would be drawn twice. Their card yields the
+     * felt's corner stamp block, which the runtime paints whenever the felt is.
      */
     private val MENU_SURFACES = setOf(RouteIds.ROOT_MENU, RouteIds.LOCAL_MENU)
 

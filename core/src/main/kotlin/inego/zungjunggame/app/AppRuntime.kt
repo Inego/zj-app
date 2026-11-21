@@ -581,14 +581,11 @@ class AppRuntime internal constructor(
         batch.begin()
         try {
             if (router.stack.onFelt) {
-                // The stamp block has one home in the felt's safe corner. Only a
-                // menu surface stands there: its card arranges itself around the
-                // block (OverlayViewport.placeBeside). Any other top layer is a
-                // card that would cover the corner, so the felt paints the marks
-                // whole or not at all — never a fragment beside a card.
-                if (router.stack.paintRange.lastOrNull()?.spec?.menuSurface == true) {
-                    FeltStamps.render(batch, screenW, screenH)
-                }
+                // The stamp block belongs to the felt, so it is painted whenever
+                // the felt is: behind the stack, under any card or scrim standing
+                // on it. The menu card reads the same rect and yields to it
+                // (OverlayViewport.placeBeside); any other card may cover it.
+                FeltStamps.render(batch, screenW, screenH)
             }
             componentHost.draw(canvas, frames)
         } finally {
