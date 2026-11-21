@@ -7,6 +7,7 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.utils.Align
 import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.i18n.L10n
+import inego.zungjunggame.platform.UiCursor
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.ui.AppPalette
@@ -293,6 +294,7 @@ class AccountOverlay : Disposable, GestureSurface<AccountOverlay.PointerResult> 
         deleteW = contentWInner
         deleteH = linkH
         val deleteHovered = inRect(pointerWorldX, pointerWorldY, deleteLeft, deleteBottom, deleteW, deleteH)
+        UiCursor.overLink(deleteHovered)
         if (deleteHovered) {
             batch.setColor(AppPalette.plateRaised)
             batch.draw(px, deleteLeft, deleteBottom, deleteW, deleteH)

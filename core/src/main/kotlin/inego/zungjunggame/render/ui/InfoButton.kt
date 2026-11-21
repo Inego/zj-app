@@ -3,6 +3,7 @@ package inego.zungjunggame.render.ui
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
+import inego.zungjunggame.platform.UiCursor
 import inego.zungjunggame.render.fonts.Fonts
 
 /**
@@ -11,6 +12,8 @@ import inego.zungjunggame.render.fonts.Fonts
  * Intended as a lightweight deep-link / help affordance next to labels and
  * options (e.g. New Game setup → Reference). Hosts [layoutAt] each frame,
  * [render] with the pointer for desktop hover, and hit-test via [contains].
+ * A hovered, enabled icon raises the desktop hand cursor itself, so every host
+ * gets the link pointer without repeating the policy ([UiCursor]).
  *
  * Visual language: glyph-first. Idle is icon only; hover uses a soft fill
  * **without** a border so it stays distinct from rimmed chrome ([CloseButton]).
@@ -65,6 +68,9 @@ class InfoButton {
                 !pointerWorldX.isNaN() &&
                 !pointerWorldY.isNaN() &&
                 contains(pointerWorldX, pointerWorldY)
+
+        // The icon is a deep link, so its hover shares the link pointer.
+        UiCursor.overLink(hovered)
 
         // Rimless: soft fill on hover/disabled only — never a border stroke.
         if (hovered || !enabled) {

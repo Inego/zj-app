@@ -29,4 +29,15 @@ object UiCursor {
     fun hand() = set(Cursor.SystemCursor.Hand)
 
     fun arrow() = set(Cursor.SystemCursor.Arrow)
+
+    /**
+     * Raise the hand while the pointer is on a live hyperlink.
+     *
+     * A link only ever raises: the frame starts on [reset]'s arrow and each
+     * widget reports only its own link, so a host never has to know what else is
+     * on screen. No-op on touch backends and when [hovered] is false.
+     */
+    fun overLink(hovered: Boolean) {
+        if (hovered) hand()
+    }
 }

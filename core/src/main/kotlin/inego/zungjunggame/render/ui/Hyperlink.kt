@@ -4,6 +4,7 @@ import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.BitmapFont
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
+import inego.zungjunggame.platform.UiCursor
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.ui.Rect
 import kotlin.math.max
@@ -35,6 +36,10 @@ import kotlin.math.max
  * (one for the hit test, one derived here for the ink) would drift apart.
  * [enabled] false paints [disabledInk] and ignores hover. The host still owns
  * the hit region and decides whether a press does anything.
+ *
+ * The widget also owns the desktop **hand cursor** for the same hover value, so
+ * every host that paints a link gets the link pointer without repeating the
+ * cursor policy. Touch backends no-op through [UiCursor].
  *
  * ### The rule
  *
@@ -95,6 +100,9 @@ object Hyperlink {
         enabled: Boolean = true,
     ) {
         val font = face()
+        // The link's hover is also its cursor: one owner, so a host cannot paint
+        // the lift without raising the hand.
+        UiCursor.overLink(hovered && enabled)
         val paint = inkFor(hovered, enabled)
         val textW = width(label)
         Fonts.drawText(batch, font, label, x, baseline + font.capHeight, paint)
