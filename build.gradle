@@ -63,7 +63,7 @@ buildscript {
   dependencies {
     // AGP 8.x is incompatible with Gradle 9.6+ (removed InternalProblems API).
     // AGP 9.2+ is required for Android SDK Platform 37 (installed as android-37.0).
-    classpath 'com.android.tools.build:gradle:9.5.1'
+    classpath 'com.android.tools.build:gradle:9.5.2'
     classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
 
   }
