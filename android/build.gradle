@@ -74,13 +74,49 @@ static def isApkTaskName(String name) {
   return name.startsWith('package') && !name.contains('Resources') && !name.contains('Assets')
 }
 
-static def assertNotLoopbackApiBaseUrl(String url, String taskPath) {
-  if (isLoopbackApiBaseUrl(url)) {
+static def assertNotLoopbackApiBaseUrl(String url, String taskPath, boolean allowLoopback) {
+  if (!allowLoopback && isLoopbackApiBaseUrl(url)) {
     throw new GradleException(
         "-PapiBaseUrl=${url} points at the local machine and would be baked into ${taskPath}; " +
-        'omit -PapiBaseUrl for local dev (install tasks write LAN hosts to dev-api-url.txt).')
+        'omit -PapiBaseUrl for local dev (install tasks write LAN hosts to dev-api-url.txt), ' +
+        'or pass -PallowLoopbackApiBaseUrl=true when the loopback is deliberate ' +
+        '(for example `adb reverse tcp:8080 tcp:8080`).')
   }
 }
+
+/**
+ * A release package has exactly one API base URL: `BuildConfig.API_BASE_URL`.
+ * Release is not debuggable, so `writeDevApiUrl`'s `run-as` can never write
+ * `files/dev-api-url.txt` on the installed package, and an empty bake falls
+ * through to `ApiConfig.DEFAULT_BASE_URL` — the phone's own 127.0.0.1:8080.
+ * That is not a local-dev convenience in a shipped build; it is a client with
+ * no backend, and every online action (Google sign-in included) fails before
+ * it leaves the device. Refuse to produce one by default; the opt-in below
+ * covers `adb reverse` testing.
+ */
+static def assertShippableApiBaseUrl(String url, String taskPath, boolean allowLoopback) {
+  if (allowLoopback) return
+  if (url == null || url.toString().trim().isEmpty()) {
+    throw new GradleException(
+        "Release build without -PapiBaseUrl would bake the fallback 127.0.0.1:8080 into " +
+        "${taskPath}. A release package is not debuggable, so files/dev-api-url.txt can never " +
+        'be written on it; pass -PapiBaseUrl=https://play.zungjung.org for a shippable build, or ' +
+        '-PallowLoopbackApiBaseUrl=true only for local `adb reverse` testing.')
+  }
+  assertNotLoopbackApiBaseUrl(url, taskPath, false)
+}
+
+/**
+ * Explicit escape hatch for the loopback guard below. Only a command-line
+ * property counts; `gradle.properties` must not be able to opt a release in.
+ *
+ * The one legitimate use is a local release build tested through
+ * `adb reverse tcp:8080 tcp:8080`, where 127.0.0.1 on the phone does reach the
+ * developer machine. Nothing uploaded to Play is in that situation.
+ */
+def allowLoopbackApiBaseUrl =
+    (project.gradle.startParameter.projectProperties['allowLoopbackApiBaseUrl'] ?: '')
+        .toString().trim().equalsIgnoreCase('true')
 
 def bakedApiBaseUrl = resolveBakedApiBaseUrl()
 def releaseSigning = resolveReleaseSigning()
@@ -91,26 +127,42 @@ def releaseSigning = resolveReleaseSigning()
 def stagedRuntimeAssetsDir = project(':core').layout.buildDirectory.dir('staged-runtime').get().asFile
 
 /**
- * Refuse a local-only bake, but only when an APK is actually in the task graph.
+ * Refuse a local-only bake, but only when an APK/AAB is actually in the task graph.
  *
  * `BuildConfig.API_BASE_URL` outranks `dev-api-url.txt`, so baking 127.0.0.1
  * ships an APK that talks to the build machine. Checking this at configuration
  * time was too broad: Gradle configures every project for every build, so
  * `:lwjgl3:run -PapiBaseUrl=http://127.0.0.1:8080` — a legitimate desktop dev
  * run — failed here instead. Deferred to `whenReady` so the build stops before
- * any task runs, and scoped to the tasks whose output is an APK. (Not
+ * any task runs, and scoped to the tasks whose output is a package. (Not
  * configuration-cache compatible; this build does not enable it.)
+ *
+ * Release tasks are stricter than debug ones: an empty bake is refused too.
+ * See [assertShippableApiBaseUrl]; a plain `bundleRelease` from Android Studio
+ * has no `-PapiBaseUrl` and would otherwise publish a loopback client.
  */
 gradle.taskGraph.whenReady { graph ->
   def apkTasks = graph.allTasks.findAll { it.project == project && isApkTaskName(it.name) }
   if (!apkTasks.isEmpty()) {
-    // Name the task a caller would recognise (`assemble*` / `install*`) rather
-    // than whichever entry Set iteration happened to return first.
-    def named = apkTasks.find { it.name.startsWith('assemble') || it.name.startsWith('install') }
-    assertNotLoopbackApiBaseUrl(bakedApiBaseUrl, (named ?: apkTasks.first()).path)
+    def releaseTasks = apkTasks.findAll { it.name.contains('Release') }
+    // Name the task a caller would recognise (`assemble*` / `bundle*` /
+    // `install*`) rather than whichever entry Set iteration returned first.
+    def named = apkTasks.find {
+      it.name.startsWith('assemble') || it.name.startsWith('bundle') || it.name.startsWith('install')
+    }
+    if (!releaseTasks.isEmpty()) {
+      def namedRelease = releaseTasks.find {
+        it.name.startsWith('assemble') || it.name.startsWith('bundle')
+      }
+      assertShippableApiBaseUrl(
+          bakedApiBaseUrl, (namedRelease ?: releaseTasks.first()).path, allowLoopbackApiBaseUrl)
+    } else {
+      assertNotLoopbackApiBaseUrl(
+          bakedApiBaseUrl, (named ?: apkTasks.first()).path, allowLoopbackApiBaseUrl)
+    }
     // A release APK without a signing config is silent (`...-unsigned.apk`).
     // Refuse instead: consumers add the zjRelease* keys to local.properties.
-    if (releaseSigning == null && apkTasks.any { it.name.contains('Release') }) {
+    if (releaseSigning == null && !releaseTasks.isEmpty()) {
       throw new GradleException(
           'Release signing is not configured: add zjReleaseStoreFile, zjReleaseStorePassword, ' +
           'zjReleaseKeyAlias and zjReleaseKeyPassword to the gitignored local.properties.')

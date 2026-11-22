@@ -67,9 +67,15 @@ Distribution builds:
 ./gradlew.bat :teavm:buildWasm     # Web dist → teavm/build/dist/wasm/webapp/
 ./gradlew.bat :teavm:debugWasm     # same dist, readable names + TeaVM debug info
 ./gradlew.bat android:assembleDebug # debug APK → android/build/outputs/apk/
+./gradlew.bat :android:bundleRelease -PapiBaseUrl=https://play.zungjung.org # Play AAB
 ```
 
 Build-time options are Gradle properties (`-Pname=value`); defaults live in `gradle.properties`.
+
+An Android release package must bake a non-loopback `-PapiBaseUrl`: release is not
+debuggable, so it can never be given a `files/dev-api-url.txt` and would otherwise
+fall back to `127.0.0.1:8080`. The build refuses an empty or loopback value unless
+`-PallowLoopbackApiBaseUrl=true` is passed for local `adb reverse` testing.
 
 | Property | Default | Effect |
 |---|---|---|
