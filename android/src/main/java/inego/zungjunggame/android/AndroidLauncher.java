@@ -1,6 +1,7 @@
 package inego.zungjunggame.android;
 
 import android.graphics.Insets;
+import android.graphics.Rect;
 import android.opengl.GLSurfaceView;
 import android.os.Build;
 import android.os.Bundle;
@@ -485,7 +486,7 @@ public class AndroidLauncher extends AndroidApplication {
         }
 
         view.setOnApplyWindowInsetsListener((v, insets) -> {
-            applySafeAreaFromInsets(insets);
+            applySafeAreaFromInsets(v, insets);
             // Do not consume — libGDX / system may still need them.
             return insets;
         });
@@ -494,7 +495,7 @@ public class AndroidLauncher extends AndroidApplication {
         view.requestApplyInsets();
         WindowInsets current = view.getRootWindowInsets();
         if (current != null) {
-            applySafeAreaFromInsets(current);
+            applySafeAreaFromInsets(view, current);
         }
     }
 
@@ -546,8 +547,13 @@ public class AndroidLauncher extends AndroidApplication {
      * would be presented and then jump — the menu card by half the delta (it re-centers in
      * the safe rect) and the bottom player row by the whole delta (it is anchored to the
      * edge). A cutout, a kept-visible bar and a caption bar cannot do that.
+     *
+     * <p>The top-right corner is published separately, through
+     * {@link #publishTopRightCorner}: an edge inset says how deep the furniture reaches
+     * <em>somewhere</em> along that edge, which is what a row crossing the whole edge
+     * needs, but a corner button needs to know whether that particular corner is free.
      */
-    private static void applySafeAreaFromInsets(WindowInsets insets) {
+    private static void applySafeAreaFromInsets(View view, WindowInsets insets) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             Insets cutout = insets.getInsets(WindowInsets.Type.displayCutout());
             Insets bars = insets.getInsets(WindowInsets.Type.navigationBars());
@@ -557,9 +563,67 @@ public class AndroidLauncher extends AndroidApplication {
                     Math.max(cutout.top, Math.max(bars.top, caption.top)),
                     Math.max(cutout.right, Math.max(bars.right, caption.right)),
                     Math.max(cutout.bottom, Math.max(bars.bottom, caption.bottom)));
+            publishTopRightCorner(
+                    view,
+                    insets.getDisplayCutout(),
+                    Math.max(bars.right, caption.right),
+                    Math.max(bars.top, caption.top));
+        } else {
+            applySafeAreaFromInsetsPreR(insets);
+            // Pre-R has no per-type insets: the stable ones are the closest
+            // equivalent, and over-reserving is the safe direction there.
+            publishTopRightCorner(
+                    view,
+                    insets.getDisplayCutout(),
+                    insets.getStableInsetRight(),
+                    insets.getStableInsetTop());
+        }
+    }
+
+    /**
+     * Publish how far the window's top-right corner is occupied, in screen pixels, so
+     * corner chrome can sit flush when that corner is open.
+     *
+     * <p>The per-side max published above cannot answer this: a punch-hole in the middle
+     * of a long side makes {@code right} a full notch deep while leaving the corner free.
+     * The cutout's bounding rects can — they are in window coordinates in the current
+     * rotation, with the origin at the window's top-left. A rect that touches both the
+     * right and the top edge of the view is a corner hole.
+     *
+     * <p>A permanent system strip is blocking wherever it is, so {@code barRight} and
+     * {@code barTop} (the navigation bar and the caption bar, which cannot move while the
+     * app runs) are part of the corner depth whatever the cutout reports: a landscape
+     * three-button navigation bar on the right edge blocks the whole right edge, corner
+     * included. The deepest of the bar and any corner hole wins per axis, and both depths
+     * stay zero when nothing occupies the corner (a mid-edge hole, a top-centre notch, no
+     * cutout).
+     *
+     * <p>The depths are measured from the edges a caller places chrome against: {@code
+     * right} is the occupied width in from the right edge, {@code top} its height down
+     * from the top edge.
+     *
+     * <p>Before the first layout the view has no bounds and the corner is cleared; the next
+     * insets pass, which the layout triggers, publishes the real value.
+     */
+    private static void publishTopRightCorner(
+            View view, DisplayCutout cutout, int barRight, int barTop) {
+        final int w = view.getWidth();
+        final int h = view.getHeight();
+        if (w <= 0 || h <= 0) {
+            SafeArea.setTopRightCorner(0, 0);
             return;
         }
-        applySafeAreaFromInsetsPreR(insets);
+        int right = Math.max(barRight, 0);
+        int top = Math.max(barTop, 0);
+        if (cutout != null) {
+            for (Rect hole : cutout.getBoundingRects()) {
+                if (hole.right >= w && hole.top <= 0) {
+                    right = Math.max(right, w - hole.left);
+                    top = Math.max(top, hole.bottom);
+                }
+            }
+        }
+        SafeArea.setTopRightCorner(right, top);
     }
 
     /**

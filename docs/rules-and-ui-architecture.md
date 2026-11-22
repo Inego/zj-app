@@ -431,5 +431,5 @@ into the assertion.
 | `render/ParkableChrome.kt` | Movable-block contract (`ParkRelease`) for the board's HINT button / claim row and the hand-end card |
 | `render/ui/ParkDrag.kt` | Press → slop → park state machine + the shared park clamp |
 | `render/ui/ParkChromeGroup.kt` | One press routed to the first of several movable blocks |
-| `render/ui/OverlayForm.kt` | Shared modal-card layout: content-sized width, one column or two, comfortable/compact rhythm, header actions, scroll fallback |
+| `render/ui/OverlayForm.kt` | Shared modal-card layout: content-sized width, one column or two, comfortable/compact rhythm, a bottom action band, scroll fallback |
 | `app/AppRuntime.kt` | Input pipeline → `ComponentAction` → `Intent`; the site that resolves input and dispatches intents |

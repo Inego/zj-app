@@ -29,6 +29,7 @@ import inego.zungjunggame.session.hosts.ConnectionStatus
 import inego.zungjunggame.session.table.DiscardOrigin
 import inego.zungjunggame.session.table.TableViewState
 import inego.zungjunggame.ui.GestureSurface
+import inego.zungjunggame.ui.Rect
 import kotlin.math.*
 
 /** The board's current input boxes, all measured on demand from the table's state. */
@@ -1047,7 +1048,9 @@ class PlayTableView(
             val safeInset = when (side) {
                 SeatSide.Left -> safe.left
                 SeatSide.Right -> safe.right
-                SeatSide.Opposite -> safe.top
+                // The Opposite label keeps its own gutter below the portrait HUD
+                // band, not the bare safe top the band hangs from.
+                SeatSide.Opposite -> layout.oppositeGutterTop
                 SeatSide.Bottom -> safe.bottom
             }
             seatLabels.draw(
@@ -1261,6 +1264,15 @@ class PlayTableView(
         val edgeInsetRight: Float,
         val edgeInsetOpposite: Float,
         /**
+         * Distance from the top edge to the Opposite seat's own label gutter.
+         * Normally the safe top; in a portrait board with a top HUD it starts
+         * below the HUD band, so the wind label sits under the rule badge rather
+         * than on the same line.
+         */
+        val oppositeGutterTop: Float,
+        /** The portrait top-HUD band, or null in landscape / without a HUD. */
+        val hud: HudBand?,
+        /**
          * Centre of the felt between the top and bottom hand rows. The wall
          * marker and the side seats live here, not on the raw pane centre: the
          * bottom edge also carries the safe inset, the coach reserve, and the
@@ -1310,17 +1322,16 @@ class PlayTableView(
         val humanLabelWidthBudget: Float = 0f,
         val alongEdgePad: Float,
         /**
+         * Along-edge pad for the human (Bottom) row: in landscape at least half
+         * of the human tile width so the bottom row never crowds the Left and
+         * Right hands; otherwise [alongEdgePad].
+         */
+        val humanAlongEdgePad: Float,
+        /**
          * Bottom band the human seat label must clear while it keeps the bottom
          * gutter: the tutorial coach reserve. Zero outside that coach.
          */
         val bottomLabelReserve: Float,
-        /**
-         * Band the Right seat's row must clear at the high end of its edge: the
-         * corner menu's square where it reaches into the tile column past the
-         * plate's rim. Zero where the menu fits (or only grazes) the seat gutter,
-         * or none paints.
-         */
-        val topRightChromeReserve: Float,
     ) {
         fun edgeInsetFor(side: SeatSide): Float = when (side) {
             SeatSide.Bottom -> humanEdgeInsetBottom
@@ -1379,19 +1390,46 @@ class PlayTableView(
     var safeInsets: SafeArea.Insets? = null
 
     /**
-     * The floating top-right control's square, measured from the safe corner
-     * (`inset + side`), or 0 where no control floats there.
+     * The square a top-right control (the board menu) floats in, in this table's
+     * coordinates, or null where nothing floats there.
      *
-     * The table reserves this square at the high end of the Right seat's edge
-     * only when its depth would reach into that seat's tile column past a small
-     * graze band: the button's size follows the UI density while the gutter
-     * follows the short side, so on a narrow landscape window the two overlap.
-     * Where the square fits the gutter — or only grazes it — no reserve is made
-     * and the Right hand keeps its size.
+     * The Right seat's column yields to it **horizontally**. Its row runs the
+     * full height of the short edge, past the corner the square occupies; if the
+     * row ended above the square instead, the whole hand would fit-scale to the
+     * shorter span (a waiting hand does not fit what is left of a landscape
+     * edge). Moving the column in costs a few dp of felt, which a landscape pane
+     * has. A square that sits in the gutter, or wholly left of the column, moves
+     * nothing.
      */
-    var topRightChromePx: Float = 0f
+    var topRightChrome: Rect? = null
+
+    /**
+     * True when this board paints its top HUD line (the rule badge and the hand
+     * counter) — free play and online, never a tutorial board. Only then does a
+     * portrait layout reserve the HUD's band below the menu and move the
+     * Opposite seat under it; the tutorial shell has a menu over the board but
+     * no HUD, so reserving a line there would shrink the lesson for nothing.
+     */
+    var topHud: Boolean = false
 
     private fun safeInsetSnapshot(): SafeArea.Insets = safeInsets ?: SafeArea.current()
+
+    /**
+     * The portrait HUD's reserved band: one line under the menu square and above
+     * the Opposite seat's label gutter, running from safe edge to safe edge.
+     *
+     * [topY] is the cap-top world y the presenter draws at. [bottomY] is the
+     * band's lower edge (the full line box, descenders included); the table
+     * starts the Opposite seat below it. [leftX] / [rightX] are the window's
+     * safe edges, so in portrait the badge spans the screen under the button
+     * instead of stopping at the side tile bands.
+     */
+    data class HudBand(
+        val leftX: Float,
+        val rightX: Float,
+        val topY: Float,
+        val bottomY: Float,
+    )
 
     /**
      * Nominal felt geometry for chrome that paints around the table, at
@@ -1403,20 +1441,31 @@ class PlayTableView(
      * for this layout — hand-tile cap and gutter fit included — not just the tile
      * cap, which stays at 1 until the window is nearly at its narrowest.
      *
-     * [rightBandInnerX] is the screen x of the Right seat's **nominal** tile
-     * band's inner face, derived from the edge inset and the hand height rather
-     * than from the fitted placements. The row is always fit-scaled while a hand
-     * is live, so its visible bounds move when a meld is claimed; this anchor
-     * does not. Chrome that stops here is clear of the Right column, and the
-     * Opposite row never reaches past it.
+     * [leftBandInnerX] and [rightBandInnerX] are the screen x of the Left and
+     * Right seats' **nominal** tile bands' inner faces, derived from the edge
+     * inset and the hand height rather than from the fitted placements. A row is
+     * always fit-scaled while a hand is live, so its visible bounds move when a
+     * meld is claimed; these anchors do not. Chrome that stops at them is clear
+     * of the side columns, and the Opposite row never reaches past them.
+     *
+     * [hud] is set only in portrait, where the top HUD line needs its own band
+     * under the menu. Landscape has no band: the line sits in the strip above
+     * the Opposite row and anchors to the two band faces instead.
      */
-    data class FeltChrome(val labelScale: Float, val rightBandInnerX: Float)
+    data class FeltChrome(
+        val labelScale: Float,
+        val leftBandInnerX: Float,
+        val rightBandInnerX: Float,
+        val hud: HudBand? = null,
+    )
 
     fun feltChrome(screenW: Float, screenH: Float): FeltChrome {
         val layout = computeTableLayout(screenW, screenH)
         return FeltChrome(
             labelScale = layout.chromeScale,
+            leftBandInnerX = layout.edgeInsetLeft + layout.handH * 0.5f,
             rightBandInnerX = screenW - (layout.edgeInsetRight + layout.handH * 0.5f),
+            hud = layout.hud,
         )
     }
 
@@ -1440,8 +1489,29 @@ class PlayTableView(
             handH * 0.05f + shortSide * 0.045f
         }
         val edgeInsetLeft = max(baseSide, safe.left + handH * 0.5f + minGutter)
-        val edgeInsetRight = max(baseSide, safe.right + handH * 0.5f + minGutter)
-        val edgeInsetOpposite = max(baseSide, safe.top + handH * 0.5f + minGutter)
+        var edgeInsetRight = max(baseSide, safe.right + handH * 0.5f + minGutter)
+
+        // ── The corner menu takes width from the Right seat, never height ──
+        // A landscape pane puts the Left and Right seats on its short edges, and
+        // the Right row then runs the full height of the edge — through the
+        // corner the menu floats over. Where the square straddles the tile
+        // column, move the column in until it clears: the row keeps its span and
+        // its size, and only felt is spent. A square that fits the gutter, or
+        // sits wholly left of the column, moves nothing. Portrait answers the
+        // same square through the table's top inset instead
+        // ([innego.zungjunggame.features.board.BoardMenuChrome.tableInsets]), and
+        // its Right seat is on a long edge, where this would eat the felt
+        // between the hands for no row height.
+        val menu = topRightChrome
+        if (screenW > screenH && menu != null) {
+            val columnInner = screenW - edgeInsetRight - handH * 0.5f
+            val columnOuter = screenW - edgeInsetRight + handH * 0.5f
+            if (menu.left < columnOuter && menu.right > columnInner) {
+                // Leave the plate's rim a little daylight from the tiles.
+                val clear = columnOuter - (menu.left - Fonts.px(3f))
+                if (clear > 0f) edgeInsetRight += clear
+            }
+        }
 
         // Every fixed-size label on the felt shares the seat labels' scale. The
         // seat fit has two parts, and the gutter is the one that moves as a window
@@ -1457,6 +1527,44 @@ class PlayTableView(
             gutter = labelGutter,
             tileGap = tileGap,
         )
+
+        // ── Portrait: the top HUD gets its own line under the menu ──
+        // A portrait pane puts the side seats on its long edges, so the strip
+        // above the Opposite row is free from edge to edge — but the menu owns
+        // the top-right corner. The badge therefore hangs below the menu (the
+        // table's `top`, which tableInsets has already put under that square)
+        // and spans the window's safe edges. The Opposite seat's label and row
+        // then start below the whole line, so the wind label can never share a
+        // line with the rule badge and the counter. Landscape keeps its strip:
+        // there the side hands occupy the short edges and the HUD already
+        // anchors to their band faces.
+        val hud = if (topHud && screenH > screenW) {
+            val gap = Fonts.px(8f)
+            val edgePad = Fonts.px(16f)
+            // The menu band is `safe.top` where tableInsets reserved it, but on a
+            // pane only just taller than wide it need not be; take the deeper of
+            // the two so the line always hangs below the button and the cutout.
+            val topFromTop = max(
+                safe.top,
+                menu?.let { screenH - it.bottom } ?: 0f,
+            ) + gap
+            HudBand(
+                leftX = max(edgePad, safe.left + edgePad),
+                rightX = screenW - max(edgePad, safe.right + edgePad),
+                topY = screenH - topFromTop,
+                bottomY = screenH - topFromTop - Fonts.label.lineHeight * chromeScale,
+            )
+        } else {
+            null
+        }
+        // Where the Opposite seat's own gutter starts: below the HUD line when
+        // one paints, otherwise the safe top. Its label is centred in the gutter
+        // between this and the row's felt-facing edge.
+        val oppositeGutterTop = hud?.let { screenH - it.bottomY + Fonts.px(8f) } ?: safe.top
+        val edgeInsetOpposite = max(
+            baseSide,
+            oppositeGutterTop + handH * 0.5f + minGutter,
+        )
         // The tutorial coach's Back / Next row is the only bottom band the hand
         // and the side labels must clear.
         val bottomReserve = bottomReservePx.coerceAtLeast(0f)
@@ -1466,23 +1574,6 @@ class PlayTableView(
         // a strip below.
         val edgeInsetBottom =
             max(baseSide, safe.bottom + bottomReserve + handH * 0.5f + minGutter)
-
-        // The corner menu is density-scaled chrome; the seat gutter is a
-        // short-side proportion. Where the square is deeper than the gutter it
-        // sits over the Right column, and the Right row starts below it. Where it
-        // fits the gutter, the corner is spare and the row keeps its size. A
-        // square that crosses the column by only a few dp is not visible over the
-        // tile art's own margin, so that graze does not shrink the hand — a
-        // maximized 1080p window lands exactly there (52 dp square, 49.7 dp
-        // gutter).
-        val rightGutter = (edgeInsetRight - safe.right - handH * 0.5f).coerceAtLeast(0f)
-        val cornerGrazing = Fonts.px(3f)
-        val topRightChromeReserve =
-            if (topRightChromePx - rightGutter > cornerGrazing) {
-                safe.top + topRightChromePx + Fonts.px(8f)
-            } else {
-                0f
-            }
 
         val maxReachTowardCenter = shortSide * 0.28f
         val firstDiscardRowY = handH * 0.5f + rowGap + discardH * 0.5f
@@ -1544,12 +1635,17 @@ class PlayTableView(
             screenOrtho = screenH,
             nearEdge = edgeInsetLeft + handH * 0.5f,
             farEdge = screenW - edgeInsetRight - handH * 0.5f,
-            pad = alongEdgePad,
+            pad = 0f,
         )
+        val humanBandW = humanBand.half * 2f
         // 13 sorted tiles + the parked draw slot: 14 tile widths, 12 gaps and the
-        // draw gap. That is the widest ordinary waiting hand.
-        val humanByWidth =
-            (humanBand.half * 2f - 12f * tileGap - drawnGap) / (14f * tileAspect)
+        // draw gap. In landscape each end also keeps at least half a player tile
+        // width clear of the Left and Right hands (+1 tile width total), or
+        // `alongEdgePad` on each side if larger.
+        val humanByWidth = minOf(
+            (humanBandW - 2f * alongEdgePad - 12f * tileGap - drawnGap) / (14f * tileAspect),
+            (humanBandW - 12f * tileGap - drawnGap) / (15f * tileAspect),
+        )
         val humanFilled = if (humanFillsGutter) {
             minOf(humanRowTopY - humanOuterY, humanByWidth)
         } else {
@@ -1563,12 +1659,17 @@ class PlayTableView(
         } else {
             metrics
         }
+        val humanAlongEdgePad = if (screenW > screenH) {
+            max(alongEdgePad, humanMetrics.handTileW * 0.5f)
+        } else {
+            alongEdgePad
+        }
         val humanLabelAbove = humanGrew
         // The above-row label aligns to the row's **measured** rightmost tile
         // ([SeatSlots.humanRightmostTileX]); this is the nominal band edge it falls
         // back to only when the row laid nothing out.
         val humanLabelRightX =
-            if (humanLabelAbove) screenW - edgeInsetRight - handH * 0.5f - alongEdgePad
+            if (humanLabelAbove) screenW - edgeInsetRight - handH * 0.5f - humanAlongEdgePad
             else Float.NaN
 
         return TableLayout(
@@ -1580,6 +1681,8 @@ class PlayTableView(
             edgeInsetLeft = edgeInsetLeft,
             edgeInsetRight = edgeInsetRight,
             edgeInsetOpposite = edgeInsetOpposite,
+            oppositeGutterTop = oppositeGutterTop,
+            hud = hud,
             // The hands' inner edges are what the felt is measured between: the
             // opposite row's face and the human row's face.
             feltCenterY =
@@ -1596,8 +1699,8 @@ class PlayTableView(
                 if (humanLabelAbove) (humanLabelRightX - screenW * 0.5f).coerceAtLeast(0f)
                 else 0f,
             alongEdgePad = alongEdgePad,
+            humanAlongEdgePad = humanAlongEdgePad,
             bottomLabelReserve = bottomReserve,
-            topRightChromeReserve = topRightChromeReserve,
         )
     }
 
@@ -1654,7 +1757,7 @@ class PlayTableView(
                 screenOrtho = screenOrtho,
                 nearEdge = nearEdge,
                 farEdge = farEdge,
-                pad = layout.alongEdgePad,
+                pad = if (side == SeatSide.Bottom) layout.humanAlongEdgePad else layout.alongEdgePad,
                 // A vertical seat shares its edge with the tutorial coach's
                 // Back / Next band; the bottom hand does not, so only the
                 // left/right rows keep that chrome clear.
@@ -1662,10 +1765,6 @@ class PlayTableView(
                     SeatSide.Left, SeatSide.Right -> layout.bottomLabelReserve
                     SeatSide.Bottom, SeatSide.Opposite -> 0f
                 },
-                // Only the Right edge shares its high end with the corner menu.
-                // On the longer-side branch (portrait) this is a no-op: tableInsets
-                // has already held the whole board below the button.
-                alongCeiling = if (side == SeatSide.Right) layout.topRightChromeReserve else 0f,
             )
             seatMetas += SeatMeta(seat, side, span.center)
             val edgeInset = layout.edgeInsetFor(side)

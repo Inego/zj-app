@@ -367,6 +367,8 @@ tiles can go, and the chrome fits the remaining space.**
   often, and putting it first keeps it from shifting the counter sideways. The
   detail is dropped only if it would reach the rule badge.
 - **The button gets a corner reserve only where it really intrudes.**
+  *(Superseded by §12: the reserve is gone; the Right column now yields
+  horizontally instead of losing the top of its row.)*
   `BoardMenuChrome.footprint` publishes the square (`cornerInset + side`).
   `PlayTableView.computeTableLayout` compares it with the Right seat's gutter
   and, when the square crosses the column by more than 3 dp, feeds
@@ -394,10 +396,83 @@ Touch landscape is the case expected to exercise the largest corner reserve.
 
 ---
 
+## 12. Replaced (2026-11-22): the corner yields, not the row
+
+The §11 reserve answered the corner by shortening the Right row's along-edge
+span. On a phone that is the expensive axis: a landscape pane is short, so the
+row fit-scales (a 13-tile hand at 0.85× on a 1224-px edge) and one hand visibly
+differed from the other. It also treated the whole right edge as blocked, when
+only the corner is — which is where the menu lives anyway.
+
+Two changes replace it:
+
+- **The corner control yields to the corner, not the edge.** `SafeArea` now
+  publishes `cornerTopRight`, the depth a cutout reaches into the top-right
+  corner, read from `DisplayCutout.getBoundingRects()` in
+  `AndroidLauncher.publishTopRightCorner`. A punch-hole in the middle of a right
+  edge reports nothing there, so `BoardMenuChrome.windowRect` places the button
+  flush in the corner; a corner punch-hole reports its depth and the button
+  yields by exactly that. The per-side insets stay conservative and unchanged,
+  because the seat rows really do cross a mid-edge hole.
+- **The Right column moves in, never down.** `PlayTableView.topRightChrome`
+  carries that square. Where it straddles the tile column — a narrow gutter, a
+  180° rotation that puts the camera on the other side, a narrower window —
+  `edgeInsetRight` grows by the overlap plus a 3 dp graze, so the row keeps its
+  full span and its size. Where the square fits the gutter, nothing moves.
+  `topRightChromeReserve` and `alongCeiling` are gone; portrait already answers
+  the same square through `tableInsets`.
+
+Arithmetic for the device this was reported from (1224 × 2700 at 3× UI scale,
+cutout mid-right in landscape): the corner is free, so the button moves 123 px
+right into it, the Right column no longer reserves 201 px at the top, and both
+side hands fit the same 1175 px span — the same tile size.
+
+**Not verified:** the device build (release-signed installs are manual); a
+corner-cutout phone; a 180° rotation.
+
+---
+
+## 13. The rule badge mirrors the counter; portrait gets its own HUD band (2026-11-22)
+
+**Landscape.** The rule badge (`PatternlessRule.standalone`: "Patternless OK" /
+"Min. 5 pts") used to paint from the window's left pad, which in landscape is
+over the top tiles of the Left hand — the exact mirror of the counter's original
+bug over the Right melds. It now anchors to `FeltChrome.leftBandInnerX`, the Left
+seat's **nominal** band inner face, plus the same 10 dp felt gap the counter
+keeps. The counter is right-aligned to the Right band's inner face, so the two
+readouts flank the felt symmetrically and neither moves when a claim rescales a
+row. On the reported device the rule moves from x = 48 px to x ≈ 244 px, clear of
+the Left column at 110–214 px.
+
+**Portrait.** Here the two badges shared the top strip with the Opposite seat's
+wind label (`東 · Bot 2 · 0` sat between `Patternless OK` and `Ping … 1/8`), and
+the counter stopped at the Right tile band instead of the screen edge. The table
+now publishes a [PlayTableView.HudBand] when `topHud && screenH > screenW`:
+
+- one line under the menu square (`safe.top + 8 dp`, where `tableInsets` has
+  already put the table below that square),
+- spanning the window's safe edges (`16 dp` pads), so the rule badge is flush
+  left and the counter flush right,
+- with `bottomY` at the foot of the full line box (descenders included).
+
+The Opposite seat's own gutter now starts below that band (`oppositeGutterTop`),
+and `edgeInsetOpposite` grows by the line plus its gaps, so the wind label and
+the hand row move down together instead of sharing a line with the HUD. On the
+device the row moves down ~120 px (≈40 dp, one 20 dp line at the 3× UI scale
+plus two 8 dp gaps), and the HUD paints just under the menu rather than at its
+bottom edge. Landscape is unchanged: no band, the band-face anchors above.
+`topHud` is set only for free play and online, so a tutorial board never spends a
+line of height on a HUD it does not draw.
+
+**Not verified:** the device build.
+
+---
+
 ## Appendix A — verification checklist (code reading only)
 
 Rows marked *(pre-fix)* describe the revision §0–§10 diagnosed; §11 records the
-prototype that replaced them.
+prototype that replaced them, §12 the corner rule that replaced the reserve,
+§13 the HUD's two orientations.
 
 | Assertion | Where |
 |---|---|
@@ -409,10 +484,14 @@ prototype that replaced them.
 | *(pre-fix)* the HUD's right edge is the button's left minus 10 dp | `BoardMenuChrome.hudRightEdge` |
 | the button is at least 14 dp + 36 dp (44 dp on touch) from the corner | `BoardMenuChrome.rect`, `buttonSide` |
 | the gutter is `0.05·handH + 0.045·short` | `computeTableLayout`, `minGutter` |
-| the HUD is right-aligned to the band, top-padded by 16 dp | `renderHandStatusBadge` |
+| in landscape the counter is right-aligned to the right band and the rule badge left-aligned to the left band, both 10 dp onto the felt | `renderHandStatusBadge`, `PlayTableView.FeltChrome` |
+| in portrait both sit on one line under the menu, at the window's safe edges, with the Opposite seat below it | `PlayTableView.HudBand`, `oppositeGutterTop`, `renderHandStatusBadge` |
 | the HUD is painted after the board, the button after both | `BoardComponent.draw` |
 | the label colour is `AppPalette.seatInk` | `Fonts.kt:682` |
-| the corner reservation is portrait-only | `BoardMenuChrome.tableInsets` |
+| a cutout in the middle of an edge leaves the top-right corner free | `AndroidLauncher.publishTopRightCorner` |
+| the corner depth, not the edge inset, places the menu | `BoardMenuChrome.windowRect` |
+| the Right column yields to that square horizontally | `PlayTableView.computeTableLayout`, `edgeInsetRight` |
+| portrait reserves the square's band above the table | `BoardMenuChrome.tableInsets` |
 
 ## Appendix B — files
 
@@ -422,7 +501,7 @@ prototype that replaced them.
 | `render/seats/SeatSide.kt` | local → world; Right's +x is up |
 | `render/table/PlayTableView.kt` | tile metrics, edge insets, along-edge span, published felt band, paint order |
 | `render/seats/SeatLabelDrawer.kt` | the gutter label (the control case) |
-| `features/board/BoardMenuChrome.kt` | button rect, `footprint`, portrait-only `tableInsets` |
+| `features/board/BoardMenuChrome.kt` | button rect (corner-accurate), portrait band in `tableInsets` |
 | `features/board/BoardComponent.kt` | draw order: board → chrome → button |
 | `features/board/FreePlayPresenter.kt` | the HUD: counter, ping, shutdown clock |
 | `app/AppGraph.kt` | wires `BoardChrome` to the HUD |

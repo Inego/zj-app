@@ -169,6 +169,17 @@ class FreePlayPresenter(
      * the column is a short-side proportion, and anchoring to the button put the
      * digits on the outermost meld of the Right hand.
      *
+     * The rule badge ([PatternlessRule]) is the counter's mirror image. In
+     * landscape the Left seat is on the short edge, so its hand runs the full
+     * height through the top-left corner: the badge sits on the felt right of it,
+     * left-aligned to [leftBandInnerX], and the counter sits left of the Right
+     * band. In portrait the table publishes a dedicated [PlayTableView.HudBand]
+     * under the menu ([hud]): the whole line hangs below the button, the rule
+     * badge at the window's left safe edge and the counter at its right safe
+     * edge, and the Opposite seat's label and row start below the band. Either
+     * way the row anchors come from nominal geometry, so a claim rescaling a row
+     * never drags the badges.
+     *
      * The detail comes **first** and the counter last, flush against the anchor.
      * The ping is volatile (2↔3 digits), the hand number is not; putting the
      * counter on the right keeps it from sliding horizontally as the ping
@@ -182,8 +193,11 @@ class FreePlayPresenter(
      */
     fun renderHandStatusBadge(
         batch: SpriteBatch,
+        screenW: Float,
         screenH: Float,
+        leftBandInnerX: Float,
         rightBandInnerX: Float,
+        hud: PlayTableView.HudBand? = null,
         sessionKind: SessionKind,
         boardHosted: Boolean,
         labelScale: Float,
@@ -196,13 +210,18 @@ class FreePlayPresenter(
         val pad = Fonts.px(16f)
         val safe = SafeArea.current()
         val topPad = kotlin.math.max(pad, safe.top + pad)
-        val leftPad = kotlin.math.max(pad, safe.left + pad)
-        // Stop a gap short of the tile column, on the felt side. The column's face
-        // is nominal geometry, so a claim does not move this anchor.
-        val hudRight = rightBandInnerX - Fonts.px(10f)
-        val handBaselineY = screenH - topPad
+        // The portrait band places the whole line under the menu, edge to edge.
+        // Landscape has no band: stop a gap short of the Left column on the felt
+        // side, like the counter at the other end.
+        val hudLeft = hud?.leftX ?: if (screenW > screenH) {
+            leftBandInnerX + Fonts.px(10f)
+        } else {
+            kotlin.math.max(pad, safe.left + pad)
+        }
+        val hudRight = hud?.rightX ?: (rightBandInnerX - Fonts.px(10f))
+        val handBaselineY = hud?.topY ?: (screenH - topPad)
 
-        // Top-left rule badge: "Patternless OK" or "Min. 5 pts"
+        // Top rule badge: "Patternless OK" or "Min. 5 pts".
         val allowChicken = playHost?.allowChickenHands ?: session.gameConfig.rules.allowChickenHands
         val ruleText = PatternlessRule.standalone(allowChicken)
 
@@ -238,12 +257,12 @@ class FreePlayPresenter(
 
         Fonts.withFaceScale(font, labelScale) {
             ruleGlyph.setText(font, ruleText)
-            Fonts.drawText(batch, font, ruleText, leftPad, handBaselineY, font.color)
+            Fonts.drawText(batch, font, ruleText, hudLeft, handBaselineY, font.color)
 
             statusGlyph.setText(font, label)
         }
         val labelW = statusGlyph.width
-        val ruleRight = leftPad + ruleGlyph.width + Fonts.px(12f)
+        val ruleRight = hudLeft + ruleGlyph.width + Fonts.px(12f)
 
         val detail = detailText
         val detailFont = Fonts.small

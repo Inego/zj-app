@@ -858,8 +858,11 @@ class AppGraph(
                     val felt = table.feltChrome(c.worldWidth, c.worldHeight)
                     freePlayPresenter.renderHandStatusBadge(
                         batch = canvas.batch,
+                        screenW = c.worldWidth,
                         screenH = c.worldHeight,
+                        leftBandInnerX = felt.leftBandInnerX,
                         rightBandInnerX = felt.rightBandInnerX,
+                        hud = felt.hud,
                         sessionKind = snapshot.kind,
                         boardHosted = true,
                         labelScale = felt.labelScale,

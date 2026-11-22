@@ -35,54 +35,87 @@ internal object BoardMenuChrome {
     }
 
     /**
-     * The button's square inside [safe], at the shared corner inset.
+     * The button's square inside [width] x [height], at the shared corner inset
+     * from the right and top edges, held clear of [right] / [top] — the space the
+     * platform claims in that corner.
      *
-     * [width] and [height] are the board's own pane — the whole viewport in free
-     * play and online, the board pane beside the coach's copy column in a tutorial
-     * lesson. Insets are zeros inside a provider's space, where the space itself
-     * already sits inside the window cutout.
+     * The insets are the caller's, not this object's: a full-screen board hands
+     * in the window's own corner ([windowRect]), while a context that already
+     * owns its panel (the tutorial shell's menu, which is laid out on the
+     * safe-inset panel) hands in the edge insets the panel was cut by
+     * ([panelRect]). The square is the same size either way.
      */
-    fun rect(width: Float, height: Float, safe: SafeArea.Insets): Rect {
+    fun rect(width: Float, height: Float, right: Float, top: Float): Rect {
         val side = buttonSide()
         val inset = CloseButton.cornerInset()
         return Rect(
-            left = (width - safe.right - inset - side).coerceAtLeast(safe.left),
-            bottom = (height - safe.top - inset - side).coerceAtLeast(safe.bottom),
+            left = (width - right - inset - side).coerceAtLeast(0f),
+            bottom = (height - top - inset - side).coerceAtLeast(0f),
             width = side,
             height = side,
         )
     }
 
     /**
-     * The square the button covers, measured from the safe corner: its inset plus
-     * its side. The table compares this with the seat gutter and reserves the
-     * corner for it where the gutter is too narrow to hold it. It does not include
-     * a breathing gap, so a button that merely sits close to the tiles — as it
-     * does at 1080p on desktop — does not shrink the Right hand.
+     * The board's own button: the window's top-right corner, clear of whatever
+     * really occupies *that corner* rather than of the deepest furniture on
+     * either edge.
+     *
+     * A punch-hole in the middle of a right edge makes [SafeArea.right] a full
+     * notch deep, and a button placed inside that inset gives up a corner nothing
+     * covers. The cutout's actual rects say the corner is free, so the button
+     * sits flush and the table's Right seat can keep the full height of its edge
+     * beside it. Where a cutout does reach the corner — a corner punch-hole, a
+     * notch running into it — [SafeArea.cornerTopRight] reports the depth and the
+     * button yields by exactly that.
+     *
+     * Only a full-screen board asks for this square: a board that paints its own
+     * menu is free play or online, both of which span the window. A tutorial
+     * board is laid out inside the shell's content zone and the shell places the
+     * context's menu ([panelRect]).
      */
-    fun footprint(): Float {
-        Fonts.ensureCreated()
-        return CloseButton.cornerInset() + buttonSide()
+    fun windowRect(width: Float, height: Float): Rect {
+        val corner = SafeArea.cornerTopRight()
+        return rect(width, height, corner.right, corner.top)
     }
 
     /**
-     * Portrait hands span the board's width, so the corner is not spare felt.
-     * When a menu floats over the corner ([reserveCorner]), reserve its band
-     * above the table; the normal seat gutter then keeps both Opposite's tiles
-     * and label below the button. Wide boards, and boards whose pane ends below
-     * the menu, retain their existing corner space. The tutorial board reserves
-     * here even though the shell paints the button. These insets apply to every
-     * table layout pass, not to the button or HUD, which stay inside the
-     * platform safe area.
+     * The square on a panel that has already been cut by [safe] — the tutorial
+     * shell's menu, which floats in the top-right of its safe-inset body. The
+     * panel is inside the cutout already, so the edge insets are the whole
+     * reservation.
+     */
+    fun panelRect(width: Float, height: Float, safe: SafeArea.Insets): Rect =
+        rect(width, height, safe.right, safe.top)
+
+    /**
+     * The insets the table lays out inside, given the corner menu's [menu] square
+     * (null where no menu floats over the table).
+     *
+     * Portrait hands span the board's width, so the corner is not spare felt:
+     * when a menu floats over it, reserve its band above the table; the normal
+     * seat gutter then keeps both Opposite's tiles and label below the button.
+     * Wide boards, and boards whose pane ends below the menu, retain their
+     * existing corner space — a landscape hand runs along the *short* edge, so
+     * the table answers the same square by moving that column in horizontally
+     * instead ([inego.zungjunggame.render.table.PlayTableView]); losing the top of
+     * the row there would fit-scale the whole hand down.
+     *
+     * These insets apply to every table layout pass, not to the button or HUD,
+     * which stay inside the platform safe area.
      */
     fun tableInsets(
         width: Float,
         height: Float,
         safe: SafeArea.Insets,
-        reserveCorner: Boolean = true,
+        menu: Rect?,
     ): SafeArea.Insets =
-        if (reserveCorner && height - safe.top - safe.bottom > width - safe.left - safe.right) {
-            safe.copy(top = height - rect(width, height, safe).bottom)
+        if (menu != null &&
+            height - safe.top - safe.bottom > width - safe.left - safe.right
+        ) {
+            // The button's own square is the band: never above the table's top
+            // rim, which the per-side inset already holds below a notch.
+            safe.copy(top = (height - menu.bottom).coerceAtLeast(safe.top))
         } else {
             safe
         }

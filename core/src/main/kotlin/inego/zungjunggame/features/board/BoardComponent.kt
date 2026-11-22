@@ -154,14 +154,12 @@ class BoardComponent(
         val area = tutorialBoardArea(frame)
         val snapshot = view.session
         val menuPresent = BoardMenuChrome.presentIn(snapshot.kind)
+        val safe = boardSafeInsets(frame)
+        val menu = boardMenuSquare(area, frame.constraints.worldHeight, safe, menuPresent)
         table().bottomReservePx = area.bottomReserve
-        table().topRightChromePx = boardMenuFootprint(menuPresent)
-        table().safeInsets = BoardMenuChrome.tableInsets(
-            area.width,
-            area.height,
-            boardSafeInsets(frame),
-            menuPresent || menuOverlapsTable(area, frame.constraints.worldHeight),
-        )
+        table().topRightChrome = menu
+        table().topHud = menuPresent
+        table().safeInsets = BoardMenuChrome.tableInsets(area.width, area.height, safe, menu)
         val tableView = if (snapshot.boardHosted) boardTableView(snapshot, view.inputs.revealedSeats) else null
         table().motion(tableView, area.width, area.height, view.inputs)
         // Only real motion asks for a present. This used to read
@@ -262,15 +260,12 @@ class BoardComponent(
             if (tableView != null) {
                 val area = tutorialBoardArea(frame)
                 val safe = boardSafeInsets(frame)
+                val menu = boardMenuSquare(area, c.worldHeight, safe, menuPresent)
                 val board = table()
                 board.bottomReservePx = area.bottomReserve
-                board.topRightChromePx = boardMenuFootprint(menuPresent)
-                board.safeInsets = BoardMenuChrome.tableInsets(
-                    area.width,
-                    area.height,
-                    safe,
-                    menuPresent || menuOverlapsTable(area, c.worldHeight),
-                )
+                board.topRightChrome = menu
+                board.topHud = menuPresent
+                board.safeInsets = BoardMenuChrome.tableInsets(area.width, area.height, safe, menu)
                 val input = view.renderInput
                 // The player's remembered HINT / claim-row places live in
                 // `ui.prefs`; the board hands them in before painting so the
@@ -306,7 +301,7 @@ class BoardComponent(
                 // Board chrome, not a route: the same rect the measure pass
                 // publishes, painted after the table so parked HINT / claim chrome
                 // cannot cover it. The HUD in [chrome] keeps its text left of it.
-                if (menuPresent) menuRect = BoardMenuChrome.rect(area.width, area.height, safe)
+                if (menuPresent) menuRect = menu
             }
         }
         chrome.draw(canvas, c, snapshot, drawn)
@@ -354,12 +349,27 @@ private fun menuOverlapsTable(area: SlideChromeLayout.BoardArea, spaceHeight: Fl
     area.height >= spaceHeight - 0.5f
 
 /**
- * The corner menu's square for the table's high-end reserve, or 0 where no menu
- * paints. The table adds its own breathing gap and only reserves where the
- * square would reach into the Right seat's column.
+ * The square a menu floats over the table in, or null where none does.
+ *
+ * The board's own menu (free play, online) takes the window's top-right corner,
+ * clear of what actually occupies that corner ([BoardMenuChrome.windowRect]). A
+ * tutorial shell paints the context's menu on its safe-inset panel instead, and
+ * the table reserves through the same square either way, so the seat column
+ * moves aside for whichever owner painted it. In a tutorial [safe] is zeros — the
+ * board's space already sits inside the shell's cut — and the shell's square is
+ * then placed from the panel's own edges.
  */
-private fun boardMenuFootprint(menuPresent: Boolean): Float =
-    if (menuPresent) BoardMenuChrome.footprint() else 0f
+private fun boardMenuSquare(
+    area: SlideChromeLayout.BoardArea,
+    spaceHeight: Float,
+    safe: SafeArea.Insets,
+    menuPresent: Boolean,
+): Rect? = when {
+    menuPresent -> BoardMenuChrome.windowRect(area.width, area.height)
+    menuOverlapsTable(area, spaceHeight) ->
+        BoardMenuChrome.panelRect(area.width, area.height, safe)
+    else -> null
+}
 
 /** A hand tile's world box as a layout anchor. */
 private fun HandHit.toAnchorRect(): Rect =
@@ -391,14 +401,11 @@ object DefaultBoardMeasure : BoardMeasure {
         if (!session.boardHosted) return BoardMeasurement(emptyList())
         val menuPresent = BoardMenuChrome.presentIn(session.kind)
         val board = table()
+        val menu = boardMenuSquare(area, c.worldHeight, safeInsets, menuPresent)
         board.bottomReservePx = area.bottomReserve
-        board.topRightChromePx = boardMenuFootprint(menuPresent)
-        board.safeInsets = BoardMenuChrome.tableInsets(
-            area.width,
-            area.height,
-            safeInsets,
-            menuPresent || menuOverlapsTable(area, c.worldHeight),
-        )
+        board.topRightChrome = menu
+        board.topHud = menuPresent
+        board.safeInsets = BoardMenuChrome.tableInsets(area.width, area.height, safeInsets, menu)
         val tableView = boardTableView(session, view.inputs.revealedSeats)
         val boxes = board.refreshHits(
             tableView,
@@ -413,9 +420,9 @@ object DefaultBoardMeasure : BoardMeasure {
         // Present exactly when the table paints: the board draws its menu only
         // alongside a hosted table view and only on the board contexts that own
         // one, so the region and the pixels agree.
-        if (menuPresent && tableView != null) {
+        if (menuPresent && tableView != null && menu != null) {
             regions += BoardRegion(
-                rect = BoardMenuChrome.rect(area.width, area.height, safeInsets),
+                rect = menu,
                 action = ComponentAction(BoardActions.MENU),
                 rank = RANK_MENU,
             )
