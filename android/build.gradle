@@ -296,6 +296,58 @@ def adbExecutable() {
   return androidSdkDir() + "/platform-tools/adb"
 }
 
+/**
+ * Runs one command to completion and captures both streams. Gradle 9 no longer
+ * exposes `Project.exec()`, and the adb helpers here are plain functions shared
+ * by several tasks. Capturing both streams also keeps a busy device from
+ * blocking on a full pipe.
+ */
+def runCommand(List<String> command) {
+  def process = new ProcessBuilder(command).start()
+  def stdout = new ByteArrayOutputStream()
+  def stderr = new ByteArrayOutputStream()
+  process.waitForProcessOutput(stdout, stderr)
+  return [
+      exitValue: process.exitValue(),
+      stdout: stdout.toString(),
+      stderr: stderr.toString(),
+  ]
+}
+
+/**
+ * Serials of connected, ready devices (`adb devices` state `device` only),
+ * in adb's order. The install tasks already fan out over every device; the
+ * companion `run` task must select one explicitly per launch, because a bare
+ * `adb shell` fails with "more than one device/emulator" as soon as two are
+ * attached.
+ */
+def connectedDeviceSerials(adb) {
+  def result = runCommand([adb, 'devices'])
+  if (result.exitValue != 0) return []
+  def serials = []
+  result.stdout.eachLine { line ->
+    def trimmed = line.trim()
+    if (trimmed.isEmpty() || trimmed.startsWith('List of devices attached')) return
+    def parts = trimmed.split(/\s+/)
+    if (parts.length >= 2 && parts[1] == 'device') serials << parts[0]
+  }
+  return serials
+}
+
+/**
+ * One serial when the caller asked for it (`-PandroidSerial=…` or
+ * `ANDROID_SERIAL`), else null meaning every connected device. The same
+ * selector drives both install-time helpers and the launch.
+ */
+def requestedDeviceSerial() {
+  def property = project.findProperty('androidSerial')
+  if (property != null && !property.toString().trim().isEmpty()) {
+    return property.toString().trim()
+  }
+  def env = System.getenv('ANDROID_SERIAL')
+  return env != null && !env.trim().isEmpty() ? env.trim() : null
+}
+
 static def collectHostLanIpv4() {
   def out = []
   NetworkInterface.networkInterfaces.each { ni ->
@@ -315,19 +367,12 @@ static def collectHostLanIpv4() {
   return out.unique()
 }
 
-def deviceLanIpv4(adb) {
-  def stdout = new ByteArrayOutputStream()
-  def stderr = new ByteArrayOutputStream()
-  def result = exec {
-    commandLine adb, 'shell', 'ip', '-4', '-o', 'addr', 'show'
-    standardOutput = stdout
-    errorOutput = stderr
-    ignoreExitValue true
-  }
+def deviceLanIpv4(adb, serial) {
+  def result = runCommand([adb, '-s', serial, 'shell', 'ip', '-4', '-o', 'addr', 'show'])
   if (result.exitValue != 0) return null
   def wlan = null
   def other = null
-  stdout.toString().eachLine { line ->
+  result.stdout.eachLine { line ->
     def m = line =~ /inet (\d+\.\d+\.\d+\.\d+)/
     if (!m.find()) return
     def ip = m.group(1)
@@ -363,40 +408,38 @@ tasks.register('writeDevApiUrl') {
       logger.warn('writeDevApiUrl: no host LAN IPv4; phone will keep loopback (127.0.0.1:8080)')
       return
     }
-    def deviceIp = null
-    try {
-      deviceIp = deviceLanIpv4(adb)
-    } catch (Exception e) {
-      logger.warn("writeDevApiUrl: could not read device IP (${e.message})")
+    def requested = requestedDeviceSerial()
+    def serials = requested != null ? [requested] : connectedDeviceSerials(adb)
+    if (serials.isEmpty()) {
+      logger.warn('writeDevApiUrl: no connected device; phone keeps loopback (127.0.0.1:8080)')
+      return
     }
-    def preferred = null
-    if (deviceIp != null) {
-      preferred = hosts.find { samePrefix24(it, deviceIp) }
-    }
-    def ordered = []
-    if (preferred != null) ordered << preferred
-    hosts.each { if (it != preferred) ordered << it }
-    def lines = ordered.collect { "http://${it}:8080" }
-    def printfArgs = lines.collect { "'${it}'" }.join(' ')
-    // Pipe on the device: host-side redirects break under `adb shell` quoting.
-    def shell = "printf '%s\\n' ${printfArgs} | run-as inego.zungjunggame tee files/dev-api-url.txt"
-    try {
-      def stdout = new ByteArrayOutputStream()
-      def stderr = new ByteArrayOutputStream()
-      def result = exec {
-        commandLine adb, 'shell', shell
-        standardOutput = stdout
-        errorOutput = stderr
-        ignoreExitValue true
+    serials.each { serial ->
+      def deviceIp = null
+      try {
+        deviceIp = deviceLanIpv4(adb, serial)
+      } catch (Exception e) {
+        logger.warn("writeDevApiUrl: could not read ${serial}'s IP (${e.message})")
       }
-      if (result.exitValue == 0) {
-        logger.lifecycle("dev-api-url: ${lines.join(', ')} (deviceIp=${deviceIp ?: 'unknown'})")
-      } else {
-        logger.warn("writeDevApiUrl failed (exit=${result.exitValue}): ${stderr}")
-        logger.warn('Phone cannot reach host zj-server over LAN until this file is written.')
+      def preferred = deviceIp != null ? hosts.find { samePrefix24(it, deviceIp) } : null
+      def ordered = []
+      if (preferred != null) ordered << preferred
+      hosts.each { if (it != preferred) ordered << it }
+      def lines = ordered.collect { "http://${it}:8080" }
+      def printfArgs = lines.collect { "'${it}'" }.join(' ')
+      // Pipe on the device: host-side redirects break under `adb shell` quoting.
+      def shell = "printf '%s\\n' ${printfArgs} | run-as inego.zungjunggame tee files/dev-api-url.txt"
+      try {
+        def result = runCommand([adb, '-s', serial, 'shell', shell])
+        if (result.exitValue == 0) {
+          logger.lifecycle("dev-api-url: ${lines.join(', ')} (device=${serial}, deviceIp=${deviceIp ?: 'unknown'})")
+        } else {
+          logger.warn("writeDevApiUrl failed on ${serial} (exit=${result.exitValue}): ${result.stderr}")
+          logger.warn('Phone cannot reach host zj-server over LAN until this file is written.')
+        }
+      } catch (Exception e) {
+        logger.warn("writeDevApiUrl skipped on ${serial}: ${e.message}")
       }
-    } catch (Exception e) {
-      logger.warn("writeDevApiUrl skipped: ${e.message}")
     }
   }
 }
@@ -405,10 +448,33 @@ tasks.matching { it.name.startsWith('install') }.configureEach { installTask ->
   installTask.finalizedBy 'writeDevApiUrl'
 }
 
-tasks.register('run', Exec) {
+tasks.register('run') {
   dependsOn 'writeDevApiUrl'
-  def adb = adbExecutable()
-  commandLine "$adb", 'shell', 'am', 'start', '-n', 'inego.zungjunggame/inego.zungjunggame.android.AndroidLauncher'
+  doLast {
+    def adb = adbExecutable()
+    def requested = requestedDeviceSerial()
+    def serials = requested != null ? [requested] : connectedDeviceSerials(adb)
+    if (serials.isEmpty()) {
+      throw new GradleException(
+          'run: no connected device; connect a phone or pass -PandroidSerial=<serial>')
+    }
+    def launched = 0
+    serials.each { serial ->
+      def result = runCommand([
+          adb, '-s', serial, 'shell', 'am', 'start', '-n',
+          'inego.zungjunggame/inego.zungjunggame.android.AndroidLauncher',
+      ])
+      if (result.exitValue == 0) {
+        launched++
+        logger.lifecycle("run: launched on ${serial}")
+      } else {
+        logger.warn("run: launch failed on ${serial} (exit=${result.exitValue}): ${result.stderr}")
+      }
+    }
+    if (launched == 0) {
+      throw new GradleException("run: could not launch on any device (${serials.join(', ')})")
+    }
+  }
 }
 
 eclipse.project.name = appName + "-android"
