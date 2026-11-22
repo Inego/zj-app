@@ -22,9 +22,9 @@ import kotlin.math.max
  *  - **Density** is `Comfortable` or `Compact`. Compact shrinks padding, gaps and
  *    row pitch — never below the tappable floor — before anything is allowed to
  *    overflow. Gaps give way first; a row stays at least 36 dp.
- *  - **Actions** sit in a footer while comfortable. In compact they move into
- *    the header (title left, Cancel/Start right), so the card keeps one sticky
- *    band instead of two.
+ *  - **Actions** sit in one band at the card's bottom, centred across the body,
+ *    in both densities. They never share the title's band: buttons up there read
+ *    as window chrome, not as the form's own decision.
  *  - **Scroll is the fallback**: the layout is computed for each candidate from
  *    roomiest to densest, and the first that fits wins. Only pathological content
  *    (very long translations, huge fonts) scrolls.
@@ -48,8 +48,8 @@ class OverlayForm {
     /** How the title relates to the scroll viewport. */
     enum class Chrome { StickyHeader, WholeCard }
 
-    /** Where the card's action pair ended up this frame. */
-    enum class Actions { None, Footer, Header }
+    /** Whether the card has an action pair at its bottom this frame. */
+    enum class Actions { None, Footer }
 
     /**
      * Vertical rhythm and paddings for one density. A section row's height is the
@@ -94,10 +94,10 @@ class OverlayForm {
 
                 Density.Compact -> Rhythm(
                     padX = Fonts.px(16f),
-                    padY = Fonts.px(10f),
-                    titleGap = Fonts.px(8f),
+                    padY = Fonts.px(8f),
+                    titleGap = Fonts.px(6f),
                     sectionLabelGap = Fonts.px(4f),
-                    blockGap = Fonts.px(10f),
+                    blockGap = Fonts.px(8f),
                     rowH = max(Fonts.px(COMPACT_ROW_DP), line + Fonts.px(10f)),
                     rowGap = Fonts.px(3f),
                     groupPad = Fonts.px(6f),
@@ -148,12 +148,9 @@ class OverlayForm {
         val landscapeWidthFraction: Float = 0.72f,
         val portraitWidthFraction: Float = 0.88f,
         val chrome: Chrome = Chrome.StickyHeader,
-        /**
-         * The actions the card wants. [Actions.Footer] may be promoted to
-         * [Actions.Header] in compact density; [Actions.None] never is.
-         */
+        /** The actions the card wants, in a band at its bottom. */
         val actions: Actions = Actions.None,
-        /** Width of the action pair, for the header promotion and the footer slot. */
+        /** Width of the action pair; the card is never narrower than it. */
         val actionWidth: Float = 0f,
         /** A persistent top-right control (the ✕), present in every density. */
         val closeWidth: Float = 0f,
@@ -182,7 +179,7 @@ class OverlayForm {
         val header: Rect,
         /** The title's own slot, clear of a trailing control. */
         val title: Rect,
-        /** The ✕ or the promoted action pair, top-right of the header. */
+        /** The ✕, top-right of the header. */
         val trailing: Rect?,
         /** The action pair's band, present only while [actions] is `Footer`. */
         val footer: Rect?,
@@ -259,19 +256,9 @@ class OverlayForm {
         scrollY: Float,
     ): Result {
         val rhythm = rhythm(density)
-        val resolved = if (density == Density.Compact && spec.actions == Actions.Footer) {
-            Actions.Header
-        } else {
-            spec.actions
-        }
-        val trailingW = when (resolved) {
-            Actions.Header -> spec.actionWidth
-            else -> spec.closeWidth
-        }
-        val trailingH = when (resolved) {
-            Actions.Header -> rhythm.actionH
-            else -> spec.closeHeight
-        }
+        val resolved = spec.actions
+        val trailingW = spec.closeWidth
+        val trailingH = spec.closeHeight
 
         val probe = spec.sections(rhythm, avail.width)
         val contentW = if (mode == Mode.SideBySide) {
@@ -280,8 +267,9 @@ class OverlayForm {
             columnWidth(probe, rhythm)
         }
         val titleW = Fonts.textWidth(Fonts.labelActive, spec.title)
+        val actionW = if (resolved == Actions.Footer) spec.actionWidth else 0f
         val ownedW = max(
-            max(contentW, spec.tailWidth) + rhythm.padX * 2f,
+            max(contentW, max(spec.tailWidth, actionW)) + rhythm.padX * 2f,
             titleW + rhythm.padX * 2f + trailingW,
         )
         val desiredW = max(spec.minWidth, ownedW) + VerticalScrollbar.gutterWidth()

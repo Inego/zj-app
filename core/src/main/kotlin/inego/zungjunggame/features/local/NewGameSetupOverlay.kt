@@ -73,8 +73,8 @@ data class NewGameSetupVerdict(
  * Visual language matches [inego.zungjunggame.features.confirm.ConfirmOverlay] / [inego.zungjunggame.features.menu.GameMenuOverlay] (dim backdrop,
  * dark card, ivory rim). The card is laid out by [inego.zungjunggame.render.ui.OverlayForm]:
  * it hugs its content, puts the two lists side by side when the window is wide
- * and short (Android landscape), moves Start / Cancel into the header when it
- * has to go compact, and scrolls only as a last resort.
+ * and short (Android landscape), keeps Start / Cancel centred at the card's
+ * bottom, and scrolls only as a last resort.
  *
  * The card is controlled: [render] is handed the draft and the body offset every
  * frame, and a release reports what it resolved ([NewGameSetupVerdict]). The
@@ -470,15 +470,14 @@ class NewGameSetupOverlay(
             AppPalette.panel,
         )
 
-        // Title. In compact density the action pair moves into the header, so the
-        // title takes the slot left of it; otherwise it is centred on the card.
+        // Title, centred on the card whatever the density.
         glyphLayout.setText(titleFont, title)
-        val titleX = if (geometry.actions == OverlayForm.Actions.Header) {
-            geometry.title.left
-        } else {
-            panel.left + (panel.width - glyphLayout.width) * 0.5f
-        }
-        titleFont.draw(batch, title, titleX, geometry.header.top)
+        titleFont.draw(
+            batch,
+            title,
+            panel.left + (panel.width - glyphLayout.width) * 0.5f,
+            geometry.header.top,
+        )
 
         val hoverX = body.hoverX(pointerWorldX)
         val hoverY = body.hoverY(pointerWorldY)
@@ -549,38 +548,22 @@ class NewGameSetupOverlay(
             chickenInfo.render(batch, px, hoverX, hoverY)
         }
 
-        // Actions: a footer while comfortable, the header when the card had to go
-        // compact. Both read the slot the form measured, so paint and hit agree.
-        if (geometry.actions == OverlayForm.Actions.Header) {
-            val trailing = geometry.trailing
-            if (trailing != null) {
-                drawActionButton(
-                    batch, px, startLabel, trailing.left, trailing.bottom,
-                    startW, trailing.height,
-                    pointerWorldX, pointerWorldY, primary = true, HitKind.Start,
-                )
-                drawActionButton(
-                    batch, px, cancelLabel, trailing.left + startW + btnGap, trailing.bottom,
-                    cancelW, trailing.height,
-                    pointerWorldX, pointerWorldY, primary = false, HitKind.Cancel,
-                )
-            }
-        } else {
-            val footer = geometry.footer
-            if (footer != null) {
-                val pairW = startW + cancelW + btnGap
-                val pairLeft = footer.left + (footer.width - pairW) * 0.5f
-                drawActionButton(
-                    batch, px, startLabel, pairLeft, footer.bottom,
-                    startW, footer.height,
-                    pointerWorldX, pointerWorldY, primary = true, HitKind.Start,
-                )
-                drawActionButton(
-                    batch, px, cancelLabel, pairLeft + startW + btnGap, footer.bottom,
-                    cancelW, footer.height,
-                    pointerWorldX, pointerWorldY, primary = false, HitKind.Cancel,
-                )
-            }
+        // Actions, centred at the card's bottom in either density. The band is the
+        // form's; paint and hit-testing read the same rect.
+        val footer = geometry.footer
+        if (footer != null) {
+            val pairW = startW + cancelW + btnGap
+            val pairLeft = footer.left + (footer.width - pairW) * 0.5f
+            drawActionButton(
+                batch, px, startLabel, pairLeft, footer.bottom,
+                startW, footer.height,
+                pointerWorldX, pointerWorldY, primary = true, HitKind.Start,
+            )
+            drawActionButton(
+                batch, px, cancelLabel, pairLeft + startW + btnGap, footer.bottom,
+                cancelW, footer.height,
+                pointerWorldX, pointerWorldY, primary = false, HitKind.Cancel,
+            )
         }
     }
 
