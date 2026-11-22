@@ -206,6 +206,14 @@ class PlayTableView(
         private set
 
     /**
+     * The hand tile under a held finger while the touch loupe shows its face
+     * above the finger; -1 on desktop or when nothing is pressed. That board
+     * copy fades and stays at its row pose (no hover lift), so the magnified
+     * face is the one the eye reads.
+     */
+    private var pressedVisualId: Int = -1
+
+    /**
      * Tile type of the visible tile under the pointer — any region, any seat,
      * any turn — or -1. Drives the [TileFocusGlow.Match] halo.
      */
@@ -289,8 +297,8 @@ class PlayTableView(
      * never settled: a seat is *always* active, so a label that animated made
      * [inego.zungjunggame.features.board.BoardComponent] ask for a frame on every
      * present, and the picture only advanced when unrelated input happened to
-     * deliver one. The label is static now
-     * ([inego.zungjunggame.render.seats.SeatLabelDrawer.activeScaleBoost]).
+     * deliver one. The label is static now — one size, ink only — and the turn is
+     * carried by [ActiveSeatSweep] and the felt panel.
      * [ActiveSeatSweep] is included because a turn onto a new seat is finite: once
      * the panel has landed, a settled board stops. It is not part of [isAnimating],
      * so tiles and bots do not wait for it.
@@ -351,8 +359,7 @@ class PlayTableView(
 
         val layout = computeTableLayout(screenW, screenH)
         val panelTileH = layout.handH * 0.72f
-        val anchorY =
-            layout.edgeInsetBottom + layout.handH * 0.5f + layout.rowGap + panelTileH * 1.15f
+        val anchorY = layout.humanRowTopY + layout.rowGap + panelTileH * 1.15f
         val claimed = if (view.isPendingDiscard) view.lastDiscarded else -1
         val claim = if (live && panelChoices != null) {
             claimPanel.buttons(claimed, panelChoices, screenW, screenH, anchorY, panelTileH, tileAspect)
@@ -372,10 +379,10 @@ class PlayTableView(
             hintButton.hitBox(
                 rowRightX = seats.humanRowRightX,
                 rowCenterY = seats.humanRowCenterY,
-                handH = layout.handH,
+                handH = layout.humanMetrics.handTileH,
                 screenW = screenW,
                 screenH = screenH,
-                edgeInsetBottom = layout.edgeInsetBottom,
+                edgeInsetBottom = layout.humanEdgeInsetBottom,
             )
         } else {
             null
@@ -387,13 +394,14 @@ class PlayTableView(
      * World pose of the prompted hand tile (first match), for overlay chrome
      * drawn on top of board-overlay dim bands. Null when nothing is highlighted.
      * When that tile is hovered, matches [TileBoard] hover lift/scale so the
-     * leader stays on the face.
+     * leader stays on the face. A tile held under the touch loupe is not lifted
+     * (the loupe is the magnified copy), so its anchor is the row pose.
      */
     fun highlightedHandAnchor(): HandHit? {
         val types = boardHighlight.handAnchorTypes()
         if (types.isEmpty()) return null
         val hit = humanHandHits.firstOrNull { it.tileType in types } ?: return null
-        if (hit.visualId != hoveredVisualId) return hit
+        if (hit.visualId != hoveredVisualId || hit.visualId == pressedVisualId) return hit
         return HandHit(
             worldX = hit.worldX,
             worldY = hit.worldY + hit.h * hoverLiftFraction,
@@ -468,8 +476,7 @@ class PlayTableView(
         if (screenW <= 0f || screenH <= 0f) return null
         val layout = computeTableLayout(screenW, screenH)
         val panelTileH = layout.handH * 0.72f
-        val anchorY =
-            layout.edgeInsetBottom + layout.handH * 0.5f + layout.rowGap + panelTileH * 1.15f
+        val anchorY = layout.humanRowTopY + layout.rowGap + panelTileH * 1.15f
         val claimed = if (view.isPendingDiscard) view.lastDiscarded else -1
         return claimPanel.layoutRow(
             claimedTile = claimed,
@@ -906,8 +913,7 @@ class PlayTableView(
             !board.isBusy()
 
         val panelTileH = layout.handH * 0.72f
-        val anchorY =
-            layout.edgeInsetBottom + layout.handH * 0.5f + layout.rowGap + panelTileH * 1.15f
+        val anchorY = layout.humanRowTopY + layout.rowGap + panelTileH * 1.15f
         val hasClaimCurve = showClaimPanel &&
             !seats.pendingDiscardX.isNaN() &&
             !seats.pendingDiscardY.isNaN() &&
@@ -1056,12 +1062,37 @@ class PlayTableView(
                 screenH = screenH,
                 edgeInset = layout.edgeInsetFor(side),
                 alongCenter = alongCenter,
-                handH = layout.handH,
+                handH =
+                    if (side == SeatSide.Bottom) layout.humanMetrics.handTileH else layout.handH,
                 tileGap = layout.tileGap,
                 seatScores = inputs.seatScores,
                 humanSeat = inputs.humanSeat,
                 safeInset = safeInset,
                 bottomReserve = layout.bottomLabelReserve,
+                // On a landscape Android window the human's gutter went to the
+                // tiles, so its label floats above the row instead of sitting in
+                // a gutter that no longer exists (or hanging below the row and
+                // cropping at the screen bottom).
+                aboveRow = if (side == SeatSide.Bottom && layout.humanLabelAbove) {
+                    // Right-align with the row as it is really laid out: the last
+                    // meld tile when melds are open, else the parked draw slot
+                    // (even while only reserved) or the last hand tile. A wide
+                    // window can leave the height-capped row short of the band, so
+                    // the nominal band edge is not where the tiles end.
+                    val rightX = seats.humanRightmostTileX.takeUnless { it.isNaN() }
+                        ?: layout.humanLabelRightX
+                    SeatLabelDrawer.AboveRow(
+                        rightX = rightX,
+                        rowEdgeY = layout.humanRowTopY,
+                        // The width budget stays the band's, not the measured edge's:
+                        // a half-dealt row is narrow, but the label has the whole
+                        // strip above the row to itself and must not be squeezed
+                        // (and re-ellipsized) as the hand fills.
+                        maxWidth = layout.humanLabelWidthBudget,
+                    )
+                } else {
+                    null
+                },
             )
         }
 
@@ -1100,11 +1131,15 @@ class PlayTableView(
                 screenW * 0.5f
             }
             val rowCenterY = if (seats.humanRowCenterY.isNaN()) {
-                layout.edgeInsetBottom + layout.handH * 0.5f
+                layout.humanEdgeInsetBottom
             } else {
                 seats.humanRowCenterY
             }
-            val handTop = rowCenterY + layout.handH * 0.5f
+            val handTop = if (seats.humanRowCenterY.isNaN()) {
+                layout.humanRowTopY
+            } else {
+                rowCenterY + layout.humanMetrics.handTileH * 0.5f
+            }
             val gap = if (inputs.hintsEnabled && mcHintArms.isNotEmpty()) Fonts.px(26f) else Fonts.px(10f)
             PatternlessNotice.draw(
                 batch = batch,
@@ -1121,10 +1156,10 @@ class PlayTableView(
                 batch = batch,
                 rowRightX = seats.humanRowRightX,
                 rowCenterY = seats.humanRowCenterY,
-                handH = layout.handH,
+                handH = layout.humanMetrics.handTileH,
                 screenW = screenW,
                 screenH = screenH,
-                edgeInsetBottom = layout.edgeInsetBottom,
+                edgeInsetBottom = layout.humanEdgeInsetBottom,
                 pointerWorldX = hoverX,
                 pointerWorldY = hoverY,
                 mode = when (hintUi) {
@@ -1177,9 +1212,13 @@ class PlayTableView(
                     anchorY = pointerWorldY,
                     screenW = screenW,
                     screenH = screenH,
-                    handW = layout.handW,
-                    handH = layout.handH,
+                    handW = layout.humanMetrics.handTileW,
+                    handH = layout.humanMetrics.handTileH,
                     handGap = layout.tileGap,
+                    // The grown Android-landscape row is already large; the loupe
+                    // and its wait row must not scale with it (see
+                    // TouchTileMagnifier.ENLARGED_SCALE).
+                    enlargedHand = layout.humanRowEnlarged,
                     waits = waits,
                     showDiscardFace = true,
                 )
@@ -1193,9 +1232,10 @@ class PlayTableView(
                         hoveredHand.h * (hoverLiftFraction + 0.5f * hoverScale),
                     screenW = screenW,
                     screenH = screenH,
-                    handW = layout.handW,
-                    handH = layout.handH,
+                    handW = layout.humanMetrics.handTileW,
+                    handH = layout.humanMetrics.handTileH,
                     handGap = layout.tileGap,
+                    enlargedHand = layout.humanRowEnlarged,
                     waits = waits,
                     showDiscardFace = false,
                 )
@@ -1220,7 +1260,6 @@ class PlayTableView(
         val edgeInsetLeft: Float,
         val edgeInsetRight: Float,
         val edgeInsetOpposite: Float,
-        val edgeInsetBottom: Float,
         /**
          * Centre of the felt between the top and bottom hand rows. The wall
          * marker and the side seats live here, not on the raw pane centre: the
@@ -1229,10 +1268,50 @@ class PlayTableView(
          */
         val feltCenterY: Float,
         val metrics: PlayerAreaLayout.Metrics,
+        /**
+         * The human seat's own metrics. On a landscape Android window the bottom
+         * gutter is a whole label band that only the human needs, so it is spent
+         * on taller human tiles (see [computeTableLayout]); the three felt seats
+         * keep [metrics] and every anchor above the row stays where it was.
+         * Equal to [metrics] wherever the row did not grow.
+         */
+        val humanMetrics: PlayerAreaLayout.Metrics,
+        /** The bottom row's centreline. */
+        val humanEdgeInsetBottom: Float,
+        /**
+         * Inner (felt-facing) edge of the human row. The grown row keeps this
+         * edge (or stops short of it, when the width band is the limit) and takes
+         * the reclaimed gutter below, so the human's river, the claim row, the
+         * HINT chip, the wall marker and every opponent row keep their place.
+         */
+        val humanRowTopY: Float,
+        /**
+         * True when the human row spent the reclaimed bottom gutter on taller
+         * tiles. The touch loupe and its wait row use it to keep their own size
+         * instead of scaling with the enlarged row.
+         */
+        val humanRowEnlarged: Boolean = false,
+        /** True when the human label floats above its row instead of in the bottom gutter. */
+        val humanLabelAbove: Boolean = false,
+        /**
+         * Nominal world x for the above-row label's right edge: the band's far
+         * edge. The paint path prefers the row's **measured** rightmost tile
+         * ([SeatSlots.humanRightmostTileX]); this stands in only when the row laid
+         * nothing out. NaN while the label keeps its gutter.
+         */
+        val humanLabelRightX: Float = Float.NaN,
+        /**
+         * How far left of the nominal right edge ([humanLabelRightX]) the
+         * above-row label may paint: the band's span to the screen centre. Kept
+         * off the measured edge, which is narrower while a hand is being dealt,
+         * so the width fit does not ellipsize a label for a row that is still
+         * filling.
+         */
+        val humanLabelWidthBudget: Float = 0f,
         val alongEdgePad: Float,
         /**
-         * Bottom band the human seat label must clear: the tutorial coach reserve.
-         * Zero outside that coach.
+         * Bottom band the human seat label must clear while it keeps the bottom
+         * gutter: the tutorial coach reserve. Zero outside that coach.
          */
         val bottomLabelReserve: Float,
         /**
@@ -1244,7 +1323,7 @@ class PlayTableView(
         val topRightChromeReserve: Float,
     ) {
         fun edgeInsetFor(side: SeatSide): Float = when (side) {
-            SeatSide.Bottom -> edgeInsetBottom
+            SeatSide.Bottom -> humanEdgeInsetBottom
             SeatSide.Left -> edgeInsetLeft
             SeatSide.Right -> edgeInsetRight
             SeatSide.Opposite -> edgeInsetOpposite
@@ -1272,6 +1351,14 @@ class PlayTableView(
         val pendingDiscardY: Float,
         val humanRowRightX: Float,
         val humanRowCenterY: Float,
+        /**
+         * Right edge of the human's rightmost tile or slot — the last meld tile
+         * when melds are open, else the parked draw slot (even while it is only
+         * reserved) or the last hand tile. NaN when the human row laid nothing
+         * out. The above-row seat label right-aligns to this, so claiming a meld
+         * (which widens the row) carries the label with the tiles.
+         */
+        val humanRightmostTileX: Float = Float.NaN,
         val winnerHandAnchorX: Float = Float.NaN,
         val winnerHandAnchorY: Float = Float.NaN,
     )
@@ -1369,13 +1456,14 @@ class PlayTableView(
             handH = handH,
             gutter = labelGutter,
             tileGap = tileGap,
-            activeScaleBoost = seatLabels.activeScaleBoost,
         )
         // The tutorial coach's Back / Next row is the only bottom band the hand
         // and the side labels must clear.
         val bottomReserve = bottomReservePx.coerceAtLeast(0f)
-        // The human hand keeps the same gutter as the other edges. Its seat
-        // label fits that gutter; only the coach adds a strip below.
+        val alongEdgePad = shortSide * 0.02f
+        // The human hand keeps the same gutter as the other edges, and its seat
+        // label fits that gutter while the row does not grow. Only the coach adds
+        // a strip below.
         val edgeInsetBottom =
             max(baseSide, safe.bottom + bottomReserve + handH * 0.5f + minGutter)
 
@@ -1416,6 +1504,73 @@ class PlayTableView(
             n
         }
 
+        val metrics = PlayerAreaLayout.Metrics(
+            handTileW = handW,
+            handTileH = handH,
+            discardTileW = discardW,
+            discardTileH = discardH,
+            tileGap = tileGap,
+            meldGap = meldGap,
+            rowGap = rowGap,
+            discardsPerRow = discardsPerRow,
+            maxDiscardRows = maxDiscardRows,
+            drawnGap = drawnGap,
+        )
+
+        // ── The human row spends the bottom gutter on tiles, not on the label ──
+        // On a landscape Android window the bottom gutter is a full label band
+        // (`minGutter` ≈ 1.05 × handH) that the other three seats never need: their
+        // labels sit in side gutters, and a landscape side gutter is as wide as the
+        // screen is tall. The human's label floats above the row instead
+        // ([humanLabelAbove]), which leaves the strip below the row as a small edge
+        // cushion (or the system bar itself) the tiles can fill. The row never
+        // crosses its old **inner** edge,
+        // so the river, the claim row, the HINT chip, the wall marker and every
+        // opponent row keep the geometry they had.
+        val humanRowTopY = edgeInsetBottom + handH * 0.5f
+        // A permanent system strip at the bottom (the navigation bar, a caption
+        // bar) is itself the margin: the tiles may sit right on top of it, and a
+        // felt cushion there would only float the row off the bar. Where the strip
+        // is on a side instead (a landscape three-button nav bar lives on the
+        // right), the screen edge is the real outer edge, so keep the cushion.
+        val humanCushion = if (safe.bottom > 0f) 0f else shortSide * 0.03f
+        val humanOuterY = safe.bottom + bottomReserve + humanCushion
+        val humanFillsGutter = isAndroid && screenW > screenH
+        // The human row lives in the band between the two side hands, exactly as
+        // [collectSeatSlots] measures it; its height is capped there so the base
+        // thirteen-tile hand never has to fit-scale. Claimed melds still do.
+        val humanBand = PlayerAreaLayout.availableAlongEdgeSpan(
+            screenAlong = screenW,
+            screenOrtho = screenH,
+            nearEdge = edgeInsetLeft + handH * 0.5f,
+            farEdge = screenW - edgeInsetRight - handH * 0.5f,
+            pad = alongEdgePad,
+        )
+        // 13 sorted tiles + the parked draw slot: 14 tile widths, 12 gaps and the
+        // draw gap. That is the widest ordinary waiting hand.
+        val humanByWidth =
+            (humanBand.half * 2f - 12f * tileGap - drawnGap) / (14f * tileAspect)
+        val humanFilled = if (humanFillsGutter) {
+            minOf(humanRowTopY - humanOuterY, humanByWidth)
+        } else {
+            handH
+        }
+        val humanHandH = max(humanFilled, handH)
+        val humanGrew = humanHandH > handH
+        val humanTopY = if (humanGrew) humanOuterY + humanHandH else humanRowTopY
+        val humanMetrics = if (humanGrew) {
+            metrics.copy(handTileW = humanHandH * tileAspect, handTileH = humanHandH)
+        } else {
+            metrics
+        }
+        val humanLabelAbove = humanGrew
+        // The above-row label aligns to the row's **measured** rightmost tile
+        // ([SeatSlots.humanRightmostTileX]); this is the nominal band edge it falls
+        // back to only when the row laid nothing out.
+        val humanLabelRightX =
+            if (humanLabelAbove) screenW - edgeInsetRight - handH * 0.5f - alongEdgePad
+            else Float.NaN
+
         return TableLayout(
             handW = handW,
             handH = handH,
@@ -1425,23 +1580,22 @@ class PlayTableView(
             edgeInsetLeft = edgeInsetLeft,
             edgeInsetRight = edgeInsetRight,
             edgeInsetOpposite = edgeInsetOpposite,
-            edgeInsetBottom = edgeInsetBottom,
-            // The hands' outer edges span edgeInsetBottom … screenH − edgeInsetOpposite;
-            // both rows are handH thick, so their inner edges share this midpoint.
-            feltCenterY = (edgeInsetBottom + screenH - edgeInsetOpposite) * 0.5f,
-            metrics = PlayerAreaLayout.Metrics(
-                handTileW = handW,
-                handTileH = handH,
-                discardTileW = discardW,
-                discardTileH = discardH,
-                tileGap = tileGap,
-                meldGap = meldGap,
-                rowGap = rowGap,
-                discardsPerRow = discardsPerRow,
-                maxDiscardRows = maxDiscardRows,
-                drawnGap = drawnGap,
-            ),
-            alongEdgePad = shortSide * 0.02f,
+            // The hands' inner edges are what the felt is measured between: the
+            // opposite row's face and the human row's face.
+            feltCenterY =
+                (humanTopY + (screenH - edgeInsetOpposite - handH * 0.5f)) * 0.5f,
+            metrics = metrics,
+            humanMetrics = humanMetrics,
+            humanEdgeInsetBottom =
+                if (humanGrew) humanOuterY + humanHandH * 0.5f else edgeInsetBottom,
+            humanRowTopY = humanTopY,
+            humanRowEnlarged = humanGrew,
+            humanLabelAbove = humanLabelAbove,
+            humanLabelRightX = humanLabelRightX,
+            humanLabelWidthBudget =
+                if (humanLabelAbove) (humanLabelRightX - screenW * 0.5f).coerceAtLeast(0f)
+                else 0f,
+            alongEdgePad = alongEdgePad,
             bottomLabelReserve = bottomReserve,
             topRightChromeReserve = topRightChromeReserve,
         )
@@ -1489,7 +1643,7 @@ class PlayTableView(
             // top as well.
             val (nearEdge, farEdge) = when (side) {
                 SeatSide.Left, SeatSide.Right ->
-                    (layout.edgeInsetBottom + layout.handH * 0.5f) to
+                    layout.humanRowTopY to
                         (screenH - layout.edgeInsetOpposite - layout.handH * 0.5f)
                 SeatSide.Bottom, SeatSide.Opposite ->
                     (layout.edgeInsetLeft + layout.handH * 0.5f) to
@@ -1518,7 +1672,9 @@ class PlayTableView(
             val placements = PlayerAreaLayout.layoutFittingAlongEdge(
                 seatView = seatView,
                 showHandFaces = showFaces,
-                metrics = layout.metrics,
+                // The human row may be taller than the felt rows (the reclaimed
+                // bottom gutter), so it brings its own metrics.
+                metrics = if (relative == 0) layout.humanMetrics else layout.metrics,
                 maxHalfSpan = span.half,
                 ownerSeat = seat,
                 handSelectable = relative == 0 && humanDiscarding,
@@ -1632,6 +1788,12 @@ class PlayTableView(
             }
         }
 
+        // The label above the human row right-aligns to the row's real edge, not
+        // the nominal band: the rightmost meld tile when melds are open, else the
+        // parked draw slot (even while only reserved), else the last hand tile.
+        // [seatBounds] already measured exactly that extent, rotation included.
+        val humanRightmostTileX = seatBounds[view.mySeat]?.get(2) ?: Float.NaN
+
         val (winnerHandAnchorX, winnerHandAnchorY) = if (winnerHandCount > 0 && winnerSeat in 0 until NUM_PLAYERS) {
             val relWinner = (winnerSeat - view.mySeat + NUM_PLAYERS) % NUM_PLAYERS
             val winSide = SeatSide.forRelativeSeat(relWinner)
@@ -1655,6 +1817,7 @@ class PlayTableView(
             pendingDiscardY = pendingDiscardY,
             humanRowRightX = humanRowRightX,
             humanRowCenterY = humanRowCenterY,
+            humanRightmostTileX = humanRightmostTileX,
             winnerHandAnchorX = winnerHandAnchorX,
             winnerHandAnchorY = winnerHandAnchorY,
         )
@@ -1736,6 +1899,18 @@ class PlayTableView(
             hoveredVisualId = hit.visualId
             hoveredHandIndex = humanHandHits.indexOfFirst { it.visualId == hit.visualId }
         }
+        // The touch loupe draws that same tile's face above the finger, so the
+        // copy under the finger fades. Tied to the loupe's own conditions
+        // (selectable hand hit, found in the hit list, press-hover profile) so
+        // the source never dims without a magnified face to replace it.
+        pressedVisualId =
+            if (hit != null && hit.selectableHand && hoveredHandIndex >= 0 &&
+                InputProfile.detect().usesPressHover
+            ) {
+                hit.visualId
+            } else {
+                -1
+            }
         // Light every other copy of the face under the pointer — own hand, own
         // melds, opponents' open melds, every river. Soft / Win halos keep priority.
         hoveredMatchType = hit?.tileType ?: -1
@@ -1759,6 +1934,7 @@ class PlayTableView(
             readyDiscardTypes = readyDiscardTypes,
             hoverLiftFraction = hoverLiftFraction,
             hoverScale = hoverScale,
+            pressedVisualId = pressedVisualId,
             drawSettled = drawSettled,
             drawFlying = drawFlying,
             drawTiles = drawTiles,

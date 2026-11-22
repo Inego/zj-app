@@ -17,15 +17,18 @@ import inego.zungjunggame.render.ui.AppPalette
  * ready-discard wait row above it.
  *
  * The touch magnifier stays the face of the tile under the finger, at 2.15× the
- * hand tile, centered on the finger and clamped to the screen. When that discard
- * is ready, a row of the waits sits above the face: open faces in tile-type
- * order at hand size. Above each face the Hu score sits on its own line and
- * the unseen count (`×n`) on the line under it, on a dark plate so the cream
- * type stays readable when the row lies on the river. The score cap is a fraction of
- * the wait face and never larger than the chrome face, so a dense phone does
- * not draw desktop-chrome glyphs on a small tile. Faces keep the hand gap.
- * The row shrinks uniformly if it would leave the screen; the magnified face
- * never shrinks.
+ * hand tile — [ENLARGED_SCALE] when the hand row is the enlarged
+ * Android-landscape one — centered on the finger and clamped to the screen.
+ * When that discard is ready, a row of the waits sits above the face: open
+ * faces in tile-type order at the loupe's own tile scale (the hand size,
+ * reduced with the loupe on the enlarged row) so the stack keeps its
+ * proportions and its counts stay legible. Above each face the Hu score sits
+ * on its own line and the unseen count (`×n`) on the line under it, on a dark
+ * plate so the cream type stays readable when the row lies on the river. The
+ * score cap is a fraction of the wait face and never larger than the chrome
+ * face, so a dense phone does not draw desktop-chrome glyphs on a small tile.
+ * Faces keep the hand gap. The row shrinks uniformly if it would leave the
+ * screen; the magnified face never shrinks.
  *
  * The magnified face follows the tile-labels setting like the board does, since
  * the loupe is where a learner reads the held tile. The wait row does not: its
@@ -36,12 +39,22 @@ import inego.zungjunggame.render.ui.AppPalette
  * only the wait row is drawn above the visible hand tile.
  */
 object TouchTileMagnifier {
+    /** Magnification over the hand tile for the ordinary (non-enlarged) hand. */
     private const val SCALE = 2.15f
+
+    /**
+     * Magnification over the hand tile on the enlarged Android-landscape row.
+     * That row already fills the reclaimed bottom gutter (roughly 1.8× the felt
+     * hand), so keeping [SCALE] made the loupe cover a third of the screen. 1.5×
+     * still magnifies the held tile without taking over the felt.
+     */
+    private const val ENLARGED_SCALE = 1.5f
     private const val MIN_WAIT_SCALE = 0.05f
 
     /**
      * Clearance above the anchor before the wait faces, as a fraction of the
-     * hand tile height. Includes the ready outline drawn outside the raised face.
+     * wait row's tile height (the hand height, reduced with the loupe on the
+     * enlarged row). Includes the ready outline drawn outside the raised face.
      */
     private const val GAP_ABOVE_ANCHOR = 0.22f
 
@@ -91,13 +104,26 @@ object TouchTileMagnifier {
         handW: Float,
         handH: Float,
         handGap: Float,
+        /**
+         * True when [handW]/[handH] are the enlarged Android-landscape row's
+         * tiles. The loupe magnifies them by [ENLARGED_SCALE] instead of [SCALE],
+         * and the wait row below the loupe shrinks by the same ratio.
+         */
+        enlargedHand: Boolean = false,
         waits: List<DiscardWait> = emptyList(),
         showDiscardFace: Boolean = true,
     ) {
         val margin = Fonts.px(8f)
-        val mw = handW * SCALE
-        val mh = handH * SCALE
-        val gapAbove = handH * GAP_ABOVE_ANCHOR
+        val magnifiedScale = if (enlargedHand) ENLARGED_SCALE else SCALE
+        val mw = handW * magnifiedScale
+        val mh = handH * magnifiedScale
+        // The wait row belongs to the loupe stack: on the enlarged hand it
+        // shrinks by the same ratio as the loupe, so the faces and their counts
+        // do not stay at the height that made the loupe huge.
+        val waitScale = magnifiedScale / SCALE
+        val waitW = handW * waitScale
+        val waitH = handH * waitScale
+        val gapAbove = waitH * GAP_ABOVE_ANCHOR
 
         var faceCy = Float.NaN
         val rowBottomY: Float
@@ -115,7 +141,7 @@ object TouchTileMagnifier {
         val row = if (waits.isEmpty()) {
             null
         } else {
-            WaitRow.fit(waits, handW, handH, handGap, margin, screenW, screenH, rowBottomY)
+            WaitRow.fit(waits, waitW, waitH, handGap, margin, screenW, screenH, rowBottomY)
         }
 
         val stackW = if (showDiscardFace) max(mw, row?.width ?: 0f) else (row?.width ?: 0f)

@@ -6,6 +6,13 @@ import inego.zungjunggame.engine.NUM_TILE_TYPES
 import inego.zungjunggame.render.ui.AppPalette
 
 /**
+ * Alpha of the hand tile under a held finger while the touch loupe shows its
+ * face above the finger. The board's copy fades so the magnified face is the
+ * one the eye reads, and the felt showing through marks the press.
+ */
+private const val PRESSED_TILE_ALPHA = 0.45f
+
+/**
  * Persistent visual tiles that always ease from [VisualTile.current] toward
  * [VisualTile.target]. Layout only supplies desired slots; this board owns
  * identity matching, spawn-from-wall, deal stagger, and drawing.
@@ -233,6 +240,9 @@ class TileBoard {
     /**
      * Draw settled tiles first, then in-flight (so flights pass over the table).
      * Hover / recommend are draw-time modifiers for selectable hand tiles.
+     * [pressedVisualId] is the hand tile under a held finger whose magnified
+     * face the touch loupe is showing; its board copy draws semi-transparent
+     * and stays at its row pose (no hover lift).
      * Play [TileFocusGlow] halos (pending discard, hover face match,
      * winning discard / hand) are drawn **under** each face — same in free play
      * and tutorial. Tutorial outlines ([Prompt]/[Deny]) are an extra ring;
@@ -251,6 +261,7 @@ class TileBoard {
         readyDiscardTypes: Set<Int> = emptySet(),
         hoverLiftFraction: Float = 0.14f,
         hoverScale: Float = 1.08f,
+        pressedVisualId: Int = -1,
         drawSettled: Boolean = true,
         drawFlying: Boolean = true,
         drawTiles: Boolean = true,
@@ -268,11 +279,11 @@ class TileBoard {
                 if (!settled && !drawFlying) continue
                 collectHighlight(
                     v, hoveredVisualId, recommendedTileTypes,
-                    hoverLiftFraction, hoverScale,
+                    hoverLiftFraction, hoverScale, pressedVisualId,
                 )
                 collectReady(
                     v, readyDiscardTypes, hoveredVisualId, recommendedTileTypes,
-                    hoverLiftFraction, hoverScale,
+                    hoverLiftFraction, hoverScale, pressedVisualId,
                 )
             }
         }
@@ -284,7 +295,7 @@ class TileBoard {
                 if (!settled && !drawFlying) continue
                 drawOne(
                     batch, drawer, v, hoveredVisualId, recommendedTileTypes,
-                    hoverLiftFraction, hoverScale,
+                    hoverLiftFraction, hoverScale, pressedVisualId,
                 )
             }
         }
@@ -482,11 +493,12 @@ class TileBoard {
         recommendedTileTypes: Set<Int>,
         hoverLiftFraction: Float,
         hoverScale: Float,
+        pressedVisualId: Int,
     ) {
         if (!v.tutorialOutline.isTutorialOutline) return
         val xform = drawXform(
             v, hoveredVisualId, recommendedTileTypes,
-            hoverLiftFraction, hoverScale,
+            hoverLiftFraction, hoverScale, pressedVisualId,
         )
         if (xform.scaleX <= 0.25f) return
         highlightBoxes += TileHighlightBox(
@@ -512,11 +524,12 @@ class TileBoard {
         recommendedTileTypes: Set<Int>,
         hoverLiftFraction: Float,
         hoverScale: Float,
+        pressedVisualId: Int,
     ) {
         if (!v.selectableHand || v.tileType !in readyDiscardTypes) return
         val xform = drawXform(
             v, hoveredVisualId, recommendedTileTypes,
-            hoverLiftFraction, hoverScale,
+            hoverLiftFraction, hoverScale, pressedVisualId,
         )
         if (xform.scaleX <= 0.25f) return
         readyBoxes += TileHighlightBox(
@@ -546,6 +559,7 @@ class TileBoard {
         recommendedTileTypes: Set<Int>,
         hoverLiftFraction: Float,
         hoverScale: Float,
+        pressedVisualId: Int,
     ): DrawXform {
         val p = v.current
         val scaleX = faceScaleX(v.from, v.target, v.elapsed)
@@ -556,6 +570,10 @@ class TileBoard {
         var w = p.w
         var h = p.h
         when {
+            // The touch loupe already shows this hand tile's face above the
+            // finger; the copy in the row stays put. Raising it too would make
+            // the loupe and its source read as two separate tiles.
+            v.id == pressedVisualId -> Unit
             hovered -> {
                 cy += h * hoverLiftFraction
                 w *= hoverScale
@@ -578,10 +596,11 @@ class TileBoard {
         recommendedTileTypes: Set<Int>,
         hoverLiftFraction: Float,
         hoverScale: Float,
+        pressedVisualId: Int,
     ) {
         val xform = drawXform(
             v, hoveredVisualId, recommendedTileTypes,
-            hoverLiftFraction, hoverScale,
+            hoverLiftFraction, hoverScale, pressedVisualId,
         )
         val cx = xform.cx
         val cy = xform.cy
@@ -644,6 +663,16 @@ class TileBoard {
             batch.setColor(AppPalette.tileRiverDim)
         }
 
+        // The touch loupe is showing this hand tile's face above the finger:
+        // fade the copy under the finger so the magnified face is the one read.
+        // Keep the wash's RGB and take its alpha down; the label's halo and ink
+        // both follow the batch alpha, so the whole tile fades, not just its art.
+        val pressed = v.id == pressedVisualId
+        if (pressed) {
+            val c = batch.color
+            batch.setColor(c.r, c.g, c.b, c.a * PRESSED_TILE_ALPHA)
+        }
+
         if (p.open && v.tileType in 0 until NUM_TILE_TYPES) {
             drawer.drawOpen(
                 batch,
@@ -669,7 +698,7 @@ class TileBoard {
                 scaleX = scaleX,
             )
         }
-        if (xform.hovered || xform.recommended || riverDim) {
+        if (xform.hovered || xform.recommended || riverDim || pressed) {
             batch.setColor(Color.WHITE)
         }
     }

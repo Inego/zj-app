@@ -61,6 +61,9 @@ class TileDrawer(
     /** Reused knockout colour — a labelled tile must not allocate per frame. */
     private val labelHalo = Color()
 
+    /** Reused ink colour, so a tag fades with its tile's batch alpha. */
+    private val labelInk = Color()
+
     /**
      * A label's natural ink box on the shadow-free [Fonts.tileLabel] face, keyed by
      * `<script profile>|<label text>`.
@@ -301,6 +304,21 @@ class TileDrawer(
         )
         val halo = max(1f, placement.inkH * TAG_HALO_FRACTION)
 
+        // The tag is part of the tile, so it follows the batch alpha: a tile the
+        // touch loupe fades under the finger must not leave an opaque tag on the
+        // felt. Every other tile is drawn at alpha 1, so this is a no-op there.
+        val ink = if (batch.color.a < 1f) {
+            labelInk.set(
+                LABEL_INK_COLOR.r,
+                LABEL_INK_COLOR.g,
+                LABEL_INK_COLOR.b,
+                LABEL_INK_COLOR.a * batch.color.a,
+            )
+            labelInk
+        } else {
+            LABEL_INK_COLOR
+        }
+
         // Ride the tile's own transform — centre, rotation, then scale, the same
         // order `drawTexture` composes — so the tag cannot drift from the face it
         // marks, in any seat rotation or mid-animation pose.
@@ -324,7 +342,7 @@ class TileDrawer(
                         labelHalo,
                     )
                 }
-                Fonts.drawText(batch, face, label, placement.leftX, placement.topY, LABEL_INK_COLOR)
+                Fonts.drawText(batch, face, label, placement.leftX, placement.topY, ink)
             }
         } finally {
             batch.transformMatrix = transformPrev

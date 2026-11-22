@@ -16,10 +16,13 @@ import kotlin.math.min
  * Seat-wind labels as plain text (never a tile graphic): a **large Han wind
  * character** (東南西北, see [PlayerLabels.windHan]) beside name · score,
  * rotated for the human (bottom) viewer — opposite stays upright, left reads
- * bottom-to-top, right reads top-to-bottom. The active seat is marked by weight
- * ([Fonts.labelActive]) and a fixed size boost, **not** by animation: it used to
- * pulse, and since a seat is always active that kept the whole table asking for
- * frames forever. See [activeScaleBoost].
+ * bottom-to-top, right reads top-to-bottom.
+ *
+ * **One size on every seat and every turn.** The active seat is marked by its
+ * ink (white against the resting seat ink) and by the board's felt panel under
+ * that seat — never by size, never by animation: a seat is *always* active, so
+ * a label that pulsed or grew kept the whole table asking for frames forever,
+ * and it made the row geometry move when the turn changed.
  *
  * The localized wind word (East, Юг, …) is not drawn. When tile tags are on,
  * the short symbol those tiles use sits beside the character, unless that
@@ -34,20 +37,27 @@ class SeatLabelDrawer {
     private val botNameTint = Color()
 
     /**
-     * Extra scale the active seat's label carries, on top of [baseLabelScale].
+     * An above-row placement: the label floats over the felt just above the
+     * seat's own hand row, instead of sitting in the gutter between that row and
+     * the screen edge.
      *
-     * **Static, deliberately.** This used to be a 1.1 s sine pulse, and the pulse
-     * was not merely cosmetic: a seat is *always* active, so an animated label meant
-     * the table always had a clock running, so it always asked for a frame. The
-     * active seat's label visibly froze mid-pulse whenever the player stopped
-     * moving the mouse — the picture only advanced when unrelated input happened to
-     * deliver a frame. A static boost keeps the affordance and removes the clock, so
-     * a settled board genuinely settles.
-     *
-     * The value is the pulse's old *mean* rather than its peak, so the label reads as
-     * the size it appeared to average rather than as a new, larger label.
+     * The human uses this when the bottom gutter is spent on taller tiles. The
+     * label is upright — the human reads it from the near edge — right-aligned to
+     * [rightX], which the board measures from the row's rightmost tile or slot
+     * (the last meld tile when melds are open, or the parked draw slot), so the
+     * label travels with the row as claims widen it or the drawn tile arrives.
+     * Its box floats just above [rowEdgeY], the row's felt-facing edge, so the
+     * ink keeps daylight from the tiles, never crosses them, and never crops at
+     * the screen edge below the row.
      */
-    var activeScaleBoost: Float = DEFAULT_ACTIVE_SCALE_BOOST
+    data class AboveRow(
+        /** World x the label's right edge sits on: the row's rightmost tile/slot edge. */
+        val rightX: Float,
+        /** World y of the hand row's felt-facing (inner) edge. */
+        val rowEdgeY: Float,
+        /** Width budget for the run: how far left of the band edge it may paint. */
+        val maxWidth: Float,
+    )
 
     /**
      * [active] is [inego.zungjunggame.session.table.TableViewState.activeSeat] — the seat whose turn
@@ -76,19 +86,43 @@ class SeatLabelDrawer {
          * portrait). Ignored by the other seats.
          */
         bottomReserve: Float = 0f,
+        /**
+         * When set, the label floats above the seat's own row instead of sitting
+         * in the gutter. [SeatSide.Bottom] only; the other seats keep their
+         * gutters.
+         */
+        aboveRow: AboveRow? = null,
     ) {
         if (windTile < 0) return
 
-        val windFont = if (active) Fonts.labelActive else Fonts.label
+        val windFont = Fonts.label
+        val ink = if (active) ACTIVE_INK else windFont.color
         val playerName = PlayerLabels.nameForAbsoluteSeat(seat, humanSeat)
+        val score = seatScores.getOrElse(seat) { 0 }
         val measured = measureRuns(
             windFont = windFont,
+            ink = ink,
             windTile = windTile,
             windName = PlayerLabels.windName(windTile),
             playerName = playerName,
-            score = seatScores.getOrElse(seat) { 0 },
+            score = score,
             isBot = PlayerLabels.isBot(seat),
         )
+        val bScale = baseLabelScale(handH)
+        val above = aboveRow
+        if (above != null) {
+            drawAboveRow(
+                batch = batch,
+                windFont = windFont,
+                windTile = windTile,
+                seat = seat,
+                score = score,
+                measured = measured,
+                bScale = bScale,
+                above = above,
+            )
+            return
+        }
         // The bottom label fits the same gutter as every other seat. Its width
         // budget is still the screen span, so a stored long name cannot paint
         // off the edge; the budget is the width it occupies after the same
@@ -100,20 +134,17 @@ class SeatLabelDrawer {
             } else {
                 safeEdge
             }
-        val bScale = baseLabelScale(handH, activeScaleBoost)
         val handFace = (edgeInset - handH * 0.5f).coerceAtLeast(outerEdge)
         val gutter = handFace - outerEdge
         val fitScale = gutterFitScale(
             boxH = measured.boxH,
             baseScale = bScale,
-            active = active,
-            activeScaleBoost = activeScaleBoost,
             gutter = gutter,
             tileGap = tileGap,
         )
         val runs = if (side == SeatSide.Bottom) {
             val span = (screenW - 2f * safeEdge).coerceAtLeast(1f)
-            val paintedScale = bScale * fitScale * (if (active) activeScaleBoost else 1f)
+            val paintedScale = bScale * fitScale
             val unscaledSpan = if (paintedScale > 0f) span / paintedScale else span
             if (measured.totalW > unscaledSpan && measured.name.isNotEmpty()) {
                 val budget = (unscaledSpan - (measured.totalW - measured.nameW)).coerceAtLeast(0f)
@@ -121,10 +152,11 @@ class SeatLabelDrawer {
                 if (fitted != measured.name) {
                     measureRuns(
                         windFont = windFont,
+                        ink = ink,
                         windTile = windTile,
                         windName = PlayerLabels.windName(windTile),
                         playerName = fitted,
-                        score = seatScores.getOrElse(seat) { 0 },
+                        score = score,
                         isBot = PlayerLabels.isBot(seat),
                     )
                 } else {
@@ -137,9 +169,9 @@ class SeatLabelDrawer {
             measured
         }
 
-        // The anchor uses the scale the glyphs are painted at, boost included,
-        // so the active label does not grow out of its box into the tiles.
-        val drawnScale = bScale * fitScale * (if (active) activeScaleBoost else 1f)
+        // The anchor uses the scale the glyphs are painted at, so the label stays
+        // inside its box and clear of the tiles.
+        val drawnScale = bScale * fitScale
         val drawnBoxH = runs.boxH * drawnScale
 
         val lx = 0f
@@ -164,11 +196,78 @@ class SeatLabelDrawer {
     }
 
     /**
+     * Paints the label above the seat's own row: upright, right-aligned to
+     * [AboveRow.rightX], its box floating just above the row's felt-facing edge.
+     *
+     * This is where the human label lives once the bottom gutter has been spent
+     * on taller tiles, so the label stays inside the screen instead of cropping
+     * at the bottom edge.
+     *
+     * It draws at [ABOVE_ROW_SCALE] of the resting size: the band between the row
+     * and the river is shallow, and at full size the Han glyph would crowd the
+     * tiles. The **box** still floats at the resting size, [ABOVE_ROW_LIFT] above
+     * the row, so the trimmed ink keeps a visible gap from the tiles instead of
+     * only the few pixels the trim alone leaves.
+     *
+     * The favourite case is a label at its full above-row size with room to
+     * spare. Where the felt does not give that room, the whole run shrinks a
+     * little (down to [MIN_ABOVE_ROW_SCALE] of that size) and only then does the
+     * name give way, so the wind character and the score stay intact.
+     */
+    private fun drawAboveRow(
+        batch: SpriteBatch,
+        windFont: BitmapFont,
+        windTile: Int,
+        seat: Int,
+        score: Int,
+        measured: LabelRuns,
+        bScale: Float,
+        above: AboveRow,
+    ) {
+        val base = bScale * ABOVE_ROW_SCALE
+        val available = above.maxWidth.coerceAtLeast(1f)
+        val scale = if (measured.totalW * base > available) {
+            (available / measured.totalW).coerceIn(base * MIN_ABOVE_ROW_SCALE, base)
+        } else {
+            base
+        }
+        var runs = measured
+        if (runs.totalW * scale > available && runs.name.isNotEmpty()) {
+            val budget = available / scale - (runs.totalW - runs.nameW)
+            val fitted = TextFit.ellipsize(windFont, runs.name, budget.coerceAtLeast(0f))
+            if (fitted != runs.name) {
+                runs = measureRuns(
+                    windFont = windFont,
+                    ink = runs.ink,
+                    windTile = windTile,
+                    windName = PlayerLabels.windName(windTile),
+                    playerName = fitted,
+                    score = score,
+                    isBot = PlayerLabels.isBot(seat),
+                )
+            }
+        }
+        // Float the resting-size box a little above the row's felt-facing edge
+        // and centre the trimmed ink in it: the label belongs to the row, but its
+        // ink must keep clear of the tiles below it.
+        val bandH = boxHeight(Fonts.label) * bScale
+        drawCenteredRotatedLabel(
+            batch = batch,
+            runs = runs,
+            cx = above.rightX - runs.totalW * scale * 0.5f,
+            cy = above.rowEdgeY + bandH * (0.5f + ABOVE_ROW_LIFT),
+            rotationDeg = 0f,
+            scale = scale,
+        )
+    }
+
+    /**
      * Measures one seat label: the large Han wind glyph (when a CJK face is
      * loaded), then the optional tile-tag symbol, then name · score.
      */
     private fun measureRuns(
         windFont: BitmapFont,
+        ink: Color,
         windTile: Int,
         windName: String,
         playerName: String,
@@ -213,6 +312,7 @@ class SeatLabelDrawer {
         }
         return LabelRuns(
             font = windFont,
+            ink = ink,
             hanFont = hanFont,
             han = han,
             hanScale = hanScale,
@@ -234,6 +334,8 @@ class SeatLabelDrawer {
     private class LabelRuns(
         /** Face for the wind / player / score runs. */
         val font: BitmapFont,
+        /** Ink for every run; the active seat's is [ACTIVE_INK]. */
+        val ink: Color,
         /** Large Han face — never upscaled; [hanScale] shrinks it to [hanH]. */
         val hanFont: BitmapFont,
         /** Han wind character, "" when the glyph is skipped. */
@@ -264,7 +366,7 @@ class SeatLabelDrawer {
     /**
      * Draws [runs] with its box centered on ([cx], [cy]), rotated
      * counter-clockwise by [rotationDeg] ([SeatSide.labelRotationDeg]).
-     * Optional [scale] is applied about the center (the active seat's static boost).
+     * Optional [scale] is applied about the center.
      * The Han glyph takes the wind-name tint, so only its size sets it apart;
      * a bot's name is the same colour as anyone else's, dimmed to
      * [PlayerLabels.BOT_NAME_ALPHA] — see [PlayerLabels.botNameTint].
@@ -298,37 +400,57 @@ class SeatLabelDrawer {
                     text = runs.han,
                     x = curX,
                     y = runs.hanH * 0.5f,
-                    color = runs.font.color,
+                    color = runs.ink,
                 )
             }
             curX += runs.hanW + runs.hanGap
         }
-        Fonts.drawText(batch, runs.font, runs.prefix, curX, textY, runs.font.color)
+        Fonts.drawText(batch, runs.font, runs.prefix, curX, textY, runs.ink)
         curX += runs.prefixW
         val nameColor =
-            if (runs.isBot) PlayerLabels.botNameTint(runs.font.color, botNameTint) else runs.font.color
+            if (runs.isBot) PlayerLabels.botNameTint(runs.ink, botNameTint) else runs.ink
         Fonts.drawText(batch, runs.font, runs.name, curX, textY, nameColor)
         curX += runs.nameW
-        Fonts.drawText(batch, runs.font, runs.suffix, curX, textY, runs.font.color)
+        Fonts.drawText(batch, runs.font, runs.suffix, curX, textY, runs.ink)
         batch.transformMatrix = textTransformPrev
     }
 
     companion object {
+        /** Ink for the seat whose turn it is: white on the felt; the size never changes. */
+        private val ACTIVE_INK: Color = Color.WHITE
+
         /**
-         * The default size boost the active seat's label carries. [baseLabelScale]
-         * reserves for it, so every label stays clear of the tile even while the
-         * active seat is emphasised.
+         * Size of a label that sits above its row, as a fraction of the resting
+         * seat label. The band between the row and the river is shallow, so the
+         * full-size ink would crowd the tiles below it (and the Han glyph would
+         * touch them).
          */
-        internal const val DEFAULT_ACTIVE_SCALE_BOOST = 1.08f
+        internal const val ABOVE_ROW_SCALE = 0.8f
+
+        /**
+         * Air between the above-row label's box and the row's felt-facing edge,
+         * as a fraction of the resting-size box. The [ABOVE_ROW_SCALE] trim
+         * leaves only a few pixels at the bottom of the box on a phone, which
+         * reads as the wind character touching the tiles; this lift adds visible
+         * daylight without carrying the label into the river.
+         */
+        internal const val ABOVE_ROW_LIFT = 0.12f
+
+        /**
+         * Smallest scale the above-row label will take before its name is allowed
+         * to ellipsize, as a fraction of [ABOVE_ROW_SCALE]. Below this the run
+         * reads as chrome noise rather than as a seat label.
+         */
+        internal const val MIN_ABOVE_ROW_SCALE = 0.72f
 
         /** Scratch for [boxHeight]; render is single-threaded. */
         private val scaleGlyphLayout = GlyphLayout()
 
         /**
-         * The scale a standard seat label is drawn at on a table with this
-         * hand-tile height and label gutter: the hand-tile cap ([baseLabelScale])
-         * times the gutter fit for the standard label face. (The active seat draws
-         * the emphasised face with its static boost on top, so it stays larger.)
+         * The scale a seat label is drawn at on a table with this hand-tile height
+         * and label gutter: the hand-tile cap ([baseLabelScale]) times the gutter
+         * fit for the label face. Every seat uses it — the active one included, so
+         * the turn never changes a label's size.
          *
          * This is the one coefficient every fixed-size label on the felt shares —
          * the center turn-status line, the HUD rule / hand counters, the rules
@@ -346,45 +468,36 @@ class SeatLabelDrawer {
             handH: Float,
             gutter: Float,
             tileGap: Float,
-            activeScaleBoost: Float = DEFAULT_ACTIVE_SCALE_BOOST,
         ): Float {
-            val base = baseLabelScale(handH, activeScaleBoost)
+            val base = baseLabelScale(handH)
             return base * gutterFitScale(
                 boxH = boxHeight(Fonts.label),
                 baseScale = base,
-                active = false,
-                activeScaleBoost = activeScaleBoost,
                 gutter = gutter,
                 tileGap = tileGap,
             )
         }
 
         /**
-         * Scale for every seat label before the active seat's boost and before its
-         * gutter fit.
+         * Scale for every seat label before its gutter fit.
          *
-         * 1 keeps the desktop size. When the active label, Han glyph and boost
-         * included, would be taller than the hand tile, shrink it to the tile.
-         * The tile is the same fraction of the short side on every platform, so
-         * a phone app and a phone browser share the scale and a large window
-         * stays at 1.
+         * 1 keeps the desktop size. When the label, Han glyph included, would be
+         * taller than the hand tile, shrink it to the tile. The tile is the same
+         * fraction of the short side on every platform, so a phone app and a
+         * phone browser share the scale and a large window stays at 1.
          */
-        internal fun baseLabelScale(
-            handH: Float,
-            activeScaleBoost: Float = DEFAULT_ACTIVE_SCALE_BOOST,
-        ): Float = labelFitScale(activeLabelBoxHeight(), handH, activeScaleBoost)
-
-        internal fun labelFitScale(activeBoxH: Float, handH: Float, activeScaleBoost: Float): Float {
-            if (activeBoxH <= 0f || handH <= 0f || activeScaleBoost <= 0f) return 1f
-            return min(1f, handH / (activeBoxH * activeScaleBoost))
+        internal fun baseLabelScale(handH: Float): Float {
+            val boxH = seatLabelBoxHeight()
+            if (boxH <= 0f || handH <= 0f) return 1f
+            return min(1f, handH / boxH)
         }
 
         /**
-         * Box height of the active label at scale 1: the Han glyph when it overhangs
+         * Box height of a seat label at scale 1: the Han glyph when it overhangs
          * the wind-name line, else that line. Latin sample; the Han box is
          * script-independent.
          */
-        private fun activeLabelBoxHeight(): Float = boxHeight(Fonts.labelActive)
+        private fun seatLabelBoxHeight(): Float = boxHeight(Fonts.label)
 
         /** Box height [font]'s seat label occupies at scale 1. */
         private fun boxHeight(font: BitmapFont): Float {
@@ -437,23 +550,20 @@ class SeatLabelDrawer {
         }
 
         /**
-         * Scale factor in (0, 1] to ensure the seat label (including the active
-         * seat's static boost) fits within the available gutter without overlapping
-         * tiles or screen edges.
+         * Scale factor in (0, 1] to ensure the seat label fits within the
+         * available gutter without overlapping tiles or screen edges.
          */
         internal fun gutterFitScale(
             boxH: Float,
             baseScale: Float,
-            active: Boolean,
-            activeScaleBoost: Float,
             gutter: Float,
             tileGap: Float,
         ): Float {
             if (boxH <= 0f || baseScale <= 0f) return 1f
             val availableGutterH = (gutter - tileGap * 2f).coerceAtLeast(0f)
-            val peakH = boxH * baseScale * (if (active) activeScaleBoost else 1f)
-            return if (peakH > availableGutterH && peakH > 0f) {
-                (availableGutterH / peakH).coerceIn(0.1f, 1f)
+            val labelH = boxH * baseScale
+            return if (labelH > availableGutterH && labelH > 0f) {
+                (availableGutterH / labelH).coerceIn(0.1f, 1f)
             } else {
                 1f
             }
