@@ -1,5 +1,6 @@
 package inego.zungjunggame.persist
 
+import inego.zungjunggame.engine.BotLevel
 import inego.zungjunggame.engine.Choice
 import inego.zungjunggame.engine.ChoiceKind
 import inego.zungjunggame.engine.DecisionType
@@ -19,6 +20,9 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 import java.io.EOFException
 import java.io.IOException
+import java.nio.ByteBuffer
+import inego.zungjunggame.state.Migration
+import inego.zungjunggame.state.MigrationResult
 import inego.zungjunggame.state.Schema
 import inego.zungjunggame.state.StateKey
 
@@ -29,8 +33,9 @@ import inego.zungjunggame.state.StateKey
  * (shared with tutorial [GameState.fromLayout]). This is **not** the authoring
  * format for tutorial scenarios.
  *
- * A payload written by an older version is not migrated: [decode] accepts only
- * [version], so an old save falls back to the key's default.
+ * A payload written by a version with no migration falls back to the key's
+ * default. The one migration is v7→v8, which appends the bot level; it is
+ * possible because that field is the payload's tail.
  *
  * Pure JVM (no libGDX) so unit tests can round-trip without a backend.
  */
@@ -43,8 +48,9 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
      * v5: seabedPlayer + handEnded (explicit end of hand; 9.1.1 / 9.1.2).
      * v6: per-hand scored patterns (the hands table's Patterns column).
      * v7: the player's exposed melds became an ordered log (exposure order).
+     * v8: bot level, the payload's tail field (v7 migrates as Standard).
      */
-    override val version: Int = 7
+    override val version: Int = 8
 
     private const val MAGIC: Int = 0x5A4A5331 // "ZJS1"
 
@@ -61,9 +67,31 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
             d.writeBoolean(value.game.allowChickenHands)
             writeScoreRows(d, value.scoreRows)
             writeGameState(d, value.game)
+            // Tail field: this is what lets the v7→v8 migration be an append.
+            d.writeUTF(value.botLevel.id)
         }
         return out.toByteArray()
     }
+
+    /**
+     * v7 wrote every other field and no bot level. Appending the level every v7
+     * game played turns the old payload into a valid v8 one; the schema's own
+     * version int (after MAGIC) is the only other byte that changes.
+     */
+    override val migrations: List<Migration> = listOf(
+        Migration { fromVersion, bytes ->
+            if (fromVersion != 7 || bytes.size < 8) {
+                MigrationResult.Drop
+            } else {
+                val out = ByteArrayOutputStream(bytes.size + 2 + BotLevel.DEFAULT.id.length)
+                out.write(bytes)
+                DataOutputStream(out).use { it.writeUTF(BotLevel.DEFAULT.id) }
+                val migrated = out.toByteArray()
+                ByteBuffer.wrap(migrated).putInt(4, version)
+                MigrationResult.Migrated(migrated)
+            }
+        },
+    )
 
     /**
      * @return decoded snapshot, or null if the payload is corrupt, truncated, or
@@ -92,6 +120,7 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
                     currentHandRecorded = currentHandRecorded,
                     dealSeed = dealSeed,
                     rounds = rounds,
+                    botLevel = BotLevel.fromId(d.readUTF()),
                 )
             }
         } catch (_: EOFException) {

@@ -1,6 +1,6 @@
 package inego.zungjunggame.app
 
-import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.i18n.AppLocale
 import inego.zungjunggame.net.NotificationPrefs
 import inego.zungjunggame.persist.AuthPersistedSession
@@ -39,8 +39,8 @@ data class AppState(
     val tutorialSession: TutorialSessionSnapshot?,
     /** Signed-in account with its refresh token (`auth.session`), null when signed out. */
     val account: AuthPersistedSession?,
-    /** Last committed New Game config (`game.prefs`). */
-    val game: GameConfig,
+    /** Last committed local New Game config (`game.prefs`). */
+    val game: LocalGameConfig,
     /** Display preferences (`ui.prefs`). */
     val ui: UiPreferences,
     /** Active language tag (`ui.locale`). */
@@ -66,8 +66,8 @@ class AppStateSource(
     val account: StateSlot<AuthPersistedSession>,
     /** Last live online table id. */
     val onlineTableId: StateSlot<String>,
-    /** Last committed New Game config. */
-    val game: StateSlot<GameConfig>,
+    /** Last committed local New Game config. */
+    val game: StateSlot<LocalGameConfig>,
     /** Display preferences. */
     val ui: StateSlot<UiPreferences>,
     /** Active language tag. */

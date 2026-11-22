@@ -54,13 +54,19 @@ object GameplayLoop {
         seatToEngine: IntArray = IntArray(NUM_PLAYERS) { it % engines.size },
         initialRng: Random = Random(System.nanoTime()),
         choiceRng: Random = Random(System.nanoTime()),
+        eastSeat: Int = 0,
+        allowChickenHands: Boolean = false,
     ): GameResult {
         require(engines.isNotEmpty()) { "at least one engine required" }
         require(seatToEngine.size == NUM_PLAYERS) {
             "seatToEngine must have $NUM_PLAYERS entries"
         }
 
-        val state = GameState.generateRandom(initialRng)
+        val state = GameState.generateRandom(
+            rng = initialRng,
+            eastSeat = eastSeat,
+            allowChickenHands = allowChickenHands,
+        )
         var decisions = 0
 
         while (!state.isTerminal()) {

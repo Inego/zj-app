@@ -7,15 +7,16 @@ import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.utils.Align
 import com.badlogic.gdx.utils.Disposable
+import inego.zungjunggame.engine.BotLevel
 import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.input.InputProfile
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.ui.InfoButton
-import inego.zungjunggame.render.ui.OverlayBodyScroll
 import inego.zungjunggame.render.ui.OverlayChrome
-import inego.zungjunggame.render.ui.OverlayViewport
+import inego.zungjunggame.render.ui.OverlayForm
 import inego.zungjunggame.render.ui.UiPlate
 import inego.zungjunggame.ui.GestureSurface
 import inego.zungjunggame.ui.Rect
@@ -27,10 +28,14 @@ import inego.zungjunggame.render.ui.FittedLabel
 /** One rounds radio option and the value it selects (`null` = unlimited). */
 data class NewGameSetupRoundGeometry(val rect: Rect, val roundsValue: Int?)
 
+/** One bot-level radio option and the level it selects. */
+data class NewGameSetupBotGeometry(val rect: Rect, val level: BotLevel)
+
 /** GL-free snapshot of the setup card's controls for the last laid-out frame. */
 data class NewGameSetupGeometry(
     val panel: Rect?,
     val rounds: List<NewGameSetupRoundGeometry>,
+    val bots: List<NewGameSetupBotGeometry>,
     val chickenToggle: Rect?,
     val chickenInfo: Rect?,
     val start: Rect?,
@@ -48,8 +53,8 @@ data class NewGameSetupGeometry(
 data class NewGameSetupVerdict(
     /** Stable id of the control the release selected, in the overlay's vocabulary. */
     val selectedId: String? = null,
-    /** The draft after an edit (rounds radio, chicken checkbox); null otherwise. */
-    val draft: GameConfig? = null,
+    /** The draft after an edit (rounds radio, bot radio, chicken checkbox); null otherwise. */
+    val draft: LocalGameConfig? = null,
     /** Where a body drag is right now, reported from the drag steps. */
     val dragScrollOffset: Float? = null,
     /** Where a body drag settled, when the release ended a scroll. */
@@ -58,16 +63,18 @@ data class NewGameSetupVerdict(
 
 /**
  * Modal New Game setup: rounds as a **vertical radio list**
- * (1 / 2 / 4 / Unlimited), then a separate checkbox for chicken hands
+ * (1 / 2 / 4 / Unlimited), the bot level as a second vertical radio list
+ * (Novice / Beginner / Standard), then a separate checkbox for chicken hands
  * with a rimless [InfoButton] deep-link to Reference.
  *
  * Desktop also accepts Enter to Start and Esc to Cancel (handled in
  * [inego.zungjunggame.Main]).
  *
  * Visual language matches [inego.zungjunggame.features.confirm.ConfirmOverlay] / [inego.zungjunggame.features.menu.GameMenuOverlay] (dim backdrop,
- * dark card, ivory rim). Title and Start / Cancel stay put; the rounds list
- * and chicken row scroll inside [OverlayViewport] when the card is taller
- * than the safe rect (Android landscape).
+ * dark card, ivory rim). The card is laid out by [inego.zungjunggame.render.ui.OverlayForm]:
+ * it hugs its content, puts the two lists side by side when the window is wide
+ * and short (Android landscape), moves Start / Cancel into the header when it
+ * has to go compact, and scrolls only as a last resort.
  *
  * The card is controlled: [render] is handed the draft and the body offset every
  * frame, and a release reports what it resolved ([NewGameSetupVerdict]). The
@@ -80,17 +87,20 @@ class NewGameSetupOverlay(
      * exactly the two ranked axes, 1 and 2.
      */
     private val roundOptions: List<Int?> = DEFAULT_ROUND_OPTIONS,
+    /** The bot levels the radio offers, top to bottom (Novice, Beginner, Standard). */
+    private val botOptions: List<BotLevel> = DEFAULT_BOT_OPTIONS,
     /** The card title's bundle key; the local and duplicate setups differ. */
     private val titleKey: String = "setup.title",
 ) : Disposable, GestureSurface<NewGameSetupVerdict> {
     private val glyphLayout = GlyphLayout()
     private val chickenInfo = InfoButton()
-    private val body = OverlayBodyScroll()
+    private val form = OverlayForm()
+    private val body = form.body
 
     private fun whitePixel(): Texture = WhitePixel.get()
 
     /** The draft [render] was handed this frame; the owner's value. */
-    private var draft: GameConfig = GameConfig.DEFAULT
+    private var draft: LocalGameConfig = LocalGameConfig()
 
     private var panelLeft = 0f
     private var panelBottom = 0f
@@ -106,6 +116,8 @@ class NewGameSetupOverlay(
     private enum class HitKind {
         /** Finite round count stored in [Hit.roundsValue], or unlimited when null. */
         RoundsChoice,
+        /** Bot level stored in [Hit.botLevel]. */
+        BotChoice,
         ChickenToggle,
         Start,
         Cancel,
@@ -119,10 +131,21 @@ class NewGameSetupOverlay(
         val h: Float,
         /** For [HitKind.RoundsChoice]: the rounds value to apply (`null` = unlimited). */
         val roundsValue: Int? = null,
+        /** For [HitKind.BotChoice]: the level to apply. */
+        val botLevel: BotLevel? = null,
     ) {
         fun contains(px: Float, py: Float): Boolean =
             px >= left && px <= left + w && py >= bottom && py <= bottom + h
     }
+
+    /** One painted radio row, before it becomes a [Hit]. */
+    private data class RadioRow(
+        val label: String,
+        val selected: Boolean,
+        val kind: HitKind,
+        val roundsValue: Int? = null,
+        val botLevel: BotLevel? = null,
+    )
 
     private sealed interface PointerResult {
         /** Start pressed — the draft is the owner's stored value. */
@@ -131,8 +154,8 @@ class NewGameSetupOverlay(
         data object Cancel : PointerResult
         /** Info next to chicken hands — open Reference on the chicken-hand page. */
         data object ChickenHandInfo : PointerResult
-        /** A rounds/chicken edit produced a new draft; no feature action. */
-        data class Draft(val value: GameConfig) : PointerResult
+        /** A rounds/bot/chicken edit produced a new draft; no feature action. */
+        data class Draft(val value: LocalGameConfig) : PointerResult
     }
 
     /**
@@ -148,7 +171,8 @@ class NewGameSetupOverlay(
 
     /**
      * Pure snapshot of the controls the last [render] laid out: card, rounds
-     * options, chicken checkbox + info, and footer buttons. No GL / fonts.
+     * options, bot levels, chicken checkbox + info, and footer buttons. No GL /
+     * fonts.
      */
     fun measureGeometry(): NewGameSetupGeometry {
         val panel = if (panelW > 0f && panelH > 0f) {
@@ -159,9 +183,17 @@ class NewGameSetupOverlay(
         val rounds = hits
             .filter { it.kind == HitKind.RoundsChoice }
             .map { NewGameSetupRoundGeometry(Rect(it.left, it.bottom, it.w, it.h), it.roundsValue) }
+        val bots = hits
+            .filter { it.kind == HitKind.BotChoice }
+            .mapNotNull { hit ->
+                hit.botLevel?.let {
+                    NewGameSetupBotGeometry(Rect(hit.left, hit.bottom, hit.w, hit.h), it)
+                }
+            }
         return NewGameSetupGeometry(
             panel = panel,
             rounds = rounds,
+            bots = bots,
             chickenToggle = rectOf(HitKind.ChickenToggle),
             chickenInfo = chickenInfoRect,
             start = rectOf(HitKind.Start),
@@ -179,7 +211,7 @@ class NewGameSetupOverlay(
      */
     internal fun seedLayoutForTest(
         geometry: NewGameSetupGeometry,
-        draft: GameConfig = GameConfig.DEFAULT,
+        draft: LocalGameConfig = LocalGameConfig(),
     ) {
         this.draft = draft
         geometry.panel?.let {
@@ -201,6 +233,18 @@ class NewGameSetupOverlay(
                 ),
             )
         }
+        for ((rect, level) in geometry.bots) {
+            hits.add(
+                Hit(
+                    HitKind.BotChoice,
+                    rect.left,
+                    rect.bottom,
+                    rect.width,
+                    rect.height,
+                    botLevel = level,
+                ),
+            )
+        }
         geometry.chickenToggle?.let {
             hits.add(Hit(HitKind.ChickenToggle, it.left, it.bottom, it.width, it.height))
         }
@@ -211,7 +255,7 @@ class NewGameSetupOverlay(
             hits.add(Hit(HitKind.Cancel, it.left, it.bottom, it.width, it.height))
         }
         chickenInfoRect = geometry.chickenInfo
-        // The rounds/chicken rows live in the scroll body in [render]; mirror that
+        // The radio/chicken rows live in the scroll body in [render]; mirror that
         // so pointer-down takes the body branch and [applyPointer] runs on release.
         geometry.panel?.let {
             body.layout(it.left, it.bottom, it.width, it.height, contentHeight = it.height, scrollY = 0f)
@@ -309,10 +353,21 @@ class NewGameSetupOverlay(
             if (!hit.contains(worldX, worldY)) continue
             return when (hit.kind) {
                 HitKind.RoundsChoice ->
-                    PointerResult.Draft(draft.copy(rounds = hit.roundsValue))
+                    PointerResult.Draft(
+                        draft.copy(rules = draft.rules.copy(rounds = hit.roundsValue)),
+                    )
 
                 HitKind.ChickenToggle ->
-                    PointerResult.Draft(draft.copy(allowChickenHands = !draft.allowChickenHands))
+                    PointerResult.Draft(
+                        draft.copy(
+                            rules = draft.rules.copy(
+                                allowChickenHands = !draft.rules.allowChickenHands,
+                            ),
+                        ),
+                    )
+
+                HitKind.BotChoice ->
+                    hit.botLevel?.let { PointerResult.Draft(draft.copy(botLevel = it)) }
 
                 HitKind.Start -> PointerResult.Start
                 HitKind.Cancel -> PointerResult.Cancel
@@ -334,7 +389,7 @@ class NewGameSetupOverlay(
         screenW: Float,
         screenH: Float,
         scrollY: Float,
-        draft: GameConfig,
+        draft: LocalGameConfig,
         pointerWorldX: Float = Float.NaN,
         pointerWorldY: Float = Float.NaN,
     ) {
@@ -350,167 +405,141 @@ class NewGameSetupOverlay(
 
         val titleFont = Fonts.labelActive
         val sectionFont = Fonts.button
-        val padX = Fonts.px(28f)
-        val padY = Fonts.px(20f)
-        val titleGap = Fonts.px(16f)
-        val sectionLabelGap = Fonts.px(10f)
-        val blockGap = Fonts.px(20f)
-        val dividerGap = Fonts.px(16f)
-        val rowH = max(Fonts.px(40f), sectionFont.lineHeight + Fonts.px(14f))
-        val checkH = max(Fonts.px(44f), sectionFont.lineHeight + Fonts.px(18f))
-        val btnH = max(Fonts.px(48f), sectionFont.lineHeight + Fonts.px(22f))
-        val btnGap = Fonts.px(12f)
-        val groupPad = Fonts.px(8f)
-        val rowGap = Fonts.px(4f)
-        val nRounds = roundOptions.size
-        val listH = groupPad * 2f + nRounds * rowH + (nRounds - 1) * rowGap
         val title = L10n.get(titleKey)
         val sectionRounds = L10n.get("setup.rounds")
+        val sectionBots = L10n.get("setup.bots")
         val labelChicken = L10n.get("setup.chicken")
         val startLabel = L10n.get("setup.start")
         val cancelLabel = L10n.get("setup.cancel")
         val infoSide = InfoButton.defaultSide()
         val infoGap = InfoButton.siblingGap()
 
-        glyphLayout.setText(titleFont, title)
-        var contentW = glyphLayout.width
-        for (label in listOf(
-            sectionRounds,
-            startLabel,
-            cancelLabel,
-        ) + roundOptions.map { roundOptionLabel(it) }) {
-            glyphLayout.setText(sectionFont, label)
-            // Radio disc + gap + label.
-            contentW = max(contentW, glyphLayout.width + Fonts.px(48f))
-        }
-        // Checkbox + label + gap + info button.
-        glyphLayout.setText(sectionFont, labelChicken)
-        contentW = max(
-            contentW,
-            Fonts.px(4f) + Fonts.px(22f) + Fonts.px(14f) + glyphLayout.width +
-                infoGap + infoSide,
+        // Natural widths, measured once: a radio row carries a disc, the chicken
+        // row a checkbox and the info control, the actions their own labels. Row
+        // heights come from the form's rhythm so the card and its rows agree.
+        val rowInset = Fonts.px(40f)
+        val roundsW = roundOptions.maxOfOrNull {
+            Fonts.textWidth(sectionFont, roundOptionLabel(it)) + rowInset
+        } ?: 0f
+        val botsW = botOptions.maxOfOrNull {
+            Fonts.textWidth(sectionFont, botOptionLabel(it)) + rowInset
+        } ?: 0f
+        val checkInset = Fonts.px(4f) + Fonts.px(22f) + Fonts.px(14f)
+        val chickenW = checkInset + Fonts.textWidth(sectionFont, labelChicken) + infoGap + infoSide
+        val btnGap = Fonts.px(12f)
+        val startW = max(Fonts.px(100f), Fonts.textWidth(sectionFont, startLabel) + Fonts.px(40f))
+        val cancelW = max(Fonts.px(100f), Fonts.textWidth(sectionFont, cancelLabel) + Fonts.px(40f))
+
+        val spec = OverlayForm.Spec(
+            title = title,
+            minWidth = if (touch) max(Fonts.px(300f), screenW * 0.42f) else Fonts.px(300f),
+            actions = OverlayForm.Actions.Footer,
+            actionWidth = startW + cancelW + btnGap,
+            tailWidth = chickenW,
+            sections = { rhythm, _ ->
+                listOf(
+                    OverlayForm.Section(
+                        label = sectionRounds,
+                        contentWidth = roundsW,
+                        rows = List(roundOptions.size) { rhythm.rowH },
+                    ),
+                    OverlayForm.Section(
+                        label = sectionBots,
+                        contentWidth = botsW,
+                        rows = List(botOptions.size) { rhythm.rowH },
+                    ),
+                )
+            },
+            tail = { rhythm, rowWidth ->
+                listOf(
+                    OverlayForm.Block(
+                        chickenRowHeight(rhythm, rowWidth, labelChicken, checkInset, infoSide, infoGap),
+                    ),
+                )
+            },
         )
+        val geometry = form.layout(screenW, screenH, spec, scrollY)
+        val panel = geometry.panel
+        panelLeft = panel.left
+        panelBottom = panel.bottom
+        panelW = panel.width
+        panelH = panel.height
 
-        val avail = OverlayViewport.available(screenW, screenH)
-        val portrait = screenH > screenW
-        val maxPanelW = OverlayViewport.maxPanelWidth(
-            screenW * (if (portrait) 0.90f else 0.72f),
-            avail,
-            screenW,
-            Fonts.px(24f),
-        )
-        val minPanelW = if (touch) {
-            max(Fonts.px(300f), screenW * 0.42f).coerceAtMost(maxPanelW)
-        } else {
-            Fonts.px(300f).coerceAtMost(maxPanelW)
-        }
-        panelW = max(minPanelW, contentW + padX * 2f).coerceAtMost(maxPanelW)
-        panelW = panelW.coerceAtMost(avail.width)
-
-        // The chicken caption shares its row with the checkbox and the info
-        // control, so its slot is narrower than the card. Measure it here, before
-        // the body height or paint: a translation that cannot fit the slot at
-        // the readable floor wraps and grows the row instead of shrinking past
-        // the floor or running under the info button. Use the body's stable
-        // width, with the scrollbar strip already removed: this runs before
-        // fitAndPlace knows whether the body will overflow, and the row height
-        // must not shrink when the bar appears.
-        val stableContentW = body.measureWidth(panelW, padX * 2f)
-        val stableCheckRowW = (stableContentW - infoSide - infoGap).coerceAtLeast(Fonts.px(120f))
-        val checkLabelInset = Fonts.px(4f) + Fonts.px(22f) + Fonts.px(14f)
-        val checkLabelW = (stableCheckRowW - checkLabelInset).coerceAtLeast(1f)
-        glyphLayout.setText(
-            sectionFont, labelChicken, Color.WHITE, checkLabelW, Align.left, true,
-        )
-        val chickenRowH = max(checkH, glyphLayout.height + Fonts.px(18f))
-
-        val divH = max(1f, Fonts.px(1.5f))
-        val chromeH = padY + titleFont.lineHeight + titleGap + blockGap + btnH + padY
-        val bodyContentH = sectionFont.lineHeight + sectionLabelGap + listH +
-            blockGap + divH + dividerGap + chickenRowH
-        val bodyInset = padY + btnH + blockGap
-        val fitted = body.fitAndPlace(
-            avail = avail,
-            panelW = panelW,
-            chromeH = chromeH,
-            bodyContentH = bodyContentH,
-            bodyInset = bodyInset,
-            scrollY = scrollY,
-        )
-        panelH = fitted.cardH
-        panelLeft = fitted.left
-        panelBottom = fitted.bottom
-
-        val contentLeft = panelLeft + padX
-        // Current frame's content width, after fitAndPlace has decided whether
-        // the body overflows. The caption's height was reserved against the
-        // stable width, so a wider slot here can only give it fewer lines.
-        val contentWInner = body.contentWidth(panelW, padX * 2f, Fonts.px(48f))
-        val checkRowW = (contentWInner - infoSide - infoGap).coerceAtLeast(Fonts.px(120f))
-
-        // Card.
         OverlayChrome.drawPanel(
-            batch, px, panelLeft, panelBottom, panelW, panelH,
+            batch, px, panel.left, panel.bottom, panel.width, panel.height,
             AppPalette.panel,
         )
 
-        // Title (sticky).
+        // Title. In compact density the action pair moves into the header, so the
+        // title takes the slot left of it; otherwise it is centred on the card.
         glyphLayout.setText(titleFont, title)
-        titleFont.draw(
-            batch,
-            title,
-            panelLeft + (panelW - glyphLayout.width) * 0.5f,
-            panelBottom + panelH - padY,
-        )
+        val titleX = if (geometry.actions == OverlayForm.Actions.Header) {
+            geometry.title.left
+        } else {
+            panel.left + (panel.width - glyphLayout.width) * 0.5f
+        }
+        titleFont.draw(batch, title, titleX, geometry.header.top)
 
         val hoverX = body.hoverX(pointerWorldX)
         val hoverY = body.hoverY(pointerWorldY)
 
-        body.drawBody(batch, camera, px, pointerWorldX, pointerWorldY) {
-            var yTop = body.contentTop
-            glyphLayout.setText(sectionFont, sectionRounds)
-            sectionFont.color = AppPalette.inkMuted
-            sectionFont.draw(batch, sectionRounds, contentLeft, yTop)
-            sectionFont.color = Color.WHITE
-            yTop -= sectionFont.lineHeight + sectionLabelGap
-
-            val groupBottom = yTop - listH
-            drawRadioList(
-                batch = batch,
-                px = px,
-                left = contentLeft,
-                bottom = groupBottom,
-                w = contentWInner,
-                h = listH,
-                rowH = rowH,
-                rowGap = rowGap,
-                groupPad = groupPad,
-                pointerWorldX = hoverX,
-                pointerWorldY = hoverY,
+        val roundRows = roundOptions.map { rounds ->
+            RadioRow(
+                label = roundOptionLabel(rounds),
+                selected = draft.rules.rounds == rounds,
+                kind = HitKind.RoundsChoice,
+                roundsValue = rounds,
             )
-            yTop = groupBottom - blockGap
+        }
+        val botRows = botOptions.map { level ->
+            RadioRow(
+                label = botOptionLabel(level),
+                selected = draft.botLevel == level,
+                kind = HitKind.BotChoice,
+                botLevel = level,
+            )
+        }
 
-            batch.setColor(AppPalette.tint(AppPalette.rimInert, 0.45f))
-            batch.draw(px, contentLeft, yTop - divH, contentWInner, divH)
-            batch.setColor(Color.WHITE)
-            yTop -= divH + dividerGap
+        body.drawBody(batch, camera, px, pointerWorldX, pointerWorldY) {
+            for ((index, placement) in geometry.sections.withIndex()) {
+                placement.label?.let { label ->
+                    sectionFont.color = AppPalette.inkMuted
+                    sectionFont.draw(
+                        batch,
+                        if (index == 0) sectionRounds else sectionBots,
+                        label.left,
+                        label.top,
+                    )
+                    sectionFont.color = Color.WHITE
+                }
+                drawRadioGroup(
+                    rows = if (index == 0) roundRows else botRows,
+                    group = placement.group,
+                    rowRects = placement.rows,
+                    batch = batch,
+                    px = px,
+                    pointerWorldX = hoverX,
+                    pointerWorldY = hoverY,
+                )
+            }
 
-            val chickenBottom = yTop - chickenRowH
+            val chicken = geometry.tail.firstOrNull() ?: return@drawBody
+            val checkW = (chicken.width - infoSide - infoGap).coerceAtLeast(1f)
             drawCheckRow(
                 batch = batch,
                 px = px,
                 label = labelChicken,
-                checked = draft.allowChickenHands,
-                left = contentLeft,
-                bottom = chickenBottom,
-                w = checkRowW,
-                h = chickenRowH,
+                checked = draft.rules.allowChickenHands,
+                left = chicken.left,
+                bottom = chicken.bottom,
+                w = checkW,
+                h = chicken.height,
                 kind = HitKind.ChickenToggle,
                 pointerX = hoverX,
                 pointerY = hoverY,
             )
-            val infoLeft = contentLeft + checkRowW + infoGap
-            val infoBottom = chickenBottom + (chickenRowH - infoSide) * 0.5f
+            val infoLeft = chicken.left + checkW + infoGap
+            val infoBottom = chicken.bottom + (chicken.height - infoSide) * 0.5f
             chickenInfo.layoutAt(
                 left = infoLeft,
                 bottom = infoBottom,
@@ -520,66 +549,90 @@ class NewGameSetupOverlay(
             chickenInfo.render(batch, px, hoverX, hoverY)
         }
 
-        // --- Action buttons (sticky footer) ---
-        val btnBottom = panelBottom + padY
-        glyphLayout.setText(sectionFont, startLabel)
-        val startW = max(Fonts.px(100f), glyphLayout.width + Fonts.px(40f))
-        glyphLayout.setText(sectionFont, cancelLabel)
-        val cancelW = max(Fonts.px(100f), glyphLayout.width + Fonts.px(40f))
-        val pairW = startW + cancelW + btnGap
-        val pairLeft = panelLeft + (panelW - pairW) * 0.5f
-        drawActionButton(
-            batch, px, startLabel, pairLeft, btnBottom, startW, btnH,
-            pointerWorldX, pointerWorldY, primary = true, HitKind.Start,
-        )
-        drawActionButton(
-            batch, px, cancelLabel, pairLeft + startW + btnGap, btnBottom, cancelW, btnH,
-            pointerWorldX, pointerWorldY, primary = false, HitKind.Cancel,
-        )
+        // Actions: a footer while comfortable, the header when the card had to go
+        // compact. Both read the slot the form measured, so paint and hit agree.
+        if (geometry.actions == OverlayForm.Actions.Header) {
+            val trailing = geometry.trailing
+            if (trailing != null) {
+                drawActionButton(
+                    batch, px, startLabel, trailing.left, trailing.bottom,
+                    startW, trailing.height,
+                    pointerWorldX, pointerWorldY, primary = true, HitKind.Start,
+                )
+                drawActionButton(
+                    batch, px, cancelLabel, trailing.left + startW + btnGap, trailing.bottom,
+                    cancelW, trailing.height,
+                    pointerWorldX, pointerWorldY, primary = false, HitKind.Cancel,
+                )
+            }
+        } else {
+            val footer = geometry.footer
+            if (footer != null) {
+                val pairW = startW + cancelW + btnGap
+                val pairLeft = footer.left + (footer.width - pairW) * 0.5f
+                drawActionButton(
+                    batch, px, startLabel, pairLeft, footer.bottom,
+                    startW, footer.height,
+                    pointerWorldX, pointerWorldY, primary = true, HitKind.Start,
+                )
+                drawActionButton(
+                    batch, px, cancelLabel, pairLeft + startW + btnGap, footer.bottom,
+                    cancelW, footer.height,
+                    pointerWorldX, pointerWorldY, primary = false, HitKind.Cancel,
+                )
+            }
+        }
     }
 
     /**
-     * Framed exclusive choice: vertical radio list (1 / 2 / 4 / Unlimited),
-     * not independent checkboxes.
+     * The chicken row's height at [rowWidth]: a translation that cannot fit its
+     * slot wraps and grows the row instead of shrinking past the readable floor
+     * or running under the info control.
      */
-    private fun drawRadioList(
+    private fun chickenRowHeight(
+        rhythm: OverlayForm.Rhythm,
+        rowWidth: Float,
+        label: String,
+        checkInset: Float,
+        infoSide: Float,
+        infoGap: Float,
+    ): Float {
+        val labelW = (rowWidth - infoSide - infoGap - checkInset).coerceAtLeast(1f)
+        glyphLayout.setText(Fonts.button, label, Color.WHITE, labelW, Align.left, true)
+        return max(rhythm.rowH, glyphLayout.height + Fonts.px(18f))
+    }
+
+    /**
+     * Framed exclusive choice: a vertical radio list, painted at the rects the
+     * form measured.
+     */
+    private fun drawRadioGroup(
+        rows: List<RadioRow>,
+        group: Rect,
+        rowRects: List<Rect>,
         batch: SpriteBatch,
         px: Texture,
-        left: Float,
-        bottom: Float,
-        w: Float,
-        h: Float,
-        rowH: Float,
-        rowGap: Float,
-        groupPad: Float,
         pointerWorldX: Float,
         pointerWorldY: Float,
     ) {
         // Group well — recessed frame so options read as one control.
         OverlayChrome.drawPanel(
-            batch, px, left, bottom, w, h,
+            batch, px, group.left, group.bottom, group.width, group.height,
             AppPalette.panelDeep,
             AppPalette.tint(AppPalette.controlRim, 0.50f),
             OverlayChrome.buttonRimPx(),
         )
 
-        val innerLeft = left + groupPad
-        val innerW = w - groupPad * 2f
-        val n = roundOptions.size
-        // Top-to-bottom order: index 0 at the top of the group.
-        for (i in roundOptions.indices) {
-            val rounds = roundOptions[i]
-            val rowBottom = bottom + groupPad + (n - 1 - i) * (rowH + rowGap)
+        for ((index, row) in rows.withIndex()) {
+            val rect = rowRects.getOrNull(index) ?: continue
             drawRadioRow(
+                row = row,
                 batch = batch,
                 px = px,
-                label = roundOptionLabel(rounds),
-                selected = draft.rounds == rounds,
-                left = innerLeft,
-                bottom = rowBottom,
-                w = innerW,
-                h = rowH,
-                roundsValue = rounds,
+                left = rect.left,
+                bottom = rect.bottom,
+                w = rect.width,
+                h = rect.height,
                 pointerX = pointerWorldX,
                 pointerY = pointerWorldY,
             )
@@ -587,22 +640,29 @@ class NewGameSetupOverlay(
     }
 
     private fun drawRadioRow(
+        row: RadioRow,
         batch: SpriteBatch,
         px: Texture,
-        label: String,
-        selected: Boolean,
         left: Float,
         bottom: Float,
         w: Float,
         h: Float,
-        roundsValue: Int?,
         pointerX: Float,
         pointerY: Float,
     ) {
-        hits += Hit(HitKind.RoundsChoice, left, bottom, w, h, roundsValue = roundsValue)
+        hits += Hit(
+            row.kind,
+            left,
+            bottom,
+            w,
+            h,
+            roundsValue = row.roundsValue,
+            botLevel = row.botLevel,
+        )
         val hovered =
             !pointerX.isNaN() && !pointerY.isNaN() &&
                 hits.last().contains(pointerX, pointerY)
+        val selected = row.selected
 
         if (selected || hovered) {
             val bg = when {
@@ -644,7 +704,7 @@ class NewGameSetupOverlay(
         FittedLabel.draw(
             batch = batch,
             font = font,
-            text = label,
+            text = row.label,
             left = textLeft,
             centerY = bottom + h * 0.5f,
             maxWidth = (left + w - textLeft).coerceAtLeast(1f),
@@ -759,6 +819,13 @@ class NewGameSetupOverlay(
     private fun roundOptionLabel(rounds: Int?): String =
         rounds?.toString() ?: L10n.get("setup.unlimited")
 
+    /** The label for one bot row. */
+    private fun botOptionLabel(level: BotLevel): String = when (level) {
+        BotLevel.NOVICE -> L10n.get("setup.bots.novice")
+        BotLevel.BEGINNER -> L10n.get("setup.bots.beginner")
+        BotLevel.STANDARD -> L10n.get("setup.bots.standard")
+    }
+
     companion object {
         internal const val SELECT_START = "start"
         internal const val SELECT_CANCEL = "cancel"
@@ -766,5 +833,12 @@ class NewGameSetupOverlay(
 
         /** The local setup's radio: 1 / 2 / 4 / Unlimited (`null` = Unlimited). */
         val DEFAULT_ROUND_OPTIONS: List<Int?> = listOf(1, 2, GameConfig.DEFAULT_ROUNDS, null)
+
+        /** Novice, Beginner, Standard; the draft's default is Standard. */
+        val DEFAULT_BOT_OPTIONS: List<BotLevel> = listOf(
+            BotLevel.NOVICE,
+            BotLevel.BEGINNER,
+            BotLevel.STANDARD,
+        )
     }
 }

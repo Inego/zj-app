@@ -103,7 +103,8 @@ data class SettingsGeometry(
  */
 class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
     private val glyphLayout = GlyphLayout()
-    private val body = OverlayBodyScroll()
+    private val form = OverlayForm()
+    private val body = form.body
 
     private fun whitePixel(): Texture = WhitePixel.get()
 
@@ -468,10 +469,6 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
         val emailLabel = L10n.get("settings.email_opt_in")
         val digestLabel = L10n.get("settings.digest_interval")
 
-        val padX = Fonts.px(28f)
-        val padY = Fonts.px(20f)
-        val titleGap = Fonts.px(16f)
-        rowH = max(Fonts.px(44f), rowFont.lineHeight + Fonts.px(18f))
         val sliderH = max(Fonts.px(58f), rowFont.lineHeight + Fonts.px(38f))
         val rowGap = Fonts.px(10f)
 
@@ -518,61 +515,74 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
             0f
         }
         val sliderContentW = max(sliderHeaderWidth(volumeLabel, ""), digestHeaderW)
-
-        glyphLayout.setText(titleFont, title)
-        val contentW = max(glyphLayout.width, max(rowContentW, sliderContentW))
-
-        val avail = OverlayViewport.available(screenW, screenH)
-        val portrait = screenH > screenW
-        val maxPanelW = OverlayViewport.maxPanelWidth(
-            screenW * (if (portrait) 0.88f else 0.72f),
-            avail,
-            screenW,
-            Fonts.px(24f),
-        )
-        panelW = max(Fonts.px(280f), contentW + padX * 2f)
-            .coerceAtMost(maxPanelW)
-            .coerceAtMost(avail.width)
-        // Row labels wrap to the row's text width: a translation longer than the
-        // panel grows its row instead of running past the rim. The scrollbar's
-        // strip is reserved whether or not it shows, so a row's height cannot
-        // change the moment the body starts overflowing.
-        val rowLabelInset = Fonts.px(4f) + checkBox + checkGap
-        val rowLabelAvail = (
-            panelW - padX * 2f - VerticalScrollbar.gutterWidth() - rowLabelInset
-        ).coerceAtLeast(1f)
-        fun wrappedRowH(label: String): Float {
-            glyphLayout.setText(rowFont, label, Color.WHITE, rowLabelAvail, Align.left, true)
-            return max(rowH, glyphLayout.height + Fonts.px(18f))
-        }
-        tileRowH = wrappedRowH(tileLabelsLabel)
-        soundsRowH = wrappedRowH(soundsLabel)
-        emailRowH = if (notificationsVisible) wrappedRowH(emailLabel) else 0f
+        val contentW = max(Fonts.textWidth(titleFont, title), max(rowContentW, sliderContentW))
         // Keep each slider's header fitted to the widest value it can show, so
         // the scale does not breathe as the digest cadence changes.
         slider.headerFitWidth = sliderHeaderRunW(volumeLabel, "")
         digestSlider.headerFitWidth = digestHeaderRunW
-        val rowsH = tileRowH + rowGap + soundsRowH + rowGap + sliderH
-        val notifH = if (notificationsVisible) {
-            rowGap + emailRowH + rowGap + sliderH
-        } else {
-            0f
-        }
-        // The whole column scrolls: title, close and rows share one offset, with
-        // only the card's rim fixed. The viewport is therefore the card's inner
-        // box, and the rows start below the title's band inside it.
-        val topChrome = padY + titleFont.lineHeight + titleGap
-        val chromeH = topChrome + padY
-        val fitted = body.fitWholeCard(
-            avail = avail,
-            panelW = panelW,
-            chromeH = chromeH,
-            bodyContentH = rowsH + notifH,
-            scrollY = scrollY,
+
+        val closeInset = CloseButton.cornerInset()
+        val closeSide = CloseButton.defaultSide()
+        val spec = OverlayForm.Spec(
+            title = title,
+            minWidth = Fonts.px(280f),
+            chrome = OverlayForm.Chrome.WholeCard,
+            closeWidth = closeInset + closeSide + Fonts.px(10f),
+            closeHeight = closeSide,
+            sections = { rhythm, rowWidth ->
+                val labelInset = Fonts.px(4f) + checkBox + checkGap
+                val labelAvail = (rowWidth - labelInset).coerceAtLeast(1f)
+                fun wrappedRowH(label: String): Float {
+                    glyphLayout.setText(rowFont, label, Color.WHITE, labelAvail, Align.left, true)
+                    return max(rhythm.rowH, glyphLayout.height + Fonts.px(18f))
+                }
+                val rows = ArrayList<Float>(5)
+                rows += wrappedRowH(tileLabelsLabel)
+                rows += wrappedRowH(soundsLabel)
+                rows += sliderH
+                if (notificationsVisible) {
+                    rows += wrappedRowH(emailLabel)
+                    rows += sliderH
+                }
+                listOf(
+                    OverlayForm.Section(
+                        label = null,
+                        contentWidth = contentW,
+                        rows = rows,
+                        groupPad = 0f,
+                        rowGap = rowGap,
+                    ),
+                )
+            },
         )
-        panelH = fitted.cardH
-        panelLeft = fitted.left
-        panelBottom = fitted.bottom
+        val geometry = form.layout(screenW, screenH, spec, scrollY)
+        val panel = geometry.panel
+        panelLeft = panel.left
+        panelBottom = panel.bottom
+        panelW = panel.width
+        panelH = panel.height
+
+        // Row rects are the form's; the hit-test predicates read them, so a press
+        // and the pixel it sees can never disagree.
+        val rows = geometry.sections.firstOrNull()?.rows.orEmpty()
+        val tileRect = rows.getOrNull(0)
+        val soundsRect = rows.getOrNull(1)
+        val volumeRect = rows.getOrNull(2)
+        val emailRect = if (notificationsVisible) rows.getOrNull(3) else null
+        val digestRect = if (notificationsVisible) rows.getOrNull(4) else null
+        if (tileRect != null) {
+            rowLeft = tileRect.left
+            rowW = tileRect.width
+            rowH = tileRect.height
+            tileRowH = tileRect.height
+            tileRowBottom = tileRect.bottom
+        }
+        if (soundsRect != null) {
+            soundsRowH = soundsRect.height
+            soundsRowBottom = soundsRect.bottom
+        }
+        emailRowH = emailRect?.height ?: 0f
+        emailRowBottom = emailRect?.bottom ?: 0f
 
         OverlayChrome.drawPanel(
             batch, px, panelLeft, panelBottom, panelW, panelH,
@@ -582,78 +592,76 @@ class SettingsOverlay : Disposable, GestureSurface<SettingsVerdict> {
         // Rows read top-down under the title: tile labels, sounds, volume, then
         // the signed-in notification section. They live in the scroll column with
         // the title, so a short window scrolls instead of pushing a row off-screen.
-        rowLeft = panelLeft + padX
-        this.rowW = body.contentWidth(panelW, padX * 2f, Fonts.px(24f))
         val hoverX = body.hoverX(pointerWorldX)
         val hoverY = body.hoverY(pointerWorldY)
         body.drawBody(batch, camera, px, pointerWorldX, pointerWorldY) {
-            val contentTop = body.contentTop
             // Chrome belongs to the column: it sits at the content's top and is
             // clipped with the rows by the card's inner box.
             glyphLayout.setText(titleFont, title)
             titleFont.draw(
                 batch,
                 title,
-                panelLeft + (panelW - glyphLayout.width) * 0.5f,
-                contentTop - padY,
+                geometry.title.left + (geometry.title.width - glyphLayout.width) * 0.5f,
+                geometry.header.top,
             )
 
-            closeButton.layoutTopRight(panelLeft, contentTop - panelH, panelW, panelH)
-            closeButton.render(
-                batch = batch,
-                whitePixel = px,
-                pointerWorldX = pointerWorldX,
-                pointerWorldY = pointerWorldY,
-            )
-
-            var top = contentTop - topChrome
-
-            tileRowBottom = top - tileRowH
-            drawCheckRow(
-                batch, px, tileLabelsLabel, showTileLabels, tileRowBottom,
-                isOnTileLabelRow(hoverX, hoverY),
-                rowHeight = tileRowH,
-            )
-            top = tileRowBottom - rowGap
-
-            soundsRowBottom = top - soundsRowH
-            drawCheckRow(
-                batch, px, soundsLabel, soundsEnabled, soundsRowBottom,
-                isOnSoundsRow(hoverX, hoverY),
-                rowHeight = soundsRowH,
-            )
-            top = soundsRowBottom - rowGap
-
-            slider.label = volumeLabel
-            slider.valueText = ""
-            slider.stepLabels = emptyList()
-            if (!slider.isDragging) slider.setValue(soundVolume)
-            slider.layout(rowLeft, top - sliderH, this.rowW, sliderH)
-            slider.render(
-                batch,
-                px,
-                pointerWorldX = hoverX,
-                pointerWorldY = hoverY,
-                muted = !soundsEnabled,
-            )
-
-            if (notificationsVisible) {
-                top = top - sliderH - rowGap
-                emailRowBottom = top - emailRowH
-                drawCheckRow(
-                    batch, px, emailLabel, emailOptIn, emailRowBottom,
-                    isOnEmailRow(hoverX, hoverY),
-                    rowHeight = emailRowH,
+            geometry.trailing?.let { trailing ->
+                closeButton.layoutAt(trailing.left, trailing.bottom, closeSide)
+                closeButton.render(
+                    batch = batch,
+                    whitePixel = px,
+                    pointerWorldX = pointerWorldX,
+                    pointerWorldY = pointerWorldY,
                 )
-                top = emailRowBottom - rowGap
+            }
 
+            if (tileRect != null) {
+                drawCheckRow(
+                    batch, px, tileLabelsLabel, showTileLabels, tileRect.bottom,
+                    isOnTileLabelRow(hoverX, hoverY),
+                    rowHeight = tileRect.height,
+                )
+            }
+
+            if (soundsRect != null) {
+                drawCheckRow(
+                    batch, px, soundsLabel, soundsEnabled, soundsRect.bottom,
+                    isOnSoundsRow(hoverX, hoverY),
+                    rowHeight = soundsRect.height,
+                )
+            }
+
+            if (volumeRect != null) {
+                slider.label = volumeLabel
+                slider.valueText = ""
+                slider.stepLabels = emptyList()
+                if (!slider.isDragging) slider.setValue(soundVolume)
+                slider.layout(volumeRect.left, volumeRect.bottom, volumeRect.width, volumeRect.height)
+                slider.render(
+                    batch,
+                    px,
+                    pointerWorldX = hoverX,
+                    pointerWorldY = hoverY,
+                    muted = !soundsEnabled,
+                )
+            }
+
+            if (emailRect != null) {
+                drawCheckRow(
+                    batch, px, emailLabel, emailOptIn, emailRect.bottom,
+                    isOnEmailRow(hoverX, hoverY),
+                    rowHeight = emailRect.height,
+                )
+            }
+
+            if (digestRect != null) {
                 digestSlider.label = digestLabel
                 digestSlider.stepLabels = emptyList()
                 if (!digestSlider.isDragging) {
                     digestSlider.setValue(NotificationPrefsScale.stepFor(digestIntervalHours))
                 }
                 digestSlider.valueText = digestIntervalText(digestSlider.value)
-                digestSlider.layout(rowLeft, top - sliderH, this.rowW, sliderH)
+                digestSlider.layout(digestRect.left, digestRect.bottom, digestRect.width, digestRect.height)
                 digestSlider.render(
                     batch,
                     px,

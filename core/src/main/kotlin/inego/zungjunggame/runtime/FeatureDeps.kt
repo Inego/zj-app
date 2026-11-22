@@ -2,7 +2,7 @@ package inego.zungjunggame.runtime
 
 import com.badlogic.gdx.graphics.Camera
 import com.badlogic.gdx.graphics.OrthographicCamera
-import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.engine.SessionScoreTable
 import inego.zungjunggame.features.board.BoardChrome
 import inego.zungjunggame.features.board.BoardPane
@@ -97,7 +97,7 @@ class FeatureDeps(
     val routeUiState: RouteUiState = RouteUiState(),
 
     val newGameSetupOverlay: () -> NewGameSetupOverlay = { NewGameSetupOverlay() },
-    val newGameConfig: () -> GameConfig = { GameConfig.DEFAULT },
+    val newGameConfig: () -> LocalGameConfig = { LocalGameConfig() },
 
     val scoreTableOverlay: () -> ScoreTableOverlay = { ScoreTableOverlay() },
 

@@ -22,10 +22,10 @@ app/             composition root, dispatcher, effects
 |---|---|---|
 | `GameState` | Wall, hands, melds, rivers, whose turn, legal `Choice`s, Hu score, terminal | Widgets, animation, “should I pung?” |
 | `Scoring` / `ZjSettlement` | Pattern points; who pays whom | Whether Hu is offered (that is enumerate) |
-| `GameConfig` / `GameSession` | Rounds, patternless-hand flag, East rotation, score table | Tile motion |
+| `GameConfig` / `LocalGameConfig` / `GameSession` | Rounds, patternless-hand flag, local bot level, East rotation, score table | Tile motion |
 | `BoardController` | The only commit path: enumerate → optional gate → `applyChoice` | Drawing, narration |
 | `LocalEventEmitter` | What an applied choice *was*: the transitions, in the server's own vocabulary | Deciding legality, cues |
-| `PlayingEngine` (`DefaultEngine`) | Pick an index into a **legal** list | Inventing moves |
+| `PlayingEngine` (`DefaultEngine` / `GreedyMeldEngine` / `PairHunterEngine`) | Pick an index into a **legal** list | Inventing moves |
 | `BoardComponent` / `BoardFeature` | Publish `Layout` (hit / gesture regions); map `ComponentAction` → `Intent` (`BoardController` commits) | Changing legality |
 | `PlayTableView` / `ClaimActionPanel` | Draw the current list (widgets only) | Input mapping, legality |
 | Tutorial `ChoiceGate` | Subset of legal moves the lesson allows | A second rules engine |
@@ -36,7 +36,7 @@ Headless self-play (`GameplayLoop`) uses the same enumerate → pick → apply l
 
 ## Source of truth: one hand
 
-A **hand** is a `GameState`. A **game** is a `GameConfig` plus a `SessionScoreTable` of finished hands (`GameSession`).
+A **hand** is a `GameState`. A **game** is a `GameConfig` plus a `SessionScoreTable` of finished hands (`GameSession`). A **local** game's setup is `LocalGameConfig`: those rules plus the bot level, which is a property of the table rather than of Zung Jung.
 
 `GameState` is a mutable board:
 
@@ -148,6 +148,8 @@ House knobs for a whole game, not a hand:
 
 Finite game ends when `scores.handCount` reaches `rounds * 4`. Next-hand / New Game is session + UI, not `GameState`.
 
+A local New Game also picks a **bot level** (`LocalGameConfig.botLevel`: Novice, Beginner or Standard). It is deliberately not a `GameConfig` field: `GameConfig` is also the online hub's matchmaking draft, where opponent strength is the server's, not the player's.
+
 ### Display preferences (`UiPreferences`) — deliberately not `GameConfig`
 
 `persist/UiPreferences` (the versioned `UiPreferencesKey` on the `zj-state`
@@ -223,11 +225,13 @@ remain untimed.
 
 ### Bots and hints
 
-`DefaultEngine` is policy. It receives an already-legal `ChoiceList` and returns an index (`rank` = all co-best, no RNG; `select` RNG-breaks ties). HINT highlights `rank`; on desktop UCB flat MC playouts refine it to the best average score delta (avgΔ / n labels), and a second press plays a unique co-best. Ctrl+Space AI assist calls the same picker on the human seat.
+`DefaultEngine` is the **Standard** policy and the only advice policy. It receives an already-legal `ChoiceList` and returns an index (`rank` = all co-best, no RNG; `select` RNG-breaks ties). HINT highlights `rank`; on desktop UCB flat MC playouts refine it to the best average score delta (avgΔ / n labels), and a second press plays a unique co-best. Ctrl+Space AI assist calls the same picker on the human seat.
 
 MC playouts need a preemptive worker thread, so they are desktop only (`platform.McHints`: off on Android — the worker competes with the GL thread and the search is slow there — and off on WasmGC, where `Thread.start` is a cooperative fiber that a playout loop would never yield, freezing the tab). Everywhere else HINT is `rank` only.
 
-Bots do not bypass rules. They cannot pung if enumerate did not offer Pung.
+New Game offers two weaker policies alongside **Standard** (`DefaultEngine`, 1200 Elo), mapped from `BotLevel` in `AppGraph`: **Beginner** (`GreedyMeldEngine`, ~983 Elo — myopic greedy meld extraction with eager calling) and **Novice** (`PairHunterEngine`, ~840 Elo — only the head pair is understood; every legal call and Kong is clicked immediately). Both ignore ZJ patterns and the river, play regular hands only, and always take a legal Hu. `:core:engineBattle` measures the ladder under the novice ruleset, where patternless (chicken) hands are always allowed. The level is a property of the local game (`LocalGameConfig.botLevel`, persisted with the game), and the non-human picker resolves the policy from the live game on every decision, so a resumed game keeps its level without reinstalling anything. Online tables and tutorials are unchanged.
+
+All engines are policy only: an engine receives the choices enumerate already allowed and returns an index. Bots do not bypass rules. They cannot pung if enumerate did not offer Pung.
 
 ### Scores on screen
 
@@ -241,12 +245,12 @@ When the card also carries **rating deltas**, the place is that table's caption,
 
 Three blocks are **parkable** — pressed and dragged out of the way on a small screen: the hand-end score card, the board's HINT button, and the claim/action row. They share one tool: `ParkableChrome` (the contract), `ParkDrag` (press → slop → park, and the single clamp in `ParkGeometry.place`), and `ParkChromeGroup` (which of the board's blocks owns a press — first in tap order). The owning component publishes the blocks as `Layout.gestureRegions` and is the `GestureHost` for them, so a release the block does not consume falls back to an ordinary tap — tapping a claim or HINT still acts. Parking never changes what a control *does* — only where it is. The place is the player's, so each block's committed offset is model state (`ui.prefs`, beside the score card's): the board hands the stored places in when it appears and reports the offset a moved block was left at; the widget keeps only the in-flight drag.
 
-New Game setup writes `GameConfig`; Cancel keeps an in-memory draft. Start picks a random dealer (`nextEastSeat`), so the human's first wind is random; East then rotates one seat per hand.
+New Game setup writes `LocalGameConfig` (rules + bot level); Cancel keeps an in-memory draft. Start picks a random dealer (`nextEastSeat`), so the human's first wind is random; East then rotates one seat per hand.
 
 ### Persist
 
 Free-play snapshots the live `GameState` plus score rows, `nextEastSeat`, and config
-(`SessionSnapshotSchema`, the `session.freeplay` key on the `zj-files` container).
+(including the local bot level) through `SessionSnapshotSchema`, the `session.freeplay` key on the `zj-files` container.
 That is a dump of engine fields, not a move log. Tutorial has its own key
 (`session.tutorial`). The two contexts keep **separate boards and separate
 saves**: opening the tutorial leaves a parked local game's board and
@@ -408,6 +412,7 @@ into the assertion.
 | `engine/Scoring.kt` / `ScoringDetail.kt` | Pattern points |
 | `engine/ZjSettlement.kt` | Payments |
 | `engine/GameConfig.kt` | Game-level knobs |
+| `engine/LocalGameConfig.kt` | Local game config: ZJ rules + bot level |
 | `engine/SessionScoreTable.kt` | Multi-hand totals |
 | `engine/GameplayLoop.kt` | Headless four-engine game |
 | `session/board/BoardController.kt` | Enumerate / gate / apply |
@@ -417,11 +422,14 @@ into the assertion.
 | `session/online/OnlinePlayHost.kt` | WebSocket client host for online tables |
 | `session/online/OnlineStateMapper.kt` | Wire snapshot → `TableViewState` / `PresentationFrame` |
 | `session/online/PresentationSequencer.kt` | The one transition queue, pacing, and prompt latching both modes drive |
-| `engines/DefaultEngine.kt` | Table AI / hint policy |
+| `engines/DefaultEngine.kt` | Standard bot / hint policy (1200 Elo) |
+| `engines/GreedyMeldEngine.kt` | Beginner bot policy (~983 Elo): myopic greedy meld extraction, eager calling |
+| `engines/PairHunterEngine.kt` | Novice bot policy (~840 Elo): one-pair tunnel vision, shiny-button calls |
 | `render/PlayTableView.kt` | Board from `GameState`; human-turn predicates |
 | `render/ClaimActionPanel.kt` | Buttons from `ChoiceList` |
 | `features/score/ScoreBreakdownOverlay.kt` | Pattern + settlement card |
 | `render/ParkableChrome.kt` | Movable-block contract (`ParkRelease`) for the board's HINT button / claim row and the hand-end card |
 | `render/ui/ParkDrag.kt` | Press → slop → park state machine + the shared park clamp |
 | `render/ui/ParkChromeGroup.kt` | One press routed to the first of several movable blocks |
+| `render/ui/OverlayForm.kt` | Shared modal-card layout: content-sized width, one column or two, comfortable/compact rhythm, header actions, scroll fallback |
 | `app/AppRuntime.kt` | Input pipeline → `ComponentAction` → `Intent`; the site that resolves input and dispatches intents |

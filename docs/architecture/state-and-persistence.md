@@ -98,7 +98,7 @@ of deleting it.
 |---|---|
 | `stack.state` | `StackState` — routes, args, resolved policy, per-route UI text |
 | `session.freeplay` / `session.tutorial` | `SessionSnapshot` / `TutorialSessionSnapshot` |
-| `game.prefs` / `ui.prefs` / `ui.locale` | `GameConfig` / `UiPreferences` / `AppLocale` |
+| `game.prefs` / `ui.prefs` / `ui.locale` | `LocalGameConfig` / `UiPreferences` / `AppLocale` |
 | `online.find` / `online.table` | `FindGamePreferences` / last table id (empty = none) |
 | `ui.remembered` | last value of each remembering route |
 | `notification.prefs` | last server-confirmed notification settings |

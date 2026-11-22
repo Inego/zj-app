@@ -1,8 +1,8 @@
 package inego.zungjunggame.session
 
 import inego.zungjunggame.ui.stack.SessionKind
-import inego.zungjunggame.engine.GameConfig
 import inego.zungjunggame.engine.GameState
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.engine.NUM_PLAYERS
 import inego.zungjunggame.engine.SessionScoreTable
 import inego.zungjunggame.persist.SessionSnapshot
@@ -33,7 +33,7 @@ import kotlin.random.Random
 class GameSession(
     private val sessionSlot: StateSlot<SessionSnapshot>,
     /** Last committed New Game config; this session owns when it is written. */
-    private val gameConfigSlot: StateSlot<GameConfig>,
+    private val gameConfigSlot: StateSlot<LocalGameConfig>,
     override val humanSeat: Int = 0,
     /**
      * Lazy persist gate. Evaluated per call so it can track the live
@@ -56,8 +56,8 @@ class GameSession(
 
     override val active: Boolean get() = gameActive
 
-    /** Rules for the current game (set on Start / restore). */
-    var gameConfig: GameConfig = GameConfig.DEFAULT
+    /** Rules and bot level for the current game (set on Start / restore). */
+    var gameConfig: LocalGameConfig = LocalGameConfig()
         private set
 
     /** Multi-hand ZJ score history (absolute seats 0..3). */
@@ -85,7 +85,7 @@ class GameSession(
 
     /** Finite game finished every configured hand. */
     fun isGameComplete(): Boolean {
-        val max = gameConfig.maxHands ?: return false
+        val max = gameConfig.rules.maxHands ?: return false
         return scores.handCount >= max
     }
 
@@ -94,7 +94,7 @@ class GameSession(
      * (used for the hand-end CTA while that hand is still showing).
      */
     fun isLastHandOfGame(): Boolean {
-        val max = gameConfig.maxHands ?: return false
+        val max = gameConfig.rules.maxHands ?: return false
         val handNum =
             if (currentHandRecorded) scores.handCount
             else scores.handCount + 1
@@ -119,7 +119,7 @@ class GameSession(
      * @return [DealResult.Dealt] for the first hand, or a terminal outcome if
      *   the config cannot deal (should not happen for a fresh start).
      */
-    fun startGame(config: GameConfig): DealResult {
+    fun startGame(config: LocalGameConfig): DealResult {
         gameConfig = config
         gameConfigSlot.set(config)
         scores.clear()
@@ -157,7 +157,7 @@ class GameSession(
         _state = GameState.generateRandom(
             Random(dealSeed),
             eastSeat = nextEastSeat,
-            allowChickenHands = gameConfig.allowChickenHands,
+            allowChickenHands = gameConfig.rules.allowChickenHands,
         )
         // Next hand: dealer / East advances to the next seat.
         nextEastSeat = (nextEastSeat + 1) % NUM_PLAYERS
@@ -219,7 +219,8 @@ class GameSession(
             nextEastSeat = nextEastSeat,
             currentHandRecorded = currentHandRecorded,
             dealSeed = dealSeed,
-            rounds = gameConfig.rounds,
+            rounds = gameConfig.rules.rounds,
+            botLevel = gameConfig.botLevel,
         )
     }
 

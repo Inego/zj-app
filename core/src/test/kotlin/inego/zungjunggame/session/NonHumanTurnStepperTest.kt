@@ -74,7 +74,7 @@ class NonHumanTurnStepperTest {
         assertEquals(DecisionType.ReactToDiscard, state.decisionType)
 
         val stepper = stepper(
-            picker = EngineNonHumanPicker(board, engine) { rng },
+            picker = EngineNonHumanPicker(board, { engine }) { rng },
             // Human is seat 0; during reaction, seats 1..3 are non-human until 0 would bid
             // (0 is discarder, never reacts). Treat only seat 0 ActOnHand as human.
             isHumanInteractiveTurn = { s ->
@@ -150,7 +150,7 @@ class NonHumanTurnStepperTest {
 
         val now = 0L
         val stepper = stepper(
-            picker = EngineNonHumanPicker(BoardController(), DefaultEngine()) { Random(0) },
+            picker = EngineNonHumanPicker(BoardController(), { DefaultEngine() }) { Random(0) },
             isHumanInteractiveTurn = { s ->
                 s.decisionType == DecisionType.ActOnHand && s.currentPlayer == 0
             },

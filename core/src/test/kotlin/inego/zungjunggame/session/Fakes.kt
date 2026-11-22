@@ -1,9 +1,9 @@
 package inego.zungjunggame.session
 
 import inego.zungjunggame.engine.Choice
-import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.engine.GameState
-import inego.zungjunggame.persist.GameConfigKey
+import inego.zungjunggame.persist.LocalGameConfigKey
 import inego.zungjunggame.persist.SessionSnapshot
 import inego.zungjunggame.persist.SessionSnapshotKey
 import inego.zungjunggame.session.hosts.ActionableDecision
@@ -22,7 +22,7 @@ import kotlin.random.Random
  */
 fun gameConfigSlot(
     backend: InMemoryStateBackend = InMemoryStateBackend(),
-): StateSlot<GameConfig> = StateSlot(DefaultStateStore(backend), GameConfigKey)
+): StateSlot<LocalGameConfig> = StateSlot(DefaultStateStore(backend), LocalGameConfigKey)
 
 /** Settable no-op [inego.zungjunggame.session.hosts.PlayHost] used by snapshot tests. */
 class FakeHost : PlayHost {

@@ -7,8 +7,12 @@ import com.badlogic.gdx.utils.TimeUtils
 import com.badlogic.gdx.utils.viewport.ScreenViewport
 import inego.zungjunggame.AppVersion
 import inego.zungjunggame.BootDiagnostics
-import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.BotLevel
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.engines.DefaultEngine
+import inego.zungjunggame.engines.GreedyMeldEngine
+import inego.zungjunggame.engines.PairHunterEngine
+import inego.zungjunggame.engines.PlayingEngine
 import inego.zungjunggame.features.board.BoardChrome
 import inego.zungjunggame.features.board.BoardRenderInput
 import inego.zungjunggame.features.board.FreePlayPresenter
@@ -56,7 +60,7 @@ import inego.zungjunggame.persist.AppLocaleKey
 import inego.zungjunggame.persist.AuthPersistedSessionKey
 import inego.zungjunggame.persist.DismissedFirstLoginPromptsKey
 import inego.zungjunggame.persist.FindGamePreferencesKey
-import inego.zungjunggame.persist.GameConfigKey
+import inego.zungjunggame.persist.LocalGameConfigKey
 import inego.zungjunggame.persist.NotificationPrefsKey
 import inego.zungjunggame.persist.OnlineTableIdKey
 import inego.zungjunggame.persist.ReferenceNavCodec
@@ -274,7 +278,7 @@ class AppGraph(
             tutorialSession = StateSlot(stateFiles, TutorialSessionSnapshotKey),
             account = StateSlot(stateStore, AuthPersistedSessionKey),
             onlineTableId = StateSlot(stateStore, OnlineTableIdKey),
-            game = StateSlot(stateStore, GameConfigKey),
+            game = StateSlot(stateStore, LocalGameConfigKey),
             ui = StateSlot(stateStore, UiPreferencesKey),
             locale = StateSlot(stateStore, AppLocaleKey),
             find = StateSlot(stateStore, FindGamePreferencesKey),
@@ -300,6 +304,17 @@ class AppGraph(
         val table = scope.own("table") { PlayTableView() }
         BootDiagnostics.mark("bootstrapApp:PlayTableView:done")
         val engine = DefaultEngine()
+        // Local bot strength. Hints / AI assist / MC playouts keep `engine`; only
+        // the bot seats read the game's level through this mapping.
+        val noviceEngine = PairHunterEngine()
+        val beginnerEngine = GreedyMeldEngine()
+        val engineForLevel: (BotLevel) -> PlayingEngine = { level ->
+            when (level) {
+                BotLevel.STANDARD -> engine
+                BotLevel.BEGINNER -> beginnerEngine
+                BotLevel.NOVICE -> noviceEngine
+            }
+        }
         // Render overlay ownership now lives here (composition root) rather than
         // inside FreePlayHost; the host drives them through session ports.
         val scoreOverlay = scope.own("scoreTable") { ScoreTableOverlay() }
@@ -408,7 +423,7 @@ class AppGraph(
 
             // Taking the draft and closing the card are one step: the route's state
             // dies with the route, so a read after the removal would see nothing.
-            override fun consumeDraft(): GameConfig? {
+            override fun consumeDraft(): LocalGameConfig? {
                 val stored = routeUiState.consume(setupRoute.key, SetupCardCodec)
                 routerHolder[0]?.remove(setupRoute.key)
                 return stored?.draft
@@ -481,7 +496,9 @@ class AppGraph(
                 ).isHumanInteractiveTurn
             },
             isAnimating = { table.isAnimating() },
-            picker = EngineNonHumanPicker(board, engine) { sessionRegistry.liveHand.choiceRng },
+            picker = EngineNonHumanPicker(board, { freePlayHost.botEngine() }) {
+                sessionRegistry.liveHand.choiceRng
+            },
             timing = BotTiming(),
             isHumanSeat = { it == sessionRegistry.playHost.humanSeat },
         )
@@ -493,6 +510,7 @@ class AppGraph(
                 initialSetupDraft = boot.game,
                 board = board,
                 engine = engine,
+                engineForLevel = engineForLevel,
                 nonHumanStepper = nonHumanStepper,
                 scoreOverlay = scoreTablePort,
                 breakdown = breakdownPort,
@@ -695,8 +713,8 @@ class AppGraph(
             board = board,
             onNextHand = { freePlayHost.requestNextHand(sessionRegistry.liveHand) },
             currentHandNumberProvider = { freePlayHost.session.currentHandNumber() },
-            maxHandsProvider = { freePlayHost.session.gameConfig.maxHands },
-            allowChickenHandsProvider = { freePlayHost.session.gameConfig.allowChickenHands },
+            maxHandsProvider = { freePlayHost.session.gameConfig.rules.maxHands },
+            allowChickenHandsProvider = { freePlayHost.session.gameConfig.rules.allowChickenHands },
         )
         tutorialHost = TutorialHost(
             board = board,

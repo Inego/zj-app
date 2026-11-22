@@ -3,6 +3,7 @@ package inego.zungjunggame.session
 import inego.zungjunggame.ui.stack.SessionKind
 import com.badlogic.gdx.files.FileHandle
 import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.i18n.LocaleController
 import inego.zungjunggame.session.board.BoardController
@@ -143,7 +144,7 @@ class HandStatusBadgeTest {
             gameConfigSlot = gameConfigSlot(),
             persistAllowed = { false },
         )
-        session.startGame(GameConfig(rounds = 1)) // 1 round = 4 hands
+        session.startGame(LocalGameConfig(GameConfig(rounds = 1))) // 1 round = 4 hands
 
         val host = LocalPlayHost(
             liveHand = session,
@@ -189,7 +190,7 @@ class HandStatusBadgeTest {
             gameConfigSlot = gameConfigSlot(),
             persistAllowed = { false },
         )
-        session.startGame(GameConfig(allowChickenHands = true))
+        session.startGame(LocalGameConfig(GameConfig(allowChickenHands = true)))
 
         val hostFromSession = LocalPlayHost(
             liveHand = session,

@@ -2,7 +2,8 @@ package inego.zungjunggame.session.hosts
 
 import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.audio.SoundCue
-import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.BotLevel
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.engines.PlayingEngine
 import inego.zungjunggame.persist.SessionSnapshot
 import inego.zungjunggame.session.DealResult
@@ -45,15 +46,22 @@ import kotlin.random.Random
  */
 class FreePlayHost(
     sessionSlot: StateSlot<SessionSnapshot>,
-    gameConfigSlot: StateSlot<GameConfig>,
+    gameConfigSlot: StateSlot<LocalGameConfig>,
     /**
      * The committed New Game config to open with. The cold start reads
      * `game.prefs` once (`AppState.game`) and hands the value in; no owner reads
      * it during the boot replay.
      */
-    initialSetupDraft: GameConfig,
+    initialSetupDraft: LocalGameConfig,
     private val board: BoardController,
+    /**
+     * Advice policy: hints and Ctrl+Space AI assist always play this engine, so
+     * coaching quality does not follow the opponents' level. Bot seats use
+     * [engineForLevel] instead.
+     */
     private val engine: PlayingEngine,
+    /** The policy the bot seats play for a given [BotLevel]. */
+    private val engineForLevel: (BotLevel) -> PlayingEngine,
     private val nonHumanStepper: NonHumanTurnStepper,
     private val scoreOverlay: FreePlayScoreTablePort,
     private val breakdown: FreePlayBreakdownPort,
@@ -111,7 +119,7 @@ class FreePlayHost(
      * edits here only (not persisted); Start and session restore write through
      * [GameSession].
      */
-    var setupDraft: GameConfig = initialSetupDraft
+    var setupDraft: LocalGameConfig = initialSetupDraft
         private set
 
     /**
@@ -158,9 +166,15 @@ class FreePlayHost(
      */
     fun needsPresentFrame(): Boolean = board.needsPresentFrame()
 
-    /** Free-play default non-human picker (restored when leaving tutorial). */
+    /** Free-play non-human picker (restored when leaving tutorial). */
     fun engineNonHumanPicker(): EngineNonHumanPicker =
-        EngineNonHumanPicker(board, engine, liveChoiceRng)
+        EngineNonHumanPicker(board, { botEngine() }, liveChoiceRng)
+
+    /**
+     * The policy the bot seats play: the live game's level, resolved per decision
+     * so a restored game resumes at the level it was started with.
+     */
+    fun botEngine(): PlayingEngine = engineForLevel(session.gameConfig.botLevel)
 
     /** Persist free-play snapshot only when [SessionKind] allows it. */
     fun persist() {

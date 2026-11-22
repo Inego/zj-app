@@ -1,6 +1,6 @@
 package inego.zungjunggame.session.hosts
 
-import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.LocalGameConfig
 
 /**
  * Narrow render-surface ports the free-play host drives.
@@ -49,7 +49,7 @@ interface FreePlaySetupPort {
     fun show()
 
     /** Take the card's draft and close the card; null when the player never edited it. */
-    fun consumeDraft(): GameConfig?
+    fun consumeDraft(): LocalGameConfig?
 }
 
 /**

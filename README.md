@@ -146,7 +146,7 @@ After a restored or started game, setup starts from that game’s rules. Edits y
 
 ## Controls
 
-Computer seats play automatically (paced by tile animations); the game only waits for your choices. AI seats and hints use **DefaultEngine**, the built-in heuristic policy: it scores every legal choice deterministically, breaks ties randomly only when actually playing a seat, and hints show every co-best option without RNG.
+Computer seats play automatically (paced by tile animations); the game only waits for your choices. New Game offers **Standard** bots — the full heuristic policy (**DefaultEngine**) — plus **Beginner** and **Novice** bots, which play regular hands only, ignore scoring patterns, and read tiles more simply. Hints and Ctrl+Space AI assist always use DefaultEngine: it scores every legal choice deterministically, and hints show every co-best option without RNG.
 
 **Mouse / touch**
 

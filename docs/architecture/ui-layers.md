@@ -113,7 +113,7 @@ narrow handle owned by the model that holds the value.
 |---|---|---|
 | `stack.state` | `StackState` — routes, args, resolved policy, per-route UI text | route stack |
 | `session.freeplay` / `session.tutorial` | live board + scores / mid-lesson progress | session |
-| `game.prefs` / `ui.prefs` / `ui.locale` | `GameConfig` / `UiPreferences` / `AppLocale` | app-wide |
+| `game.prefs` / `ui.prefs` / `ui.locale` | `LocalGameConfig` / `UiPreferences` / `AppLocale` | app-wide |
 | `online.find` / `online.table` | find-game prefs / last table id | lazy |
 | `ui.remembered` | last value of each remembering route | lazy |
 | `notification.prefs` | last server-confirmed notification settings | lazy |
@@ -198,7 +198,7 @@ Current route state:
 | Codec | Routes | Stores |
 |---|---|---|
 | `GameMenuCardCodec` | root/local/game menu | card body scroll + account drawer |
-| `SetupCardCodec` | new-game setup | draft `GameConfig` + scroll |
+| `SetupCardCodec` | new-game setup | draft `LocalGameConfig` + scroll |
 | `TutorialShellCodec` | tutorial shell | TOC scroll, drawer, pull-tab |
 | `OnlineHubCodec` | Online hub | tab, both tab scroll offsets (the card scrolls as one column), Shadow Ranked draft |
 | `RatingHistoryCodec` | rating history | target (a public handle or self), visible window, rung |

@@ -2,7 +2,7 @@ package inego.zungjunggame.features.local
 
 import com.badlogic.gdx.graphics.Camera
 import com.badlogic.gdx.graphics.OrthographicCamera
-import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.engine.PatternIds
 import inego.zungjunggame.input.Intent
 import inego.zungjunggame.runtime.FeatureRegistry
@@ -29,7 +29,7 @@ object NewGameSetupFeature {
     fun register(
         registry: FeatureRegistry,
         overlay: () -> NewGameSetupOverlay,
-        config: () -> GameConfig = { GameConfig.DEFAULT },
+        config: () -> LocalGameConfig = { LocalGameConfig() },
         camera: () -> Camera = { OrthographicCamera() },
         routeUi: RouteUiState = RouteUiState(),
     ) {
@@ -55,9 +55,9 @@ object NewGameSetupFeature {
  * Maps the setup controls to [Intent]s.
  *
  * Approximations (no exact intent exists in this stage): `start` uses
- * [Intent.NewGame] for "begin with the draft config"; the rounds radio and the
- * chicken checkbox report an edited draft, which the component writes as the
- * route's state and which deliberately maps to no feature intent;
+ * [Intent.NewGame] for "begin with the draft config"; the rounds and bot radios
+ * and the chicken checkbox report an edited draft, which the component writes as
+ * the route's state and which deliberately maps to no feature intent;
  * `cancel`/dismiss use [Intent.Back]. `chickenInfo` matches the legacy deep-link
  * to the chicken-hand reference page.
  */

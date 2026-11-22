@@ -2,7 +2,7 @@ package inego.zungjunggame.features.local
 
 import com.badlogic.gdx.graphics.Camera
 import com.badlogic.gdx.graphics.OrthographicCamera
-import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.ui.Canvas
 import inego.zungjunggame.ui.Component
 import inego.zungjunggame.ui.ComponentAction
@@ -27,14 +27,14 @@ import inego.zungjunggame.ui.stack.Route
  * [config] (the host's process draft) is what the card opens with.
  *
  * The card is gesture-owned: the overlay runs its own press/drag/release state
- * machine (rounds radio, chicken checkbox, Start/Cancel, body scroll), and the
+ * machine (rounds radio, bot radio, chicken checkbox, Start/Cancel, body scroll), and the
  * [GestureBridge] forwards the pointer and emits the control the release resolved,
  * rather than re-deriving hit regions that would duplicate that logic.
  */
 class NewGameSetupComponent(
     route: Route,
     private val overlay: NewGameSetupOverlay = NewGameSetupOverlay(),
-    private val config: () -> GameConfig = { GameConfig.DEFAULT },
+    private val config: () -> LocalGameConfig = { LocalGameConfig() },
     private val camera: () -> Camera = { OrthographicCamera() },
     private val measure: (Float, Float) -> NewGameSetupGeometry = { _, _ -> overlay.measureGeometry() },
     /**
@@ -91,7 +91,7 @@ class NewGameSetupComponent(
  */
 private fun cardActionFor(
     state: StatePort<SetupCardState>,
-    config: () -> GameConfig,
+    config: () -> LocalGameConfig,
     actions: (NewGameSetupVerdict) -> ComponentAction?,
     verdict: NewGameSetupVerdict,
 ): ComponentAction? = when {
@@ -105,8 +105,8 @@ private fun cardActionFor(
 
 private fun cardWrite(
     state: StatePort<SetupCardState>,
-    config: () -> GameConfig,
-    draft: GameConfig?,
+    config: () -> LocalGameConfig,
+    draft: LocalGameConfig?,
     scroll: Float?,
 ): ComponentAction? {
     val stored = state.read()

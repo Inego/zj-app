@@ -35,12 +35,12 @@ class LocalPlayHost(
         get() = if (maxHandsProvider != null) {
             maxHandsProvider.invoke()
         } else {
-            (liveHand as? GameSession)?.gameConfig?.maxHands
+            (liveHand as? GameSession)?.gameConfig?.rules?.maxHands
         }
 
     override val allowChickenHands: Boolean
         get() = allowChickenHandsProvider?.invoke()
-            ?: ((liveHand as? GameSession)?.gameConfig?.allowChickenHands ?: false)
+            ?: ((liveHand as? GameSession)?.gameConfig?.rules?.allowChickenHands ?: false)
 
     /**
      * Local free play finishes when its [GameSession] has recorded every configured

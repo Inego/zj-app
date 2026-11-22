@@ -1,6 +1,7 @@
 package inego.zungjunggame.session
 
 import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.ui.stack.SessionKind
 import kotlin.test.Test
 import kotlin.test.assertNotNull
@@ -25,7 +26,7 @@ class FreePlayPersistTest {
         )
 
         // Active board while Menu: deal auto-save must be refused.
-        session.startGame(GameConfig(rounds = 1))
+        session.startGame(LocalGameConfig(GameConfig(rounds = 1)))
         assertNull(slot.get())
 
         kind = SessionKind.Tutorial
@@ -49,7 +50,7 @@ class FreePlayPersistTest {
             gameConfigSlot = gameConfigSlot(),
         )
         // No explicit gate: standalone sessions keep the historical "allow" default.
-        session.startGame(GameConfig(rounds = 1))
+        session.startGame(LocalGameConfig(GameConfig(rounds = 1)))
         assertNotNull(slot.get())
     }
 
@@ -61,7 +62,7 @@ class FreePlayPersistTest {
             sessionSlot = slot,
             gameConfigSlot = gameConfigSlot(),
         )
-        session.startGame(GameConfig(rounds = 1))
+        session.startGame(LocalGameConfig(GameConfig(rounds = 1)))
         session.persist()
         assertNotNull(slot.get())
 

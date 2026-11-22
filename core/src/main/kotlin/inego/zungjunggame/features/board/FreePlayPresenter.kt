@@ -203,13 +203,13 @@ class FreePlayPresenter(
         val handBaselineY = screenH - topPad
 
         // Top-left rule badge: "Patternless OK" or "Min. 5 pts"
-        val allowChicken = playHost?.allowChickenHands ?: session.gameConfig.allowChickenHands
+        val allowChicken = playHost?.allowChickenHands ?: session.gameConfig.rules.allowChickenHands
         val ruleText = PatternlessRule.standalone(allowChicken)
 
         val label = formatHandStatusLabel(
             sessionKind = sessionKind,
             handNumber = playHost?.currentHandNumber ?: session.currentHandNumber(),
-            maxHands = playHost?.maxHands ?: session.gameConfig.maxHands,
+            maxHands = playHost?.maxHands ?: session.gameConfig.rules.maxHands,
         )
 
         // The restart clock outranks the ping: both share the detail slot, and an

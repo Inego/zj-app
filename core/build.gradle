@@ -149,6 +149,14 @@ tasks.register('stageRuntimeAssets', Sync) {
   into stagedRuntimeDir
 }
 
+tasks.register('engineBattle', JavaExec) {
+  group = 'verification'
+  description = 'Run a headless 2v2 battle between two engines. Usage: :core:engineBattle --args="<engineA> <engineB> <games> <rounds> [--seed=N] [--chicken]"'
+  dependsOn classes
+  classpath = sourceSets.main.runtimeClasspath
+  mainClass = 'inego.zungjunggame.engines.EngineBattle'
+}
+
 dependencies {
   api "com.badlogicgames.gdx:gdx:$gdxVersion"
   api "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
