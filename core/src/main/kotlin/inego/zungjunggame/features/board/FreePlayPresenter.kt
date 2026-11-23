@@ -1,5 +1,6 @@
 package inego.zungjunggame.features.board
 
+import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
@@ -7,9 +8,11 @@ import inego.zungjunggame.engine.Choice
 import inego.zungjunggame.engine.ChoiceList
 import inego.zungjunggame.engine.DecisionType
 import inego.zungjunggame.engine.GameState
+import inego.zungjunggame.engine.HintMode
 import inego.zungjunggame.engine.NUM_PLAYERS
 import inego.zungjunggame.engine.Scoring
 import inego.zungjunggame.engines.PlayingEngine
+import inego.zungjunggame.hints.OmniscientHintSearch
 import inego.zungjunggame.hints.UcbFlatMcHintSearch
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.net.PatternlessRule
@@ -50,17 +53,32 @@ class FreePlayPresenter(
     private val breakdown: FreePlayBreakdownPort,
     private val board: BoardController,
     private val engine: PlayingEngine,
+    private val opponentEngine: () -> PlayingEngine = { engine },
     private val sessionKind: () -> SessionKind,
     private val playHintChoice: (Choice) -> Boolean,
+    private val requestFrame: () -> Unit = { Gdx.graphics?.requestRendering() },
 ) {
     /**
-     * Background sequential UCB flat MC for the HINT button. Started only where
-     * [McHints] allows it; never on the render thread.
+     * Background sequential UCB flat MC for the Standard bot HINT mode. Started
+     * only where [McHints] allows it; never on the render thread.
      */
     private val mcHintSearch = UcbFlatMcHintSearch(engine = engine)
 
+    /**
+     * Background perfect-information SP-MCTS + Pattern Seekers for the
+     * Omniscient HINT mode. Publishes at Phase 0 and ~1 Hz and wakes the render
+     * loop via [requestFrame].
+     */
+    private val omniscientSearch = OmniscientHintSearch(onPublish = requestFrame)
+
     /** Accumulator for ~1 s MC label / highlight refresh. */
     private var mcHintUiRefreshSec: Float = 0f
+
+    /** True once [omniscientSearch] has been kicked off for the current human turn. */
+    private var omniscientTurnStarted: Boolean = false
+
+    /** Last snapshot revision pushed onto [table] for Omniscient mode. */
+    private var lastAppliedOmniscientRev: Long = -1L
 
     private val statusGlyph = GlyphLayout()
     private val ruleGlyph = GlyphLayout()
@@ -321,8 +339,10 @@ class FreePlayPresenter(
      * hint: no labels, no worker thread.
      */
     fun highlightEngineHint(liveHand: LiveHand) {
-        // MC hints are free-play only.
+        // Hints are free-play only.
         if (sessionKind() != SessionKind.FreePlay) return
+        val hintMode = session.gameConfig.hintMode
+        if (hintMode == HintMode.NONE) return
         val state = liveHand.state ?: return
         if (!TableViewState.fromGameState(state, liveHand.humanSeat).isHumanInteractiveTurn) return
         // Hint surface follows the same gate as human commits.
@@ -339,7 +359,15 @@ class FreePlayPresenter(
                 }
             }
             HintUi.Off -> {
-                startMcHintSearch(liveHand, state, allowedList)
+                when (hintMode) {
+                    HintMode.STANDARD_BOT -> startMcHintSearch(liveHand, state, allowedList)
+                    HintMode.OMNISCIENT -> {
+                        if (!omniscientTurnStarted) {
+                            startOmniscientSearch(liveHand, state, allowed)
+                        }
+                    }
+                    HintMode.NONE -> Unit
+                }
             }
         }
     }
@@ -354,6 +382,7 @@ class FreePlayPresenter(
             if (i in 0 until choices.size) classic.add(choices[i])
         }
         table.setMcHintArms(emptyList())
+        table.setOmniscientHintArms(emptyList())
         table.activateHint(classic)
         if (!McHints.enabled) return
         mcHintSearch.start(
@@ -365,9 +394,32 @@ class FreePlayPresenter(
         mcHintUiRefreshSec = 0f
     }
 
+    private fun startOmniscientSearch(
+        liveHand: LiveHand,
+        state: GameState,
+        allowed: List<Choice>,
+    ) {
+        if (sessionKind() != SessionKind.FreePlay) return
+        table.setMcHintArms(emptyList())
+        omniscientTurnStarted = true
+        lastAppliedOmniscientRev = -1L
+        omniscientSearch.start(
+            liveState = state,
+            rootChoices = allowed,
+            humanSeat = liveHand.humanSeat,
+            opponentEngine = opponentEngine(),
+            rngSeed = liveHand.choiceRng.nextLong(),
+        )
+        applyOmniscientSnapshotIfChanged()
+    }
+
     fun stopMcHintSearch() {
         mcHintSearch.stop()
         mcHintSearch.clearSnapshot()
+        omniscientSearch.stop()
+        omniscientSearch.clearSnapshot()
+        omniscientTurnStarted = false
+        lastAppliedOmniscientRev = -1L
         mcHintUiRefreshSec = 0f
         table.clearRecommendation()
     }
@@ -389,23 +441,54 @@ class FreePlayPresenter(
         }
     }
 
+    private fun applyOmniscientSnapshotIfChanged() {
+        val snap = omniscientSearch.snapshot() ?: return
+        if (snap.revision == lastAppliedOmniscientRev) return
+        lastAppliedOmniscientRev = snap.revision
+        table.setOmniscientHintArms(snap.arms, snap.evalsPerSec)
+        val best = snap.bestChoices()
+        if (best.isNotEmpty()) {
+            table.activateHint(best)
+        }
+    }
+
     /**
-     * While MC is running, refresh labels / highlights every [MC_HINT_UI_REFRESH_SEC].
-     * Also stops the worker if the turn is no longer interactive.
+     * Advance active hint search (Standard bot MC or Omniscient SP-MCTS).
+     *
+     * Both modes stay idle until the player presses HINT / H on the turn.
+     * Once started, Omniscient pulls fresh 1 Hz snapshots whenever the worker
+     * publishes one and stops cleanly as soon as the turn is no longer interactive.
      */
     fun tickMcHintUi(deltaSec: Float, liveHand: LiveHand) {
-        if (!mcHintSearch.isRunning && table.mcHintArms.isEmpty() && table.hintUi is HintUi.Off) {
-            return
-        }
+        val hintMode = session.gameConfig.hintMode
         val state = liveHand.state
-        if (state == null || !liveHand.active ||
-            !TableViewState.fromGameState(state, liveHand.humanSeat).isHumanInteractiveTurn
-        ) {
-            if (mcHintSearch.isRunning || table.mcHintArms.isNotEmpty() || table.hintUi !is HintUi.Off) {
+        val interactive = state != null && liveHand.active &&
+            TableViewState.fromGameState(state, liveHand.humanSeat).isHumanInteractiveTurn
+
+        if (hintMode == HintMode.NONE || !interactive) {
+            if (mcHintSearch.isRunning || omniscientSearch.isRunning ||
+                omniscientTurnStarted ||
+                table.mcHintArms.isNotEmpty() || table.omniscientHintArms.isNotEmpty() ||
+                table.hintUi !is HintUi.Off
+            ) {
                 stopMcHintSearch()
             }
             return
         }
+
+        if (hintMode == HintMode.OMNISCIENT) {
+            if (!omniscientTurnStarted) return
+            omniscientSearch.setHoveredChoice(table.hoveredChoiceForHint())
+            // On Web/WasmGC (no preemptive threads), advance a short per-frame slice
+            // and keep scheduling frames while the search has work remaining.
+            if (omniscientSearch.stepFrameSlice()) {
+                requestFrame()
+            }
+            applyOmniscientSnapshotIfChanged()
+            return
+        }
+
+        // Standard bot mode: MC runs only after HINT is pressed.
         if (!mcHintSearch.isRunning) return
         mcHintUiRefreshSec += deltaSec
         if (mcHintUiRefreshSec >= MC_HINT_UI_REFRESH_SEC) {

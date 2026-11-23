@@ -394,17 +394,18 @@ class OverlayForm {
             } else {
                 ColumnRect(panel.left + rhythm.padX, rowWidth)
             }
+            var sectionTop = if (mode == Mode.SideBySide) rowsTop else top
             val labelRect: Rect?
             if (section.label != null) {
-                labelRect = Rect(column.left, top - labelH, column.width, labelH)
-                top -= labelH + rhythm.sectionLabelGap
+                labelRect = Rect(column.left, sectionTop - labelH, column.width, labelH)
+                sectionTop -= labelH + rhythm.sectionLabelGap
             } else {
                 labelRect = null
             }
-            val groupBottom = top - groupH(section)
+            val groupBottom = sectionTop - groupH(section)
             val group = Rect(column.left, groupBottom, column.width, groupH(section))
             val rows = ArrayList<Rect>(section.rows.size)
-            var rowTop = top - section.groupPadOr(rhythm)
+            var rowTop = sectionTop - section.groupPadOr(rhythm)
             for (height in section.rows) {
                 rows += Rect(column.left + section.groupPadOr(rhythm), rowTop - height, rowWidthOf(column, section, rhythm), height)
                 rowTop -= height + section.rowGapOr(rhythm)

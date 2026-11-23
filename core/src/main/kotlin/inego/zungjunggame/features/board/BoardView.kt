@@ -32,6 +32,7 @@ fun boardView(model: AppModel): BoardView = BoardView(
 /** Free-play facts the board's table inputs need, projected from the live session. */
 data class FreePlayRenderFacts(
     val seatScores: IntArray,
+    val hintsEnabled: Boolean = true,
 )
 
 /** Online facts the board's table inputs need, projected from the live host. */
@@ -75,7 +76,7 @@ fun boardTableInputs(
     val scores = when {
         !session.boardHosted -> TableRenderInputs(
             humanSeat = humanSeat,
-            hintsEnabled = kind == SessionKind.FreePlay,
+            hintsEnabled = kind == SessionKind.FreePlay && freePlay.hintsEnabled,
             discardOrigin = origin,
         )
         kind == SessionKind.Tutorial -> TableRenderInputs(
@@ -86,7 +87,7 @@ fun boardTableInputs(
         kind == SessionKind.FreePlay && session.hand?.state != null -> TableRenderInputs(
             humanSeat = humanSeat,
             seatScores = freePlay.seatScores,
-            hintsEnabled = true,
+            hintsEnabled = freePlay.hintsEnabled,
             discardOrigin = origin,
         )
         kind == SessionKind.Online && online != null -> TableRenderInputs(
@@ -97,7 +98,7 @@ fun boardTableInputs(
         )
         else -> TableRenderInputs(
             humanSeat = humanSeat,
-            hintsEnabled = kind == SessionKind.FreePlay,
+            hintsEnabled = kind == SessionKind.FreePlay && freePlay.hintsEnabled,
             discardOrigin = origin,
         )
     }

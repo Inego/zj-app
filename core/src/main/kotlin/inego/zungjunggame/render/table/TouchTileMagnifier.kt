@@ -93,6 +93,13 @@ object TouchTileMagnifier {
      */
     private const val LABEL_BACK_PAD_Y = 0.04f
 
+    /**
+     * Draw the touch loupe and/or ready-discard wait row.
+     *
+     * @return the world Y of the highest painted element (wait plate top when
+     *   waits were drawn, else magnified face top when [showDiscardFace]), or
+     *   [Float.NaN] when nothing was drawn.
+     */
     fun draw(
         batch: SpriteBatch,
         drawer: TileDrawer,
@@ -112,7 +119,7 @@ object TouchTileMagnifier {
         enlargedHand: Boolean = false,
         waits: List<DiscardWait> = emptyList(),
         showDiscardFace: Boolean = true,
-    ) {
+    ): Float {
         val margin = Fonts.px(8f)
         val magnifiedScale = if (enlargedHand) ENLARGED_SCALE else SCALE
         val mw = handW * magnifiedScale
@@ -172,7 +179,12 @@ object TouchTileMagnifier {
             batch.setColor(Color.WHITE)
         }
 
-        row?.draw(batch, drawer, cx, rowBottomY)
+        val rowTopY = row?.draw(batch, drawer, cx, rowBottomY)
+        return when {
+            rowTopY != null -> rowTopY
+            showDiscardFace -> faceCy + mh * 0.5f
+            else -> Float.NaN
+        }
     }
 
     /**
@@ -190,9 +202,10 @@ object TouchTileMagnifier {
         val fontScale: Float,
         val width: Float,
     ) {
-        fun draw(batch: SpriteBatch, drawer: TileDrawer, cx: Float, bottomY: Float) {
+        fun draw(batch: SpriteBatch, drawer: TileDrawer, cx: Float, bottomY: Float): Float {
             val countFont = Fonts.body
             val scoreFont = Fonts.wallCount
+            var topY = bottomY + faceH
             Fonts.withFaceScale(countFont, fontScale) {
                 Fonts.withFaceScale(scoreFont, fontScale) {
                     // Draw Y is the cap top. The count sits on the gap above the
@@ -205,6 +218,7 @@ object TouchTileMagnifier {
                     val faceCy = bottomY + faceH * 0.5f
                     val padX = faceH * LABEL_BACK_PAD_X
                     val padY = faceH * LABEL_BACK_PAD_Y
+                    topY = scoreY + padY
                     val originX = cx - width * 0.5f
                     var x = originX
                     for ((tileType) in waits) {
@@ -253,6 +267,7 @@ object TouchTileMagnifier {
                     }
                 }
             }
+            return topY
         }
 
         private fun labelBlockWidth(

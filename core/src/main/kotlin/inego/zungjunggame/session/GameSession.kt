@@ -221,6 +221,7 @@ class GameSession(
             dealSeed = dealSeed,
             rounds = gameConfig.rules.rounds,
             botLevel = gameConfig.botLevel,
+            hintMode = gameConfig.hintMode,
         )
     }
 

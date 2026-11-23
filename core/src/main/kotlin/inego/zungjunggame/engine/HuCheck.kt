@@ -55,27 +55,117 @@ object HuCheck {
 
     fun canDecompose(counts: IntArray, setsNeeded: Int): Boolean {
         if (setsNeeded !in 0..4) return false
-        var found = false
-        val working = counts.copyOf()
-        val currentSets = ArrayList<ConcealedSet>(setsNeeded)
-        var pairTile = -1
+        var s0 = 0
+        for (i in 0 until 9) {
+            val c = counts[i]
+            if (c < 0) return false
+            s0 += c
+        }
+        var s1 = 0
+        for (i in 9 until 18) {
+            val c = counts[i]
+            if (c < 0) return false
+            s1 += c
+        }
+        var s2 = 0
+        for (i in 18 until 27) {
+            val c = counts[i]
+            if (c < 0) return false
+            s2 += c
+        }
+        var s3 = 0
+        for (i in 27 until NUM_TILE_TYPES) {
+            val c = counts[i]
+            if (c < 0) return false
+            s3 += c
+        }
+        val total = s0 + s1 + s2 + s3
+        if (total != setsNeeded * 3 + 2) return false
 
-        collectDecompositions(
-            working,
-            pos = 0,
-            setsNeeded = setsNeeded,
-            needPair = true,
-            currentSets = currentSets,
-            getPair = { pairTile },
-            setPair = { pairTile = it },
-            onSetEnter = {},
-            onSetExit = {},
-            onLeaf = {
-                found = true
-            },
-            stopWhenFound = { found },
-        )
-        return found
+        val m0 = s0 % 3
+        val m1 = s1 % 3
+        val m2 = s2 % 3
+        val m3 = s3 % 3
+        if (m0 == 1 || m1 == 1 || m2 == 1 || m3 == 1) return false
+        // Exactly one group must hold the pair (sum % 3 == 2).
+        var pairGroups = 0
+        if (m0 == 2) pairGroups++
+        if (m1 == 2) pairGroups++
+        if (m2 == 2) pairGroups++
+        if (m3 == 2) pairGroups++
+        if (pairGroups != 1) return false
+
+        // Honors (no chows): every non-zero tile must be 3 (or 2 once if pair is in honors).
+        if (s3 > 0) {
+            var pairs = 0
+            for (i in 27 until NUM_TILE_TYPES) {
+                val c = counts[i]
+                if (c == 0) continue
+                val rem = c % 3
+                if (rem == 1) return false
+                if (rem == 2) {
+                    pairs++
+                    if (pairs > 1) return false
+                }
+            }
+            if ((m3 == 2) != (pairs == 1)) return false
+        }
+
+        if (s0 > 0 && !(if (m0 == 2) canDecomposeSuitWithPair(counts, 0) else canDecomposeSuitNoPair(counts, 0))) {
+            return false
+        }
+        if (s1 > 0 && !(if (m1 == 2) canDecomposeSuitWithPair(counts, 9) else canDecomposeSuitNoPair(counts, 9))) {
+            return false
+        }
+        if (s2 > 0 && !(if (m2 == 2) canDecomposeSuitWithPair(counts, 18) else canDecomposeSuitNoPair(counts, 18))) {
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Exact zero-allocation suit decomposition check without a pair: because 3 identical
+     * chows `(r, r+1, r+2)` consume the exact same tiles as 3 pungs, taking `rem % 3`
+     * chows starting at the leftmost rank `r` is always optimal.
+     */
+    private fun canDecomposeSuitNoPair(counts: IntArray, base: Int): Boolean {
+        var sub1 = 0
+        var sub2 = 0
+        for (r in 0 until 9) {
+            val rem = counts[base + r] - sub1
+            if (rem < 0) return false
+            val chows = rem % 3
+            if (chows > 0 && r > 6) return false
+            sub1 = sub2 + chows
+            sub2 = chows
+        }
+        return sub1 == 0 && sub2 == 0
+    }
+
+    private fun canDecomposeSuitWithPair(counts: IntArray, base: Int): Boolean {
+        for (pairR in 0 until 9) {
+            if (counts[base + pairR] < 2) continue
+            var sub1 = 0
+            var sub2 = 0
+            var ok = true
+            for (r in 0 until 9) {
+                val c = if (r == pairR) counts[base + r] - 2 else counts[base + r]
+                val rem = c - sub1
+                if (rem < 0) {
+                    ok = false
+                    break
+                }
+                val chows = rem % 3
+                if (chows > 0 && r > 6) {
+                    ok = false
+                    break
+                }
+                sub1 = sub2 + chows
+                sub2 = chows
+            }
+            if (ok && sub1 == 0 && sub2 == 0) return true
+        }
+        return false
     }
 
     fun isSevenPairsHand(counts: IntArray): Boolean {

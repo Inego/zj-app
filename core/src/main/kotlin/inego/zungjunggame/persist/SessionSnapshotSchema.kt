@@ -8,6 +8,7 @@ import inego.zungjunggame.engine.GameState
 import inego.zungjunggame.engine.GameStateLayout
 import inego.zungjunggame.engine.HandScoreComponent
 import inego.zungjunggame.engine.HandScoreRow
+import inego.zungjunggame.engine.HintMode
 import inego.zungjunggame.engine.NUM_CHOW_TYPES
 import inego.zungjunggame.engine.NUM_PLAYERS
 import inego.zungjunggame.engine.NUM_TILE_TYPES
@@ -49,8 +50,9 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
      * v6: per-hand scored patterns (the hands table's Patterns column).
      * v7: the player's exposed melds became an ordered log (exposure order).
      * v8: bot level, the payload's tail field (v7 migrates as Standard).
+     * v9: hint mode, the payload's tail field (v8 migrates as Standard bot).
      */
-    override val version: Int = 8
+    override val version: Int = 9
 
     private const val MAGIC: Int = 0x5A4A5331 // "ZJS1"
 
@@ -67,31 +69,43 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
             d.writeBoolean(value.game.allowChickenHands)
             writeScoreRows(d, value.scoreRows)
             writeGameState(d, value.game)
-            // Tail field: this is what lets the v7→v8 migration be an append.
             d.writeUTF(value.botLevel.id)
+            // Tail field: this is what lets the v8→v9 migration be an append.
+            d.writeUTF(value.hintMode.id)
         }
         return out.toByteArray()
     }
 
     /**
-     * v7 wrote every other field and no bot level. Appending the level every v7
-     * game played turns the old payload into a valid v8 one; the schema's own
-     * version int (after MAGIC) is the only other byte that changes.
+     * Step migrations (`baseVersion = 7`):
+     * - v7→v8 appends [BotLevel.DEFAULT] and updates the embedded version int to 8.
+     * - v8→v9 appends [HintMode.DEFAULT] and updates the embedded version int to 9.
      */
     override val migrations: List<Migration> = listOf(
         Migration { fromVersion, bytes ->
             if (fromVersion != 7 || bytes.size < 8) {
                 MigrationResult.Drop
             } else {
-                val out = ByteArrayOutputStream(bytes.size + 2 + BotLevel.DEFAULT.id.length)
-                out.write(bytes)
-                DataOutputStream(out).use { it.writeUTF(BotLevel.DEFAULT.id) }
-                val migrated = out.toByteArray()
-                ByteBuffer.wrap(migrated).putInt(4, version)
-                MigrationResult.Migrated(migrated)
+                appendTailUtf(bytes, BotLevel.DEFAULT.id, targetVersion = 8)
+            }
+        },
+        Migration { fromVersion, bytes ->
+            if (fromVersion != 8 || bytes.size < 8) {
+                MigrationResult.Drop
+            } else {
+                appendTailUtf(bytes, HintMode.DEFAULT.id, targetVersion = 9)
             }
         },
     )
+
+    private fun appendTailUtf(bytes: ByteArray, value: String, targetVersion: Int): MigrationResult {
+        val out = ByteArrayOutputStream(bytes.size + 2 + value.length)
+        out.write(bytes)
+        DataOutputStream(out).use { it.writeUTF(value) }
+        val migrated = out.toByteArray()
+        ByteBuffer.wrap(migrated).putInt(4, targetVersion)
+        return MigrationResult.Migrated(migrated)
+    }
 
     /**
      * @return decoded snapshot, or null if the payload is corrupt, truncated, or
@@ -113,6 +127,8 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
                 val scoreRows = readScoreRows(d)
                 val game = readGameState(d)
                 game.allowChickenHands = allowChickenHands
+                val botLevel = BotLevel.fromId(d.readUTF())
+                val hintMode = HintMode.fromId(d.readUTF())
                 SessionSnapshot(
                     scoreRows = scoreRows,
                     game = game,
@@ -120,7 +136,8 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
                     currentHandRecorded = currentHandRecorded,
                     dealSeed = dealSeed,
                     rounds = rounds,
-                    botLevel = BotLevel.fromId(d.readUTF()),
+                    botLevel = botLevel,
+                    hintMode = hintMode,
                 )
             }
         } catch (_: EOFException) {

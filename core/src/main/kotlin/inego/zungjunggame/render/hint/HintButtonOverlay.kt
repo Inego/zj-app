@@ -202,6 +202,7 @@ class HintButtonOverlay(
         pointerWorldX: Float,
         pointerWorldY: Float,
         mode: Mode = Mode.Idle,
+        metricText: String? = null,
     ) {
         val geom = layout(rowRightX, rowCenterY, handH, screenW, screenH, edgeInsetBottom)
         park.setPark(geom.parkX, geom.parkY)
@@ -268,6 +269,38 @@ class HintButtonOverlay(
             )
         }
         buttonFont.color = Color.WHITE
+
+        if (!metricText.isNullOrEmpty()) {
+            drawMetric(batch, metricText, cx, bottom, bottom + btnH, geom.bounds)
+        }
+    }
+
+    private fun drawMetric(
+        batch: SpriteBatch,
+        text: String,
+        buttonCx: Float,
+        buttonBottom: Float,
+        buttonTop: Float,
+        bounds: Rect,
+    ) {
+        Fonts.ensureCreated()
+        val font = Fonts.button
+        val gap = Fonts.px(4f)
+        val margin = Fonts.px(4f)
+        Fonts.withFaceScale(font, METRIC_SCALE) {
+            val textW = Fonts.textWidth(font, text)
+            val textH = font.capHeight
+            val minLeft = bounds.left + margin
+            val maxLeft = max(minLeft, bounds.right - margin - textW)
+            val x = (buttonCx - textW * 0.5f).coerceIn(minLeft, maxLeft)
+            val aboveBaseline = buttonTop + gap + textH
+            val y = if (aboveBaseline <= bounds.top - margin) {
+                aboveBaseline
+            } else {
+                buttonBottom - gap
+            }
+            Fonts.drawText(batch, font, text, x, y, METRIC_INK)
+        }
     }
 
     // ── ParkableChrome ───────────────────────────────────────────────────────
@@ -311,6 +344,9 @@ class HintButtonOverlay(
          * inside the chip are unchanged; desktop and the browser keep 1.
          */
         private const val ANDROID_SCALE = 0.67f
+        /** Tiny readout above the HINT chip (Fonts.button is 18 px → ~12 px). */
+        private const val METRIC_SCALE = 0.68f
+        private val METRIC_INK: Color = AppPalette.inkMuted
 
         /**
          * Vertical space used by [McHintLabels.drawTwoLine] above a hand

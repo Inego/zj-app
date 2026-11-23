@@ -5,6 +5,7 @@ import inego.zungjunggame.engine.ChoiceKind
 import inego.zungjunggame.engine.ChoiceList
 import inego.zungjunggame.engine.DecisionType
 import inego.zungjunggame.engine.Deficiency
+import inego.zungjunggame.engine.DeficiencyCache
 import inego.zungjunggame.engine.DeficiencyFast
 import inego.zungjunggame.engine.GameState
 import inego.zungjunggame.engine.NUM_CHOW_TYPES
@@ -86,7 +87,7 @@ class DefaultEngine(
      * decision). Cleared at the start of each [rank]. One engine instance must
      * not be shared across threads — [inego.zungjunggame.hints.UcbFlatMcHintSearch] clones for its worker.
      */
-    private val rankCache = HashMap<Long, Int>(256)
+    private val rankCache = DeficiencyCache()
 
     /** Local trial hand for discard / claim scoring (no per-call [PlayerState.copy]). */
     private val trialHand = PlayerState()
@@ -600,7 +601,7 @@ class DefaultEngine(
             remaining: IntArray,
             withAcceptance: Boolean,
             withExtras: Boolean,
-            cache: MutableMap<Long, Int>,
+            cache: DeficiencyCache,
             cfg: DefaultEngineConfig,
             suitCounts: IntArray,
             honorCounts: IntArray,
@@ -634,7 +635,7 @@ class DefaultEngine(
             remaining: IntArray,
             withAcceptance: Boolean,
             withExtras: Boolean,
-            cache: MutableMap<Long, Int>,
+            cache: DeficiencyCache,
             cfg: DefaultEngineConfig,
             trialHand: PlayerState,
             suitCounts: IntArray,
@@ -661,7 +662,7 @@ class DefaultEngine(
         private fun deficiencyAfterDiscard(
             hand: PlayerState,
             tile: Int,
-            cache: MutableMap<Long, Int>,
+            cache: DeficiencyCache,
             trialHand: PlayerState,
         ): Int {
             check(tile in 0 until NUM_TILE_TYPES)
@@ -677,7 +678,7 @@ class DefaultEngine(
             tile: Int,
             remaining: IntArray,
             baseDef: Int,
-            cache: MutableMap<Long, Int>,
+            cache: DeficiencyCache,
             trialHand: PlayerState,
         ): Int {
             trialHand.copyFrom(hand)
@@ -714,7 +715,7 @@ class DefaultEngine(
             choice: Choice,
             withAcceptance: Boolean,
             withExtras: Boolean,
-            cache: MutableMap<Long, Int>,
+            cache: DeficiencyCache,
             cfg: DefaultEngineConfig,
             suitCounts: IntArray,
             honorCounts: IntArray,
@@ -775,7 +776,7 @@ class DefaultEngine(
             seatWind: Int,
             liveWallSize: Int,
             choices: ChoiceList,
-            cache: MutableMap<Long, Int>,
+            cache: DeficiencyCache,
             cfg: DefaultEngineConfig,
             trialHand: PlayerState,
             suitCounts: IntArray,
@@ -856,7 +857,7 @@ class DefaultEngine(
             state: GameState,
             actor: Int,
             choices: ChoiceList,
-            cache: MutableMap<Long, Int>,
+            cache: DeficiencyCache,
             cfg: DefaultEngineConfig,
             trialHand: PlayerState,
             suitCounts: IntArray,
@@ -1000,7 +1001,7 @@ class DefaultEngine(
             seatWind: Int,
             withAcceptance: Boolean,
             withExtras: Boolean,
-            cache: MutableMap<Long, Int>,
+            cache: DeficiencyCache,
             cfg: DefaultEngineConfig,
             trialHand: PlayerState,
             suitCounts: IntArray,
@@ -1045,7 +1046,7 @@ class DefaultEngine(
         private fun rankActOnHandObservation(
             obs: SeatObservation,
             choices: ChoiceList,
-            cache: MutableMap<Long, Int>,
+            cache: DeficiencyCache,
             cfg: DefaultEngineConfig,
             trialHand: PlayerState,
             suitCounts: IntArray,

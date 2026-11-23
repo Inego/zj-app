@@ -354,6 +354,7 @@ class FreePlayHost(
      */
     fun parkToMenu() {
         if (sessionKind() != SessionKind.FreePlay) return
+        stopHint()
         persist()
     }
 

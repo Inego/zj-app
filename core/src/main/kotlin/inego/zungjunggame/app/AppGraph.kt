@@ -8,6 +8,7 @@ import com.badlogic.gdx.utils.viewport.ScreenViewport
 import inego.zungjunggame.AppVersion
 import inego.zungjunggame.BootDiagnostics
 import inego.zungjunggame.engine.BotLevel
+import inego.zungjunggame.engine.HintMode
 import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.engines.DefaultEngine
 import inego.zungjunggame.engines.GreedyMeldEngine
@@ -539,6 +540,7 @@ class AppGraph(
             breakdown = breakdownPort,
             board = board,
             engine = engine,
+            opponentEngine = { freePlayHost.botEngine() },
             sessionKind = { sessionRegistry.kind },
             playHintChoice = { choice -> sessionEffects.commitChoice(choice) },
         )
@@ -820,6 +822,7 @@ class AppGraph(
         ): TableRenderInputs {
             val freePlay = FreePlayRenderFacts(
                 seatScores = freePlayHost.session.scores.runningTotals(),
+                hintsEnabled = freePlayHost.session.gameConfig.hintMode != HintMode.NONE,
             )
             val online = onlineCoordinator.onlineHost?.let {
                 OnlineRenderFacts(

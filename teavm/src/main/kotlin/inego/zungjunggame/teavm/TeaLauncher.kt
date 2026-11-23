@@ -18,6 +18,7 @@ import inego.zungjunggame.net.ApiConfig
 import inego.zungjunggame.platform.GoogleAuthProvider
 import inego.zungjunggame.platform.OverlayClipboard
 import inego.zungjunggame.platform.SessionCoordination
+import inego.zungjunggame.platform.SliceScheduler
 import inego.zungjunggame.platform.WebSocketClient
 import inego.zungjunggame.state.PlatformStateBackend
 import inego.zungjunggame.state.PreferencesStateBackend
@@ -109,6 +110,7 @@ class TeaLauncher {
                 NativeLocalTime.offsetMinutes(millis.toDouble())
             }
             inego.zungjunggame.platform.PresenceScheduler.factory = { WasmPresenceScheduler() }
+            SliceScheduler.startLoop = WasmSliceScheduler::startLoop
             // The web's context is *measured* durable (six
             // away/return cycles to 155 s, listener live, zero loss events), and the
             // freeze the user actually reported was ours: a ~1.2 s

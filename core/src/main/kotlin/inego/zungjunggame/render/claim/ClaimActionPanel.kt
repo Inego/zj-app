@@ -13,10 +13,12 @@ import inego.zungjunggame.engine.DecisionType
 import inego.zungjunggame.engine.GameState
 import inego.zungjunggame.engine.NUM_TILE_TYPES
 import inego.zungjunggame.hints.McHintArmSnapshot
+import inego.zungjunggame.hints.OmniscientHintArmSnapshot
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.hint.McHintLabels
+import inego.zungjunggame.render.hint.OmniscientHintLabels
 import inego.zungjunggame.render.table.ConnectorCurveDrawer
 import inego.zungjunggame.render.table.TurnStatusBanner
 import inego.zungjunggame.render.tiles.TileDrawer
@@ -123,6 +125,12 @@ class ClaimActionPanel(
         rowInteractive = false
     }
 
+    /** Currently hovered claim button from the last interactive render, or null. */
+    fun hoveredButtonHit(): ButtonHit? = hits.getOrNull(hoveredIndex)
+
+    /** Currently hovered claim [Choice] from the last interactive render, or null. */
+    fun hoveredChoice(): Choice? = hoveredButtonHit()?.choice
+
     /** Current button boxes for [choices] at this geometry; no prior render needed. */
     fun buttons(
         claimedTile: Int,
@@ -199,6 +207,7 @@ class ClaimActionPanel(
         pointerWorldY: Float = Float.NaN,
         recommended: Collection<Choice> = emptyList(),
         mcHintArms: List<McHintArmSnapshot> = emptyList(),
+        omniscientHintArms: List<OmniscientHintArmSnapshot> = emptyList(),
         discardedTileX: Float = Float.NaN,
         discardedTileY: Float = Float.NaN,
         interactive: Boolean = true,
@@ -221,6 +230,7 @@ class ClaimActionPanel(
             pointerWorldY = pointerWorldY,
             recommended = recommended,
             mcHintArms = mcHintArms,
+            omniscientHintArms = omniscientHintArms,
             discardedTileX = discardedTileX,
             discardedTileY = discardedTileY,
             interactive = interactive,
@@ -244,6 +254,7 @@ class ClaimActionPanel(
         pointerWorldY: Float = Float.NaN,
         recommended: Collection<Choice> = emptyList(),
         mcHintArms: List<McHintArmSnapshot> = emptyList(),
+        omniscientHintArms: List<OmniscientHintArmSnapshot> = emptyList(),
         discardedTileX: Float = Float.NaN,
         discardedTileY: Float = Float.NaN,
         interactive: Boolean = true,
@@ -273,6 +284,7 @@ class ClaimActionPanel(
             pointerWorldY = pointerWorldY,
             recommended = recommended,
             mcHintArms = mcHintArms,
+            omniscientHintArms = omniscientHintArms,
             discardedTileX = discardedTileX,
             discardedTileY = discardedTileY,
             interactive = interactive,
@@ -434,6 +446,7 @@ class ClaimActionPanel(
         pointerWorldY: Float = Float.NaN,
         recommended: Collection<Choice> = emptyList(),
         mcHintArms: List<McHintArmSnapshot> = emptyList(),
+        omniscientHintArms: List<OmniscientHintArmSnapshot> = emptyList(),
         discardedTileX: Float = Float.NaN,
         discardedTileY: Float = Float.NaN,
         interactive: Boolean = true,
@@ -502,6 +515,12 @@ class ClaimActionPanel(
             if (arm.n <= 0) continue
             armByChoice[choiceKey(arm.choice)] = arm
         }
+        val (maxOmniScore, minOmniSteps) = OmniscientHintLabels.bestOutcome(omniscientHintArms)
+        val minOmniStepsAll = OmniscientHintLabels.minSteps(omniscientHintArms)
+        val omniByChoice = HashMap<Long, OmniscientHintArmSnapshot>(omniscientHintArms.size.coerceAtLeast(1))
+        for (arm in omniscientHintArms) {
+            omniByChoice[choiceKey(arm.choice)] = arm
+        }
 
         for ((i, hit) in hits.withIndex()) {
             val hovered = i == hoveredIndex
@@ -515,16 +534,31 @@ class ClaimActionPanel(
                 hovered = hovered,
                 recommended = isRecommended,
             )
-            val arm = armByChoice[choiceKey(choice)]
-            if (arm != null) {
-                drawMcLabel(
-                    batch,
-                    hit.cx,
+            val omniArm = omniByChoice[choiceKey(choice)]
+            if (omniArm != null) {
+                OmniscientHintLabels.drawScoreBadge(
+                    batch = batch,
+                    cx = hit.cx,
                     choiceTopY = hit.cy + row.height * 0.5f,
-                    arm.avgDelta,
-                    arm.n,
+                    gapAboveChoice = Fonts.px(3f),
+                    arm = omniArm,
+                    isBest = OmniscientHintLabels.isBestArm(omniArm, maxOmniScore, minOmniSteps),
+                    isFastest = OmniscientHintLabels.isFastestArm(omniArm, minOmniStepsAll),
                     maxWidth = hit.w * 0.96f,
+                    glyphLayout = glyphLayout,
                 )
+            } else {
+                val arm = armByChoice[choiceKey(choice)]
+                if (arm != null) {
+                    drawMcLabel(
+                        batch,
+                        hit.cx,
+                        choiceTopY = hit.cy + row.height * 0.5f,
+                        arm.avgDelta,
+                        arm.n,
+                        maxWidth = hit.w * 0.96f,
+                    )
+                }
             }
         }
         // Grab chrome: while the row is being dragged, frame it so the move

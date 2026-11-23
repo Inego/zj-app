@@ -52,4 +52,63 @@ public final class NativeScheduler {
 
     @JSBody(script = "return document.visibilityState === 'visible';")
     public static native boolean isVisible();
+
+    /**
+     * Create a reusable cooperative macro-task channel backed by {@code MessageChannel}
+     * (with {@code setTimeout(0)} fallback). Each call to {@link #scheduleSlice(JSObject)}
+     * invokes {@code onTick} once on a fresh browser macro-task without the 4 ms nested
+     * timer clamp or redundant {@code requestAnimationFrame} WebGL redraws.
+     */
+    @JSBody(params = {"onTick"}, script =
+        """
+        var ch = (typeof MessageChannel !== 'undefined') ? new MessageChannel() : null;
+        var state = { ch: ch, timer: 0, closed: false, onTick: onTick };
+        var dispatch = function() {
+            state.timer = 0;
+            if (!state.closed) state.onTick();
+        };
+        state.dispatch = dispatch;
+        if (ch) {
+            ch.port1.onmessage = dispatch;
+        }
+        return state;
+        """
+    )
+    public static native JSObject createSliceChannel(Callback onTick);
+
+    /**
+     * Schedule one slice tick on {@code handle}. When the tab is hidden, throttles to
+     * a 250 ms timer so an unfocused tab does not spin CPU.
+     */
+    @JSBody(params = {"handle"}, script =
+        """
+        if (!handle || handle.closed) return;
+        if (document.visibilityState === 'hidden') {
+            handle.timer = window.setTimeout(handle.dispatch, 250);
+        } else if (handle.ch) {
+            handle.ch.port2.postMessage(null);
+        } else {
+            handle.timer = window.setTimeout(handle.dispatch, 0);
+        }
+        """
+    )
+    public static native void scheduleSlice(JSObject handle);
+
+    @JSBody(params = {"handle"}, script =
+        """
+        if (!handle || handle.closed) return;
+        handle.closed = true;
+        if (handle.timer) {
+            window.clearTimeout(handle.timer);
+            handle.timer = 0;
+        }
+        if (handle.ch) {
+            handle.ch.port1.onmessage = null;
+            handle.ch.port1.close();
+            handle.ch.port2.close();
+            handle.ch = null;
+        }
+        """
+    )
+    public static native void closeSliceChannel(JSObject handle);
 }

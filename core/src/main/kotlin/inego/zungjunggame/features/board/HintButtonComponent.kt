@@ -22,6 +22,7 @@ data class HintButtonRenderInput(
     val handH: Float = 0f,
     val edgeInsetBottom: Float = 0f,
     val mode: HintButtonOverlay.Mode = HintButtonOverlay.Mode.Idle,
+    val metricText: String? = null,
 )
 
 /**
@@ -85,6 +86,7 @@ class HintButtonComponent(
             pointerWorldX = c.pointerX,
             pointerWorldY = c.pointerY,
             mode = input.mode,
+            metricText = input.metricText,
         )
     }
 }

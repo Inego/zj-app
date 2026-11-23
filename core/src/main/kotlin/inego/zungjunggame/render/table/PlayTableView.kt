@@ -7,6 +7,7 @@ import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.engine.*
 import inego.zungjunggame.hints.McHintArmSnapshot
+import inego.zungjunggame.hints.OmniscientHintArmSnapshot
 import inego.zungjunggame.input.InputProfile
 import inego.zungjunggame.platform.SafeArea
 import inego.zungjunggame.render.assets.TileAssets
@@ -15,6 +16,8 @@ import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.hint.HintButtonOverlay
 import inego.zungjunggame.render.hint.HintUi
 import inego.zungjunggame.render.hint.McHintLabels
+import inego.zungjunggame.render.hint.OmniscientBreakdownPopup
+import inego.zungjunggame.render.hint.OmniscientHintLabels
 import inego.zungjunggame.render.seats.PlayerAreaLayout
 import inego.zungjunggame.render.seats.SeatLabelDrawer
 import inego.zungjunggame.render.seats.SeatSide
@@ -250,6 +253,17 @@ class PlayTableView(
      * Empty when HINT is off.
      */
     var mcHintArms: List<McHintArmSnapshot> = emptyList()
+        private set
+
+    /**
+     * Latest Omniscient per-option best scores and pattern breakdowns (refreshed ~1 s).
+     * Empty when Omniscient mode is off.
+     */
+    var omniscientHintArms: List<OmniscientHintArmSnapshot> = emptyList()
+        private set
+
+    /** Latest Omniscient search speed in evals/s (0 when idle or unmeasured). */
+    var omniscientEvalsPerSec: Float = 0f
         private set
 
     /**
@@ -554,6 +568,8 @@ class PlayTableView(
     fun clearRecommendation() {
         hintUi = HintUi.Off
         mcHintArms = emptyList()
+        omniscientHintArms = emptyList()
+        omniscientEvalsPerSec = 0f
     }
 
     /**
@@ -572,6 +588,22 @@ class PlayTableView(
     /** Replace per-option MC labels (main thread; from search snapshot). */
     fun setMcHintArms(arms: List<McHintArmSnapshot>) {
         mcHintArms = arms
+    }
+
+    /** Replace per-option Omniscient score / breakdown snapshots (main thread). */
+    fun setOmniscientHintArms(arms: List<OmniscientHintArmSnapshot>, evalsPerSec: Float = 0f) {
+        omniscientHintArms = arms
+        omniscientEvalsPerSec = if (arms.isEmpty()) 0f else evalsPerSec
+    }
+
+    /**
+     * Currently hovered legal choice on the board (hand tile discard or claim
+     * button), or null when nothing is hovered. Used to prioritize hovered
+     * options in Omniscient search.
+     */
+    fun hoveredChoiceForHint(): Choice? {
+        claimPanel.hoveredChoice()?.let { return it }
+        return humanHandHits.getOrNull(hoveredHandIndex)?.let { Choice.discard(it.tileType) }
     }
 
     /**
@@ -1113,6 +1145,7 @@ class PlayTableView(
                 pointerWorldY = hoverY,
                 recommended = if (inputs.hintsEnabled) recChoices else emptyList(),
                 mcHintArms = if (inputs.hintsEnabled && live) mcHintArms else emptyList(),
+                omniscientHintArms = if (inputs.hintsEnabled && live) omniscientHintArms else emptyList(),
                 discardedTileX = Float.NaN,
                 discardedTileY = Float.NaN,
                 interactive = live,
@@ -1121,10 +1154,30 @@ class PlayTableView(
                 decisionBaseMs = decisionBaseMs,
                 preparing = decisionPreparing,
             )
+        } else {
+            claimPanel.clear()
         }
 
         if (inputs.hintsEnabled && live) {
-            McHintLabels.drawAboveHands(batch, mcHintArms, humanHandHits, glyphLayout)
+            if (omniscientHintArms.isNotEmpty()) {
+                OmniscientHintLabels.drawAboveHands(
+                    batch = batch,
+                    arms = omniscientHintArms,
+                    hits = humanHandHits,
+                    glyphLayout = glyphLayout,
+                ) { hit ->
+                    when {
+                        hit.visualId == pressedVisualId -> hit.worldY + hit.h * 0.5f
+                        hit.visualId == hoveredVisualId ->
+                            hit.worldY + hit.h * (hoverLiftFraction + 0.5f * hoverScale)
+                        hit.tileType in recDiscardTypes ->
+                            hit.worldY + hit.h * (hoverLiftFraction * 0.85f + 0.5f * 1.05f)
+                        else -> hit.worldY + hit.h * 0.5f
+                    }
+                }
+            } else {
+                McHintLabels.drawAboveHands(batch, mcHintArms, humanHandHits, glyphLayout)
+            }
         }
 
         if (PatternlessNotice.isApplicable(view, inputs.allowChickenHands) && live) {
@@ -1143,7 +1196,11 @@ class PlayTableView(
             } else {
                 rowCenterY + layout.humanMetrics.handTileH * 0.5f
             }
-            val gap = if (inputs.hintsEnabled && mcHintArms.isNotEmpty()) Fonts.px(26f) else Fonts.px(10f)
+            val gap = if (inputs.hintsEnabled && (mcHintArms.isNotEmpty() || omniscientHintArms.isNotEmpty())) {
+                Fonts.px(26f)
+            } else {
+                Fonts.px(10f)
+            }
             PatternlessNotice.draw(
                 batch = batch,
                 font = font,
@@ -1169,6 +1226,11 @@ class PlayTableView(
                     HintUi.Off -> HintButtonOverlay.Mode.Idle
                     is HintUi.Active -> HintButtonOverlay.Mode.Active
                     is HintUi.Exhausted -> HintButtonOverlay.Mode.Exhausted
+                },
+                metricText = if (omniscientHintArms.isNotEmpty()) {
+                    OmniscientHintLabels.formatEvalsPerSec(omniscientEvalsPerSec)
+                } else {
+                    null
                 },
             )
         }
@@ -1204,10 +1266,12 @@ class PlayTableView(
         }
 
         val hoveredHand = humanHandHits.getOrNull(hoveredHandIndex)
+        var magnifierTopY = Float.NaN
+        val isTouch = InputProfile.detect() == InputProfile.Touch
         if (hoveredHand != null && !hoverX.isNaN() && !hoverY.isNaN()) {
             val waits = inputs.discardWaits.waitsFor(hoveredHand.tileType)
-            if (InputProfile.detect() == InputProfile.Touch) {
-                TouchTileMagnifier.draw(
+            if (isTouch) {
+                magnifierTopY = TouchTileMagnifier.draw(
                     batch = batch,
                     drawer = drawer,
                     tileType = hoveredHand.tileType,
@@ -1226,7 +1290,7 @@ class PlayTableView(
                     showDiscardFace = true,
                 )
             } else if (waits.isNotEmpty()) {
-                TouchTileMagnifier.draw(
+                magnifierTopY = TouchTileMagnifier.draw(
                     batch = batch,
                     drawer = drawer,
                     tileType = hoveredHand.tileType,
@@ -1242,6 +1306,51 @@ class PlayTableView(
                     waits = waits,
                     showDiscardFace = false,
                 )
+            }
+        }
+
+        if (inputs.hintsEnabled && live && omniscientHintArms.isNotEmpty() &&
+            !hoverX.isNaN() && !hoverY.isNaN()
+        ) {
+            val hoveredClaim = claimPanel.hoveredButtonHit()
+            if (hoveredClaim != null) {
+                val arm = omniscientHintArms.firstOrNull {
+                    it.choice.kind == hoveredClaim.choice.kind &&
+                        it.choice.payload == hoveredClaim.choice.payload
+                }
+                if (arm != null) {
+                    OmniscientBreakdownPopup.draw(
+                        batch = batch,
+                        arm = arm,
+                        anchorX = hoveredClaim.cx,
+                        anchorTopY = hoveredClaim.cy + hoveredClaim.h * 0.5f + Fonts.px(24f),
+                        screenW = screenW,
+                        screenH = screenH,
+                        glyphLayout = glyphLayout,
+                    )
+                }
+            } else if (hoveredHand != null) {
+                val arm = omniscientHintArms.firstOrNull {
+                    it.choice.kind == ChoiceKind.Discard && it.choice.payload == hoveredHand.tileType
+                }
+                if (arm != null) {
+                    val baseTop = hoveredHand.worldY +
+                        hoveredHand.h * (hoverLiftFraction + 0.5f * hoverScale)
+                    val anchorTopY = if (!magnifierTopY.isNaN()) {
+                        magnifierTopY
+                    } else {
+                        baseTop + Fonts.px(24f)
+                    }
+                    OmniscientBreakdownPopup.draw(
+                        batch = batch,
+                        arm = arm,
+                        anchorX = if (isTouch) pointerWorldX else hoveredHand.worldX,
+                        anchorTopY = anchorTopY,
+                        screenW = screenW,
+                        screenH = screenH,
+                        glyphLayout = glyphLayout,
+                    )
+                }
             }
         }
     }
@@ -1932,16 +2041,28 @@ class PlayTableView(
         if (!hintsEnabled || interact != TableInteract.Play || !isHumanInteractive) {
             hintUi = HintUi.Off
             mcHintArms = emptyList()
+            omniscientHintArms = emptyList()
+            omniscientEvalsPerSec = 0f
             return
         }
         val current = hintUi
-        if (current is HintUi.Off && mcHintArms.isEmpty()) return
+        if (current is HintUi.Off && mcHintArms.isEmpty() && omniscientHintArms.isEmpty()) return
 
         if (mcHintArms.isNotEmpty()) {
             mcHintArms = mcHintArms.filter { arm ->
                 legalChoices.any { it.kind == arm.choice.kind && it.payload == arm.choice.payload }
             }
             if (mcHintArms.isEmpty()) {
+                hintUi = HintUi.Off
+                return
+            }
+        }
+        if (omniscientHintArms.isNotEmpty()) {
+            omniscientHintArms = omniscientHintArms.filter { arm ->
+                legalChoices.any { it.kind == arm.choice.kind && it.payload == arm.choice.payload }
+            }
+            if (omniscientHintArms.isEmpty()) {
+                omniscientEvalsPerSec = 0f
                 hintUi = HintUi.Off
                 return
             }

@@ -9,6 +9,7 @@ import com.badlogic.gdx.utils.Align
 import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.engine.BotLevel
 import inego.zungjunggame.engine.GameConfig
+import inego.zungjunggame.engine.HintMode
 import inego.zungjunggame.engine.LocalGameConfig
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.input.InputProfile
@@ -31,11 +32,15 @@ data class NewGameSetupRoundGeometry(val rect: Rect, val roundsValue: Int?)
 /** One bot-level radio option and the level it selects. */
 data class NewGameSetupBotGeometry(val rect: Rect, val level: BotLevel)
 
+/** One hint-mode radio option and the mode it selects. */
+data class NewGameSetupHintGeometry(val rect: Rect, val mode: HintMode)
+
 /** GL-free snapshot of the setup card's controls for the last laid-out frame. */
 data class NewGameSetupGeometry(
     val panel: Rect?,
     val rounds: List<NewGameSetupRoundGeometry>,
     val bots: List<NewGameSetupBotGeometry>,
+    val hints: List<NewGameSetupHintGeometry> = emptyList(),
     val chickenToggle: Rect?,
     val chickenInfo: Rect?,
     val start: Rect?,
@@ -89,6 +94,8 @@ class NewGameSetupOverlay(
     private val roundOptions: List<Int?> = DEFAULT_ROUND_OPTIONS,
     /** The bot levels the radio offers, top to bottom (Novice, Beginner, Standard). */
     private val botOptions: List<BotLevel> = DEFAULT_BOT_OPTIONS,
+    /** The hint modes the radio offers, top to bottom (None, Standard bot, Omniscient). */
+    private val hintOptions: List<HintMode> = DEFAULT_HINT_OPTIONS,
     /** The card title's bundle key; the local and duplicate setups differ. */
     private val titleKey: String = "setup.title",
 ) : Disposable, GestureSurface<NewGameSetupVerdict> {
@@ -118,6 +125,8 @@ class NewGameSetupOverlay(
         RoundsChoice,
         /** Bot level stored in [Hit.botLevel]. */
         BotChoice,
+        /** Hint mode stored in [Hit.hintMode]. */
+        HintChoice,
         ChickenToggle,
         Start,
         Cancel,
@@ -133,6 +142,8 @@ class NewGameSetupOverlay(
         val roundsValue: Int? = null,
         /** For [HitKind.BotChoice]: the level to apply. */
         val botLevel: BotLevel? = null,
+        /** For [HitKind.HintChoice]: the hint mode to apply. */
+        val hintMode: HintMode? = null,
     ) {
         fun contains(px: Float, py: Float): Boolean =
             px >= left && px <= left + w && py >= bottom && py <= bottom + h
@@ -145,6 +156,7 @@ class NewGameSetupOverlay(
         val kind: HitKind,
         val roundsValue: Int? = null,
         val botLevel: BotLevel? = null,
+        val hintMode: HintMode? = null,
     )
 
     private sealed interface PointerResult {
@@ -190,10 +202,18 @@ class NewGameSetupOverlay(
                     NewGameSetupBotGeometry(Rect(hit.left, hit.bottom, hit.w, hit.h), it)
                 }
             }
+        val hints = hits
+            .filter { it.kind == HitKind.HintChoice }
+            .mapNotNull { hit ->
+                hit.hintMode?.let {
+                    NewGameSetupHintGeometry(Rect(hit.left, hit.bottom, hit.w, hit.h), it)
+                }
+            }
         return NewGameSetupGeometry(
             panel = panel,
             rounds = rounds,
             bots = bots,
+            hints = hints,
             chickenToggle = rectOf(HitKind.ChickenToggle),
             chickenInfo = chickenInfoRect,
             start = rectOf(HitKind.Start),
@@ -242,6 +262,18 @@ class NewGameSetupOverlay(
                     rect.width,
                     rect.height,
                     botLevel = level,
+                ),
+            )
+        }
+        for ((rect, mode) in geometry.hints) {
+            hits.add(
+                Hit(
+                    HitKind.HintChoice,
+                    rect.left,
+                    rect.bottom,
+                    rect.width,
+                    rect.height,
+                    hintMode = mode,
                 ),
             )
         }
@@ -369,6 +401,9 @@ class NewGameSetupOverlay(
                 HitKind.BotChoice ->
                     hit.botLevel?.let { PointerResult.Draft(draft.copy(botLevel = it)) }
 
+                HitKind.HintChoice ->
+                    hit.hintMode?.let { PointerResult.Draft(draft.copy(hintMode = it)) }
+
                 HitKind.Start -> PointerResult.Start
                 HitKind.Cancel -> PointerResult.Cancel
             }
@@ -408,6 +443,7 @@ class NewGameSetupOverlay(
         val title = L10n.get(titleKey)
         val sectionRounds = L10n.get("setup.rounds")
         val sectionBots = L10n.get("setup.bots")
+        val sectionHints = L10n.get("setup.hints")
         val labelChicken = L10n.get("setup.chicken")
         val startLabel = L10n.get("setup.start")
         val cancelLabel = L10n.get("setup.cancel")
@@ -424,6 +460,9 @@ class NewGameSetupOverlay(
         val botsW = botOptions.maxOfOrNull {
             Fonts.textWidth(sectionFont, botOptionLabel(it)) + rowInset
         } ?: 0f
+        val hintsW = hintOptions.maxOfOrNull {
+            Fonts.textWidth(sectionFont, hintOptionLabel(it)) + rowInset
+        } ?: 0f
         val checkInset = Fonts.px(4f) + Fonts.px(22f) + Fonts.px(14f)
         val chickenW = checkInset + Fonts.textWidth(sectionFont, labelChicken) + infoGap + infoSide
         val btnGap = Fonts.px(12f)
@@ -437,18 +476,31 @@ class NewGameSetupOverlay(
             actionWidth = startW + cancelW + btnGap,
             tailWidth = chickenW,
             sections = { rhythm, _ ->
-                listOf(
-                    OverlayForm.Section(
-                        label = sectionRounds,
-                        contentWidth = roundsW,
-                        rows = List(roundOptions.size) { rhythm.rowH },
-                    ),
-                    OverlayForm.Section(
-                        label = sectionBots,
-                        contentWidth = botsW,
-                        rows = List(botOptions.size) { rhythm.rowH },
-                    ),
-                )
+                buildList {
+                    add(
+                        OverlayForm.Section(
+                            label = sectionRounds,
+                            contentWidth = roundsW,
+                            rows = List(roundOptions.size) { rhythm.rowH },
+                        ),
+                    )
+                    add(
+                        OverlayForm.Section(
+                            label = sectionBots,
+                            contentWidth = botsW,
+                            rows = List(botOptions.size) { rhythm.rowH },
+                        ),
+                    )
+                    if (hintOptions.isNotEmpty()) {
+                        add(
+                            OverlayForm.Section(
+                                label = sectionHints,
+                                contentWidth = hintsW,
+                                rows = List(hintOptions.size) { rhythm.rowH },
+                            ),
+                        )
+                    }
+                }
             },
             tail = { rhythm, rowWidth ->
                 listOf(
@@ -498,6 +550,24 @@ class NewGameSetupOverlay(
                 botLevel = level,
             )
         }
+        val hintRows = hintOptions.map { mode ->
+            RadioRow(
+                label = hintOptionLabel(mode),
+                selected = draft.hintMode == mode,
+                kind = HitKind.HintChoice,
+                hintMode = mode,
+            )
+        }
+        val sectionLabels = buildList {
+            add(sectionRounds)
+            add(sectionBots)
+            if (hintOptions.isNotEmpty()) add(sectionHints)
+        }
+        val sectionRows = buildList {
+            add(roundRows)
+            add(botRows)
+            if (hintOptions.isNotEmpty()) add(hintRows)
+        }
 
         body.drawBody(batch, camera, px, pointerWorldX, pointerWorldY) {
             for ((index, placement) in geometry.sections.withIndex()) {
@@ -505,14 +575,14 @@ class NewGameSetupOverlay(
                     sectionFont.color = AppPalette.inkMuted
                     sectionFont.draw(
                         batch,
-                        if (index == 0) sectionRounds else sectionBots,
+                        sectionLabels[index],
                         label.left,
                         label.top,
                     )
                     sectionFont.color = Color.WHITE
                 }
                 drawRadioGroup(
-                    rows = if (index == 0) roundRows else botRows,
+                    rows = sectionRows[index],
                     group = placement.group,
                     rowRects = placement.rows,
                     batch = batch,
@@ -641,6 +711,7 @@ class NewGameSetupOverlay(
             h,
             roundsValue = row.roundsValue,
             botLevel = row.botLevel,
+            hintMode = row.hintMode,
         )
         val hovered =
             !pointerX.isNaN() && !pointerY.isNaN() &&
@@ -809,6 +880,13 @@ class NewGameSetupOverlay(
         BotLevel.STANDARD -> L10n.get("setup.bots.standard")
     }
 
+    /** The label for one hint-mode row. */
+    private fun hintOptionLabel(mode: HintMode): String = when (mode) {
+        HintMode.NONE -> L10n.get("setup.hints.none")
+        HintMode.STANDARD_BOT -> L10n.get("setup.hints.standard")
+        HintMode.OMNISCIENT -> L10n.get("setup.hints.omniscient")
+    }
+
     companion object {
         internal const val SELECT_START = "start"
         internal const val SELECT_CANCEL = "cancel"
@@ -822,6 +900,13 @@ class NewGameSetupOverlay(
             BotLevel.NOVICE,
             BotLevel.BEGINNER,
             BotLevel.STANDARD,
+        )
+
+        /** None, Standard bot, Omniscient; the draft's default is Standard bot. */
+        val DEFAULT_HINT_OPTIONS: List<HintMode> = listOf(
+            HintMode.NONE,
+            HintMode.STANDARD_BOT,
+            HintMode.OMNISCIENT,
         )
     }
 }

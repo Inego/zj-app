@@ -4,6 +4,7 @@ import inego.zungjunggame.engine.BotLevel
 import inego.zungjunggame.engine.GameConfig
 import inego.zungjunggame.engine.GameState
 import inego.zungjunggame.engine.HandScoreRow
+import inego.zungjunggame.engine.HintMode
 import inego.zungjunggame.engine.LocalGameConfig
 
 /**
@@ -21,6 +22,8 @@ data class SessionSnapshot(
     val rounds: Int? = GameConfig.DEFAULT_ROUNDS,
     /** Bot strength of this local game; a resumed game keeps the level it started with. */
     val botLevel: BotLevel = BotLevel.DEFAULT,
+    /** Hint assistance mode of this local game; a resumed game keeps the mode it started with. */
+    val hintMode: HintMode = HintMode.DEFAULT,
 ) {
     val gameConfig: LocalGameConfig
         get() = LocalGameConfig(
@@ -29,5 +32,6 @@ data class SessionSnapshot(
                 allowChickenHands = game.allowChickenHands,
             ),
             botLevel = botLevel,
+            hintMode = hintMode,
         )
 }
