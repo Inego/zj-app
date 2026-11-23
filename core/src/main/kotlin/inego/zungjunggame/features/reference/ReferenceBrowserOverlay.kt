@@ -492,7 +492,7 @@ class ReferenceBrowserOverlay(
             hasNavigationSession = true
         }
         val sectionChanged = nav.section != section
-        val validPage = ReferenceCatalog.page(nav.section, nav.pageId) != null
+        val validPage = ReferenceCatalog.hasPage(nav.section, nav.pageId)
         val pageId = if (validPage) nav.pageId else ReferenceCatalog.defaultPageId(nav.section)
         val pageChanged = pageId != this.pageId
         val localeChanged = loadedContentLocale != ReferenceCatalog.currentLocale()

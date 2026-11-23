@@ -10,6 +10,7 @@ import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.input.InputProfile
 import inego.zungjunggame.platform.UiCursor
+import inego.zungjunggame.render.assets.TileAssets
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.ui.AppPalette
@@ -66,14 +67,16 @@ import kotlin.math.min
   * dim bands and the side column veil). Wall-build and seat-winds keep their own
   * views, which own their own clocks.
   */
-class TutorialCoachOverlay : Disposable, GestureSurface<TutorialCoachOverlay.PointerUpResult> {
+class TutorialCoachOverlay(
+    sharedTileAssets: (() -> TileAssets)? = null,
+) : Disposable, GestureSurface<TutorialCoachOverlay.PointerUpResult> {
     private val glyphLayout = GlyphLayout()
 
     /** The localized title and rich-text body of the beat. */
-    private val copy = CoachCopyText()
+    private val copy = CoachCopyText(sharedTileAssets)
 
     /** Tile diagrams: plan → draw, plus the anchors they publish for the focus. */
-    private val diagramTiles = CoachDiagramTiles(glyphLayout)
+    private val diagramTiles = CoachDiagramTiles(glyphLayout, sharedTileAssets)
 
     /** Highlight + callout over a focused tile, diagram or live-board. */
     private val focusChrome = CoachFocusChrome()

@@ -38,9 +38,11 @@ class RichTextBlock(
      * markup (`**bold**`, `[hl]…[/]`) and proper wrapping.
      */
     private val bodyRole: TextRole = TextRole.Body,
+    /** Borrowed app-scoped tile assets; when null, lazily creates and owns a private set. */
+    private val sharedTileAssets: (() -> TileAssets)? = null,
 ) : Disposable {
 
-    private var tileAssets: TileAssets? = null
+    private var ownedTileAssets: TileAssets? = null
     private var tileDrawer: TileDrawer? = null
 
     private var sourceDoc: RichDoc = RichDoc(emptyList())
@@ -145,7 +147,6 @@ class RichTextBlock(
         lastLeft = left
         lastTop = top
         val originY = top - doc.height
-        val drawer = ensureTiles()
         val px = whitePixel()
         val hoverHref = if (!pointerWorldX.isNaN() && !pointerWorldY.isNaN()) {
             linkAt(pointerWorldX, pointerWorldY)
@@ -158,7 +159,7 @@ class RichTextBlock(
                 richRenderer.draw(
                     batch = batch,
                     doc = doc,
-                    drawer = drawer,
+                    drawer = ::ensureTiles,
                     whitePixel = px,
                     originX = left,
                     originY = originY,
@@ -170,7 +171,7 @@ class RichTextBlock(
             richRenderer.draw(
                 batch = batch,
                 doc = doc,
-                drawer = drawer,
+                drawer = ::ensureTiles,
                 whitePixel = px,
                 originX = left,
                 originY = originY,
@@ -215,7 +216,11 @@ class RichTextBlock(
 
     private fun ensureFontsReady() {
         if (measurer !is GdxTextMeasurer) return
-        Fonts.ensureDocFonts()
+        if (bodyRole == TextRole.Small) {
+            Fonts.ensureCreated()
+        } else {
+            Fonts.ensureDocFonts()
+        }
         pendingWarmup?.let {
             Fonts.warmDocGlyphs(it)
             pendingWarmup = null
@@ -278,16 +283,16 @@ class RichTextBlock(
 
     private fun ensureTiles(): TileDrawer {
         tileDrawer?.let { return it }
-        val assets = TileAssets()
-        tileAssets = assets
+        val assets = sharedTileAssets?.invoke()
+            ?: TileAssets().also { ownedTileAssets = it }
         val drawer = TileDrawer(assets)
         tileDrawer = drawer
         return drawer
     }
 
     override fun dispose() {
-        tileAssets?.dispose()
-        tileAssets = null
+        ownedTileAssets?.dispose()
+        ownedTileAssets = null
         tileDrawer = null
         invalidateLayout()
         lastLeft = 0f

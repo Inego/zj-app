@@ -150,16 +150,6 @@ class AppRuntime internal constructor(
         const val NOTICES_POLL_MS = 30_000L
 
         /**
-         * The rebuild reason for a freshly-constructed runtime.
-         *
-         * Named, and compared by name in [rebuildFaces], because it is the one
-         * reason that must **not** run GL-object recovery: a cold start inherits a
-         * live context, so there is nothing dead to repair and invalidating working
-         * objects only breaks the first frame.
-         */
-        const val COLD_START_REASON = "new runtime"
-
-        /**
          * How often a *changed* stack may be written between lifecycle edges.
          *
          * Durable writes are required at [pause]/[exitApp]/[dispose]; this timer is
@@ -231,67 +221,13 @@ class AppRuntime internal constructor(
     private val session get() = freePlayHost.session
     private val kind get() = sessionRegistry.kind
 
-    /**
-     * Requests a glyph-atlas rebuild on the next frame.
-     *
-     * Called by a freshly-created runtime. On a cold process start there is no
-     * previous context to have inherited faces from, so this call was measured
-     * redundant on desktop (218 ms of a 1026 ms boot, an identical first
-     * frame without it). It is kept deliberately, not by oversight:
-     *
-     *  - the Android activity-recreation path *does* build a second runtime inside
-     *    one process and genuinely inherits faces across a context change, and that
-     *    is the case the call was written for;
-     *  - the desktop A/B cannot cover it (one platform, one process).
-     *
-     * **Stage C did not remove this, and the reason is worth keeping distinct
-     * from the one above.** A second runtime is a *new* `AndroidGraphics`, so the
-     * re-entry signal a loss produces — a second `onSurfaceCreated` on the
-     * *same* graphics object — starts from a cleared flag and does not fire. The
-     * event and this call therefore cover different cases and both stay.
-     * (A rotation is not that path: the manifest lists `orientation|screenSize`
-     * on `configChanges`, so it arrives as `onSurfaceChanged`.)
-     *
-     * What Stage C did change is what this call may throw away: see
-     * [rebuildFaces]'s `new runtime` branch, which now also drops the shared
-     * [WhitePixel] — a process-wide name, and the one object here that can
-     * outlive the context that made it.
-     */
-    fun requestFontRebuild() {
-        gpuRecovery.request(COLD_START_REASON)
-    }
-
     private fun rebuildFaces(reason: String) {
-        // Order matters, and the reason is not obvious from the names.
-        //
-        // The GL-object recovery must come **first**. It is what makes a real
-        // context loss survivable at all: without it the batch's mesh and shader
-        // still hold names from the dead context, every draw call fails with
-        // "object does not belong to this context", and the frame paints nothing —
-        // the felt-only screen Stage G exists to remove. Fonts and textures would
-        // be rebuilt perfectly into a context that cannot draw them.
-        //
-        // *Which* rebuilds get it is [shouldRecoverManagedGpuResources]'s whole
-        // subject, and the reasoning is not obvious from the names — read it
-        // there rather than here. The font/texture rebuild below it, by contrast,
-        // is unconditional: on a cold start that is what compiles the atlases once.
-        if (shouldRecoverManagedGpuResources(reason)) {
-            ManagedGpuResources.recoverAll(reason)
-        } else {
-            // The shared pixel is the one thing a cold start must still drop, and
-            // it is here because it is a *process-wide* name rather than a
-            // runtime-owned one. `recoverAll` would also drop the
-            // batch shader and invalidate every mesh, which a live context must
-            // not be asked to survive; the pixel can be dropped on its own
-            // because nothing caches it anywhere except [WhitePixel] itself —
-            // every holder is a getter, so the next draw builds a fresh one.
-            //
-            // Safe on a genuine cold process start, where the cache is empty
-            // anyway, and required on a second runtime in one process (the
-            // Android activity-recreation path), where the pixel is the one
-            // object here that outlived the context that made it.
-            WhitePixel.invalidate()
-        }
+        // Order matters: GL-object recovery must come first so the batch's mesh and
+        // shader hold valid names in the restored context before fonts and textures
+        // rebuild into it. Every call here is a genuine context loss (or forced
+        // diagnostic marker); process-global caches inherited across Android activity
+        // recreation are invalidated up front in [AppGraph.create].
+        ManagedGpuResources.recoverAll(reason)
         Fonts.recoverAfterBackgrounding(reason)
         TextureRecovery.recoverAll(reason)
     }
@@ -917,38 +853,6 @@ class AppRuntime internal constructor(
  * the volatile default until a launcher says otherwise.
  */
 internal fun shouldRequestOnResume(contextsAreDurable: Boolean): Boolean = !contextsAreDurable
-
-/**
- * Whether this rebuild must also repair libGDX's *own* GL objects — the batch's
- * shader and mesh handles, and the shared `WhitePixel`.
- *
- * A rebuild reason arrives for two unrelated reasons and the difference decides
- * whether the managed objects are broken:
- *
- *  - a **context that went away** (`contextRecreated`, and the volatile gap
- *    fallback) — every GL name the batch holds died, so the repair is the whole
- *    point. Without it the frame paints felt and every draw logs
- *    "object does not belong to this context" (Stage G).
- *  - a **freshly-constructed runtime** (`new runtime`) — it inherits a
- *    *live* context with freshly allocated objects. Invalidating them is not a
- *    no-op: dropping the batch's shader and every managed mesh's buffers
- *    mid-boot is enough to make the first frame draw nothing, which is the
- *    felt-only symptom Stage G removed, manufactured at startup. Measured: the
- *    pre-G build loaded its menu and the Stage G build showed green felt with no
- *    loss event ever firing.
- *
- * **But the shared pixel is dropped on the cold start too**, and that asymmetry
- * is the point of the function rather than an exception bolted onto it. The pixel
- * is a *process-wide* name, not a runtime-owned one: it is the one object here
- * that can outlive the context that made it, which is exactly what a second
- * runtime in one process (Android activity recreation) does. It cannot be put
- * behind the gate with the rest, because the rest is what would break at boot.
- *
- * Extracted as a named function for the same reason [shouldRequestOnResume] is:
- * the ordering lives inside a 500-line [renderFrame] that `:core:test` cannot
- * run, so the rule becomes a test instead of a comment.
- */
-internal fun shouldRecoverManagedGpuResources(reason: String): Boolean = reason != "new runtime"
 
 /**
  * Whether this frame must bail out without clearing and without painting.

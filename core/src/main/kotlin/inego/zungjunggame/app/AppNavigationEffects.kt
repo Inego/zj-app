@@ -91,7 +91,7 @@ internal class AppNavigationEffects(
         base: ReferenceNavState,
     ): ReferenceNavState {
         val bookmark = sectionBookmarks.restore(targetSection) { id ->
-            ReferenceCatalog.page(targetSection, id) != null
+            ReferenceCatalog.hasPage(targetSection, id)
         }
         return if (bookmark != null) {
             base.copy(

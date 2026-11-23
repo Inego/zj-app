@@ -4,9 +4,9 @@ package inego.zungjunggame.app
  * The single entry point for "the GPU resources may be gone, rebuild them".
  *
  * Three places can ask for that — a long frame gap ([FrameStallRecovery]), a
- * `resume()` ([AppRuntime.resume]), and a freshly-created runtime
- * ([AppRuntime.requestFontRebuild]) — and this class gives them one pending flag
- * and one rebuild per frame.
+ * `resume()` ([AppRuntime.resume]) on volatile platforms, and a real platform
+ * context-recreation signal (`GpuContextPolicy.onContextRecreated`) — and this
+ * class gives them one pending flag and one rebuild per frame.
  *
  * ### What coalescing does and does not buy — measured 2026-09-29
  *

@@ -6,6 +6,7 @@ import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.utils.Disposable
+import inego.zungjunggame.render.assets.TileAssets
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.richtext.RichTextView
@@ -36,10 +37,11 @@ data class NoticesGeometry(
  */
 class NoticesOverlay(
     private val compact: Boolean = false,
+    sharedTileAssets: (() -> TileAssets)? = null,
 ) : Disposable, GestureSurface<ModalVerdict> {
     private val glyphLayout = GlyphLayout()
     private val closeButton = CloseButton()
-    private val view = RichTextView()
+    private val view = RichTextView(sharedTileAssets = sharedTileAssets)
 
 
     private var panelLeft = 0f

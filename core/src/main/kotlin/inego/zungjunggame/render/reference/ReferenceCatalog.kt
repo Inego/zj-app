@@ -117,8 +117,11 @@ object ReferenceCatalog {
         ensureLoaded().sectionLabels[section]
             ?: section.name
 
-    fun pages(section: Section): List<Page> =
-        ensureLoaded().pagesBySection[section].orEmpty()
+    fun pages(section: Section): List<Page> {
+        val loaded = ensureLoaded()
+        val metas = loaded.metaBySection[section].orEmpty()
+        return metas.map { loadPage(loaded, it) }
+    }
 
     /**
      * Browser window title from the pack language’s `reference.title` bundle key.
@@ -130,15 +133,27 @@ object ReferenceCatalog {
     /**
      * TOC rows for [section]: one row per index page, in index order.
      * Indent and muted number come from the page title / optional overrides.
+     * Uses taxonomy metadata only — reads zero `.md` page bodies.
      */
     fun listItems(section: Section): List<ListItem> =
-        buildTocItems(pages(section))
+        ensureLoaded().metaBySection[section].orEmpty().map { metaToListItem(it) }
 
-    fun page(section: Section, id: String): Page? =
-        pages(section).firstOrNull { it.id == id }
+    /** True when [id] exists in [section]'s taxonomy (reads zero `.md` bodies). */
+    fun hasPage(section: Section, id: String): Boolean =
+        ensureLoaded().metaById[section]?.containsKey(id) == true
+
+    /**
+     * Resolve one page with its markdown body, reading and caching only that
+     * page's `.md` file on first access.
+     */
+    fun page(section: Section, id: String): Page? {
+        val loaded = ensureLoaded()
+        val meta = loaded.metaById[section]?.get(id) ?: return null
+        return loadPage(loaded, meta)
+    }
 
     fun defaultPageId(section: Section): String =
-        pages(section).first().id
+        ensureLoaded().metaBySection.getValue(section).first().id
 
     /**
      * Resolve a markdown link destination from reference body markup.
@@ -177,16 +192,18 @@ object ReferenceCatalog {
                 return LinkTarget.Page(Section.Rules, ABOUT_PAGE_ID)
         }
 
-        // Exact page id in any section.
+        val loaded = ensureLoaded()
+
+        // Exact page id in any section (taxonomy-only; zero body reads).
         for (section in Section.entries) {
-            page(section, h)?.let { return LinkTarget.Page(section, it.id) }
+            loaded.metaById[section]?.get(h)?.let { return LinkTarget.Page(section, it.id) }
         }
 
         // Locale-relative file path.
         val fileNorm = h.removePrefix("./").replace('\\', '/').trimStart('/')
         if (fileNorm.isNotEmpty()) {
             for (section in Section.entries) {
-                for (p in pages(section)) {
+                for (p in loaded.metaBySection[section].orEmpty()) {
                     if (p.file.isEmpty()) continue
                     if (p.file == fileNorm ||
                         p.file.endsWith("/$fileNorm") ||
@@ -233,6 +250,20 @@ object ReferenceCatalog {
         )
     }
 
+    private fun metaToListItem(meta: PageMeta): ListItem {
+        val number = meta.number?.takeIf { it.isNotBlank() }
+        val level = meta.level?.coerceAtLeast(0)
+            ?: number?.let { (numberSegments(it).size - 1).coerceAtLeast(0) }
+            ?: 0
+        return ListItem(
+            id = meta.id,
+            label = meta.title,
+            number = number,
+            level = level,
+            selectable = true,
+        )
+    }
+
     private fun numberSegments(number: String): List<String> =
         number.split('.').filter { it.isNotEmpty() }
 
@@ -253,7 +284,8 @@ object ReferenceCatalog {
 
         val browserTitle = optionalString("reference.title", strings)
         val labels = LinkedHashMap<Section, String>()
-        val pagesBySection = LinkedHashMap<Section, List<Page>>()
+        val metaBySection = LinkedHashMap<Section, List<PageMeta>>()
+        val metaById = LinkedHashMap<Section, Map<String, PageMeta>>()
 
         for ((section, pages1) in structure) {
             labels[section] = requireString(
@@ -262,43 +294,63 @@ object ReferenceCatalog {
                 "section '${section.id}' label for pack '$loc'",
             )
 
-            val pages = ArrayList<Page>(pages1.size)
+            val metas = ArrayList<PageMeta>(pages1.size)
+            val byId = LinkedHashMap<String, PageMeta>(pages1.size)
             for ((id, file, number, level) in pages1) {
                 val title = requireString(
                     "reference.page.$id.title",
                     strings,
                     "page '$id' title for pack '$loc'",
                 )
-                val markupPath = "reference/$loc/$file"
-                val markup = pageBody(src, loc, file)
-                    ?: error("Missing reference page: $markupPath")
-                pages += Page(
+                val meta = PageMeta(
                     id = id,
                     title = title,
-                    markup = markup.trimEnd() + "\n",
                     file = file,
                     number = number,
                     level = level,
                 )
+                metas += meta
+                byId[id] = meta
             }
-            pagesBySection[section] = pages
+            metaBySection[section] = metas
+            metaById[section] = byId
         }
 
         for (section in Section.entries) {
-            check(pagesBySection.containsKey(section)) {
+            check(metaBySection.containsKey(section)) {
                 "reference/structure.json: required section '${section.id}' is missing"
             }
-            check(pagesBySection.getValue(section).isNotEmpty()) {
+            check(metaBySection.getValue(section).isNotEmpty()) {
                 "reference/structure.json: section '${section.id}' has no pages"
             }
         }
 
         return LoadedLocale(
             locale = loc,
+            source = src,
             browserTitle = browserTitle,
             sectionLabels = labels,
-            pagesBySection = pagesBySection,
+            metaBySection = metaBySection,
+            metaById = metaById,
         )
+    }
+
+    /** Read and cache one page's markdown body on demand. */
+    private fun loadPage(loaded: LoadedLocale, meta: PageMeta): Page {
+        loaded.bodyCache[meta.id]?.let { return it }
+        val markupPath = "reference/${loaded.locale}/${meta.file}"
+        val markup = pageBody(loaded.source, loaded.locale, meta.file)
+            ?: error("Missing reference page: $markupPath")
+        val page = Page(
+            id = meta.id,
+            title = meta.title,
+            markup = markup.trimEnd() + "\n",
+            file = meta.file,
+            number = meta.number,
+            level = meta.level,
+        )
+        loaded.bodyCache[meta.id] = page
+        return page
     }
 
     /**
@@ -396,10 +448,21 @@ object ReferenceCatalog {
         val pages: List<StructurePage>,
     )
 
-    private data class LoadedLocale(
+    private data class PageMeta(
+        val id: String,
+        val title: String,
+        val file: String,
+        val number: String?,
+        val level: Int?,
+    )
+
+    private class LoadedLocale(
         val locale: String,
+        val source: ReferenceAssetSource,
         val browserTitle: String,
         val sectionLabels: Map<Section, String>,
-        val pagesBySection: Map<Section, List<Page>>,
+        val metaBySection: Map<Section, List<PageMeta>>,
+        val metaById: Map<Section, Map<String, PageMeta>>,
+        val bodyCache: MutableMap<String, Page> = HashMap(),
     )
 }

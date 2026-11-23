@@ -82,10 +82,14 @@ import inego.zungjunggame.features.settings.LanguagePickerOverlay
 import inego.zungjunggame.features.menu.MenuContext
 import inego.zungjunggame.render.gameMenuFlags
 import inego.zungjunggame.render.assets.ManagedGpuResources
+import inego.zungjunggame.render.assets.TileAssets
+import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.assets.registerWhitePixelRecovery
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.render.hint.HintButtonOverlay
+import inego.zungjunggame.render.richtext.RichTextView
 import inego.zungjunggame.render.ui.UiChip
+import inego.zungjunggame.render.ui.UiIcons
 import inego.zungjunggame.features.challenges.ShadowRankedAttemptsOverlay
 import inego.zungjunggame.features.challenges.ShadowRankedAttemptsRenderInput
 import inego.zungjunggame.features.challenges.ShadowRankedHandsOverlay
@@ -216,13 +220,28 @@ class AppGraph(
     private val ratingHistory = scope.own("ratingHistory") { RatingHistoryOverlay() }
     private val shadowRankedAttemptsOverlay = scope.own("shadowRankedAttempts") { ShadowRankedAttemptsOverlay() }
     private val shadowRankedHandsOverlay = scope.own("shadowRankedHands") { ShadowRankedHandsOverlay() }
-    private val notices = scope.own("notices") { NoticesOverlay() }
-    private val noticePopup = scope.own("noticePopup") { NoticesOverlay(compact = true) }
-    private val referenceBrowser = scope.own("referenceBrowser") { ReferenceBrowserOverlay() }
+    /**
+     * Single app-wide tile texture set, owned by [scope] and shared across the play
+     * table, reference browser, notices, and tutorial surfaces. Built once during
+     * [create] (when [PlayTableView] resolves it) so opening Reference, Notices, or
+     * Tutorial never decodes another copy of the 35 tile PNGs + 3 procedural textures.
+     */
+    private val tileAssets: TileAssets by lazy { scope.own("tileAssets") { TileAssets() } }
+    private val notices = scope.own("notices") { NoticesOverlay(sharedTileAssets = { tileAssets }) }
+    private val noticePopup = scope.own("noticePopup") {
+        NoticesOverlay(compact = true, sharedTileAssets = { tileAssets })
+    }
+    private val referenceBrowser = scope.own("referenceBrowser") {
+        ReferenceBrowserOverlay(contentView = RichTextView(sharedTileAssets = { tileAssets }))
+    }
     private val awayOverlay = scope.own("away") { AwayOverlay() }
     private val tutorialShell = scope.own("tutorialShell") { TutorialShell() }
-    private val tutorialQuiz = scope.own("tutorialQuiz") { TutorialQuizOverlay() }
-    private val tutorialCoach = scope.own("tutorialCoach") { TutorialCoachOverlay() }
+    private val tutorialQuiz = scope.own("tutorialQuiz") {
+        TutorialQuizOverlay(sharedTileAssets = { tileAssets })
+    }
+    private val tutorialCoach = scope.own("tutorialCoach") {
+        TutorialCoachOverlay(sharedTileAssets = { tileAssets })
+    }
     /**
      * The single HINT button every entry shares. Its [UiChip] is the resource, so
      * the scope owns the chip and this overlay is the view over it; lazy because the
@@ -250,6 +269,14 @@ class AppGraph(
         // The shared 1×1 white pixel is the app's only unmanaged texture that every
         // panel draws through, so it is registered last, next to its two siblings.
         registerWhitePixelRecovery()
+        // Drop process-global GL caches that may survive a prior activity's dead
+        // context in the same process (Android activity recreation). On a cold
+        // process start all three are empty (zero-cost no-op); on a second runtime
+        // they guarantee every font, icon, and white-pixel upload targets the new
+        // live context once instead of paying a redundant second rebuild on frame 1.
+        WhitePixel.invalidate()
+        UiIcons.invalidateForNewContext()
+        Fonts.invalidateForNewContext()
         ApiConfig.loadFromLocalFile()
         BootDiagnostics.mark("bootstrapApp:api", ApiConfig.baseUrl)
         // A web launch may arrive with a deep link (a mail link's `#my_challenges`).
@@ -302,7 +329,7 @@ class AppGraph(
         // The one audio resource: it owns the Sound handles and gates on `ui.prefs`.
         val soundPlayer = scope.own("sound") { AppSoundPlayer(state.ui) }
         BootDiagnostics.mark("bootstrapApp:PlayTableView:begin")
-        val table = scope.own("table") { PlayTableView() }
+        val table = scope.own("table") { PlayTableView(assets = tileAssets, ownsAssets = false) }
         BootDiagnostics.mark("bootstrapApp:PlayTableView:done")
         val engine = DefaultEngine()
         // Local bot strength. Hints / AI assist / MC playouts keep `engine`; only
@@ -1380,7 +1407,6 @@ class AppGraph(
             pollNotices = { onlineEffects.pollNotices() },
             startupIntent = startupIntent,
         )
-        runtime.requestFontRebuild()
         // No flush here: [AppRuntime] flushes on pause/exit/dispose, which is the
         // runtime's one flush site. Boot-time writes are the imports' (each
         // flushed against its own source) and the restored session's, which the

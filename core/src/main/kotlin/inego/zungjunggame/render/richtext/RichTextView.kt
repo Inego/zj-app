@@ -39,12 +39,14 @@ class RichTextView(
     private val measurer: GdxTextMeasurer = GdxTextMeasurer(),
     palette: RichColorPalette = RichColorPalette.Default,
     private val richRenderer: RichTextRenderer = RichTextRenderer(measurer, palette),
+    /** Borrowed app-scoped tile assets; when null, lazily creates and owns a private set. */
+    private val sharedTileAssets: (() -> TileAssets)? = null,
 ) : Disposable {
 
     private val clipBounds = Rectangle()
     private val scissors = Rectangle()
 
-    private var tileAssets: TileAssets? = null
+    private var ownedTileAssets: TileAssets? = null
     private var tileDrawer: TileDrawer? = null
 
     private var sourceDoc: RichDoc = RichDoc(emptyList())
@@ -265,7 +267,6 @@ class RichTextView(
         viewH = height
 
         val px = whitePixel()
-        val drawer = ensureTiles()
         // Keep text clear of the right-edge scrollbar track.
         val contentW = (width - VerticalScrollbar.gutterWidth()).coerceAtLeast(1f)
         val doc = ensureLaidOut(contentW)
@@ -293,7 +294,7 @@ class RichTextView(
         richRenderer.draw(
             batch,
             doc,
-            drawer,
+            ::ensureTiles,
             px,
             originX,
             originY,
@@ -381,16 +382,16 @@ class RichTextView(
 
     private fun ensureTiles(): TileDrawer {
         tileDrawer?.let { return it }
-        val assets = TileAssets()
-        tileAssets = assets
+        val assets = sharedTileAssets?.invoke()
+            ?: TileAssets().also { ownedTileAssets = it }
         val drawer = TileDrawer(assets)
         tileDrawer = drawer
         return drawer
     }
 
     override fun dispose() {
-        tileAssets?.dispose()
-        tileAssets = null
+        ownedTileAssets?.dispose()
+        ownedTileAssets = null
         tileDrawer = null
         laidOut = null
         scrollbar.clear()

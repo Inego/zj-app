@@ -34,7 +34,7 @@ class RichTextRenderer(
     fun draw(
         batch: SpriteBatch,
         doc: LaidOutDoc,
-        drawer: TileDrawer,
+        drawer: () -> TileDrawer,
         whitePixel: Texture,
         originX: Float,
         originY: Float,
@@ -83,7 +83,7 @@ class RichTextRenderer(
                 is DrawOp.Tile -> {
                     val prev = batch.color.cpy()
                     batch.setColor(AppPalette.tint(AppPalette.headerInk, a))
-                    drawer.drawOpen(
+                    drawer().drawOpen(
                         batch,
                         op.type,
                         originX + op.cx,

@@ -32,6 +32,16 @@ class GdxTextMeasurer : TextMeasurer {
     fun capHeight(role: TextRole): Float = fontFor(TextStyle.Plain, role).data.capHeight
 
     fun fontFor(style: TextStyle, role: TextRole): BitmapFont {
+        if (role == TextRole.Small) {
+            Fonts.ensureCreated()
+            // Small print has one weight: no small italic face exists, so an
+            // italic span there draws at the small bold face rather than silently
+            // losing its size.
+            return when {
+                style.bold || style.italic -> Fonts.smallBold
+                else -> Fonts.small
+            }
+        }
         Fonts.ensureDocFonts()
         return when (role) {
             TextRole.H1 -> Fonts.docHeading1
@@ -47,13 +57,7 @@ class GdxTextMeasurer : TextMeasurer {
                 style.italic -> Fonts.docBodyItalic
                 else -> Fonts.docBody
             }
-            // Small print has one weight: no small italic face exists, so an
-            // italic span there draws at the small bold face rather than silently
-            // losing its size.
-            TextRole.Small -> when {
-                style.bold || style.italic -> Fonts.smallBold
-                else -> Fonts.small
-            }
+            TextRole.Small -> Fonts.small
         }
     }
 }

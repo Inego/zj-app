@@ -37,7 +37,10 @@ import kotlin.random.Random
  * The not-a-sequence peel (phase 0 static, 1/2 peeling spares aside) is beat
  * state, so it arrives as [NotASequencePeel] rather than living here.
  */
-internal class CoachDiagramTiles(private val glyphLayout: GlyphLayout = GlyphLayout()) : Disposable {
+internal class CoachDiagramTiles(
+    private val glyphLayout: GlyphLayout = GlyphLayout(),
+    private val sharedTileAssets: (() -> TileAssets)? = null,
+) : Disposable {
 
     /** Whether tile faces carry a character/honor label. */
     enum class TagMode { Off, FollowSetting, ForceOn }
@@ -60,7 +63,7 @@ internal class CoachDiagramTiles(private val glyphLayout: GlyphLayout = GlyphLay
     /** Individual diagram tile faces; same type is unioned into [anchors]. */
     private val diagramTileFaces = ArrayList<DiagramFace>(48)
 
-    private var tileAssets: TileAssets? = null
+    private var ownedTileAssets: TileAssets? = null
     private var tileDrawer: TileDrawer? = null
 
     /** Running index for [SlideFrame.itemWeight] while drawing diagram tiles. */
@@ -168,16 +171,16 @@ internal class CoachDiagramTiles(private val glyphLayout: GlyphLayout = GlyphLay
 
     override fun dispose() {
         tileDrawer = null
-        tileAssets?.dispose()
-        tileAssets = null
+        ownedTileAssets?.dispose()
+        ownedTileAssets = null
         anchors.clear()
         diagramTileFaces.clear()
     }
 
     private fun tileDrawerOrCreate(): TileDrawer {
         tileDrawer?.let { return it }
-        val assets = TileAssets()
-        tileAssets = assets
+        val assets = sharedTileAssets?.invoke()
+            ?: TileAssets().also { ownedTileAssets = it }
         val d = TileDrawer(assets)
         tileDrawer = d
         return d

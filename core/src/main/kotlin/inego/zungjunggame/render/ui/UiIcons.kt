@@ -180,6 +180,27 @@ object UiIcons : Disposable {
         }
     }
 
+    /**
+     * Drop cached icon handles inherited from a prior GL context (Android activity
+     * recreation in the same process) without calling `glDeleteTextures` on names
+     * the new context may have reissued. No-op on a cold process start.
+     */
+    fun invalidateForNewContext() {
+        if (!loaded) return
+        TextureRecovery.unregister(RECOVERY_KEY)
+        closeTex = null
+        backTex = null
+        chevronLeftTex = null
+        chevronRightTex = null
+        chevronUpTex = null
+        chevronDownTex = null
+        infoTex = null
+        globeTex = null
+        bellTex = null
+        menuTex = null
+        loaded = false
+    }
+
     override fun dispose() {
         TextureRecovery.unregister(RECOVERY_KEY)
         closeTex?.disposeQuietly()

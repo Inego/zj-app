@@ -36,16 +36,27 @@ import inego.zungjunggame.render.ui.AppPalette
  */
 object Fonts : Disposable {
     private const val MAX_UI_SCALE = 3f
-    private const val MAX_FONT_TEXTURE_SIZE = 2048
+    private const val MAX_STATIC_TEXTURE_SIZE = 1024
 
     /**
-     * Seed glyphs for incremental FreeType faces. Full Latin UI is pre-baked for
-     * primary chrome ([PRIMARY_SEED_CHARS]); fallback (CJK) only seeds metrics —
-     * real glyphs arrive on first use so cold-start does not rasterize DEFAULT_CHARS
-     * thirteen times from a heavy TTC.
+     * Seed glyphs for incremental FreeType faces.
+     *
+     * - [PRIMARY_SEED_CHARS]: `\u0000` (missing-glyph box), printable ASCII (0x20..0x7E),
+     *   and the UI punctuation/symbols used across shipped screens (`—–…·×•→←Δ○◑✓`) so
+     *   common chrome never faults incrementally on first draw. Accented Latin, Cyrillic,
+     *   Greek, and CJK arrive incrementally via `glTexSubImage2D`.
+     * - [DISPLAY_SEED_CHARS]: digits, sign, and metrics probe for the 48 dp [display] face
+     *   so cold start does not pre-bake 100+ display-sized glyphs into a large atlas.
+     * - [METRICS_SEED_CHARS]: minimal metrics probe for lazy fallback faces; real fallback
+     *   glyphs arrive on first use.
      */
-    private const val METRICS_SEED_CHARS = "xX"
-    private const val PRIMARY_SEED_CHARS: String = FreeTypeFontGenerator.DEFAULT_CHARS
+    private const val METRICS_SEED_CHARS = "\u0000xX"
+    private const val PRIMARY_SEED_CHARS =
+        "\u0000 !\"#\$%&'()*+,-./0123456789:;<=>?@" +
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`" +
+            "abcdefghijklmnopqrstuvwxyz{|}~" +
+            "—–…·×•→←Δ○◑✓"
+    private const val DISPLAY_SEED_CHARS = "\u00000123456789+-xX"
 
     /**
      * Tile-label face size (design px). A label tag is a fraction of a tile — roughly
@@ -58,15 +69,43 @@ object Fonts : Disposable {
      * Every glyph a tile label can need: digits, the wind/dragon tags, and the Cyrillic
      * tags. `incremental = true` still fills in any future locale's tag on first use.
      */
-    private const val TILE_LABEL_SEED_CHARS = "0123456789ESWNRGWhВЮЗСКБ"
+    private const val TILE_LABEL_SEED_CHARS = "\u00000123456789ESWNRGWhВЮЗСКБ"
+
+    /** Reused layout for priming `PixmapPacker.packToTexture = true` on new faces. */
+    private val primerLayout = GlyphLayout()
+
+    /**
+     * Incremental [FreeTypeFontGenerator.FreeTypeBitmapFontData] that caches missing-glyph
+     * lookups. LibGDX's default `getGlyph` does not record misses, so repeated fallback
+     * probes (`FallbackText.hasUsableGlyph`) otherwise hit FreeType on every frame.
+     */
+    private class CachingFreeTypeFontData : FreeTypeFontGenerator.FreeTypeBitmapFontData() {
+        private val missingChars = HashSet<Char>()
+        var cacheMissing: Boolean = false
+
+        override fun getGlyph(ch: Char): BitmapFont.Glyph? {
+            if (cacheMissing && ch.code != 0 && missingChars.contains(ch)) {
+                return missingGlyph
+            }
+            val glyph = super.getGlyph(ch)
+            if (cacheMissing && ch.code != 0 &&
+                (glyph == null || (missingGlyph != null && glyph === missingGlyph))
+            ) {
+                missingChars.add(ch)
+            }
+            return glyph
+        }
+    }
 
     // ── Primary generators ─────────────────────────────────────────────────
+    private var primaryFamily: FontFaceResolver.Family? = null
     private var primaryRegularGen: FreeTypeFontGenerator? = null
     private var primaryBoldGen: FreeTypeFontGenerator? = null
     private var primaryItalicGen: FreeTypeFontGenerator? = null
     private var primaryBoldItalicGen: FreeTypeFontGenerator? = null
 
     // ── Fallback generators (optional second face) ─────────────────────────
+    private var fallbackFamily: FontFaceResolver.Family? = null
     private var fallbackRegularGen: FreeTypeFontGenerator? = null
     private var fallbackBoldGen: FreeTypeFontGenerator? = null
     private var fallbackItalicGen: FreeTypeFontGenerator? = null
@@ -234,15 +273,16 @@ object Fonts : Disposable {
         if (fallbackCreated || fallbackAttempted) return
         fallbackAttempted = true
 
+        val t0 = System.nanoTime()
         // If primary already CJK, still load Roboto as fallback for rare Latin gaps.
-        val family = try {
-            FontFaceResolver.resolveFallback(activeProfile)
+        val opened = try {
+            FontFaceResolver.resolveFallbackOpened(activeProfile)
         } catch (t: Throwable) {
             Gdx.app.error("Fonts", "resolveFallback failed: ${t.message}", t)
             null
         }
 
-        if (family == null) {
+        if (opened == null) {
             // Missing CJK (should not happen on WebGL once NotoSansSC is in
             // assets). Do not use error(): TeaVM maps that to console.error and
             // Chrome attaches the whole rAF history, which looks like a crash.
@@ -253,20 +293,25 @@ object Fonts : Disposable {
             return
         }
 
+        val family = opened.family
+
         // Skip if fallback is the same face as primary.
         if (family.regular.label == primaryRegularLabel) {
+            disposeGenerators(opened.regularGen, opened.boldGen)
             Gdx.app.log("Fonts", "Fallback equals primary; skipping second atlas")
             cjkCapable = cjkCapable || family.cjkCapable
             return
         }
 
         try {
-            val t0 = System.nanoTime()
-            val regular = openGen(family.regular)
-            val bold =
-                if (sameFace(family.bold, family.regular)) regular
-                else openGen(family.bold)
+            val regular = opened.regularGen ?: openGen(family.regular)
+            val bold = when {
+                opened.boldGen != null -> opened.boldGen
+                sameFace(family.bold, family.regular) -> regular
+                else -> openGen(family.bold)
+            }
             // Italic faces only when a doc style first needs them.
+            fallbackFamily = family
             fallbackRegularGen = regular
             fallbackBoldGen = bold
             fallbackItalicGen = null
@@ -280,6 +325,7 @@ object Fonts : Disposable {
                     if (family.bold.label != family.regular.label) " / bold=${family.bold.label}" else ""
             Gdx.app.log("Fonts", msg)
         } catch (t: Throwable) {
+            disposeGenerators(opened.regularGen, opened.boldGen)
             val msg = "Fallback font load failed: ${t.javaClass.simpleName}: ${t.message}"
             Gdx.app.error("Fonts", msg, t)
             disposeFallbackOnly()
@@ -295,6 +341,7 @@ object Fonts : Disposable {
         bold: Boolean = false,
         italic: Boolean = false,
         shadowed: Boolean = true,
+        primaryScale: BitmapFont? = null,
     ): BitmapFont? {
         ensureFallbackGenerators()
         if (!fallbackCreated) return null
@@ -312,18 +359,25 @@ object Fonts : Disposable {
             bold -> boldGen
             else -> regular
         }
-        return generate(gen, designSize, color, seedChars = METRICS_SEED_CHARS, shadowed = shadowed)
+        val font = generate(
+            gen = gen,
+            designSize = designSize,
+            color = color,
+            seedChars = METRICS_SEED_CHARS,
+            shadowed = shadowed,
+            sparse = true,
+        )
+        if (primaryScale != null) {
+            font.data.setScale(primaryScale.data.scaleX, primaryScale.data.scaleY)
+        }
+        return font
     }
 
     private fun ensureFallbackItalicGens() {
         if (fallbackItalicGen != null && fallbackBoldItalicGen != null) return
         val regular = fallbackRegularGen ?: return
         val bold = fallbackBoldGen ?: regular
-        val family = try {
-            FontFaceResolver.resolveFallback(activeProfile)
-        } catch (_: Throwable) {
-            null
-        }
+        val family = fallbackFamily
         if (family == null) {
             fallbackItalicGen = regular
             fallbackBoldItalicGen = bold
@@ -360,11 +414,11 @@ object Fonts : Disposable {
      * and CJK fallback stay in lockstep during measure + draw.
      */
     fun withDocFontScale(scale: Float, block: () -> Unit) {
-        ensureDocFonts()
         if (abs(scale - 1f) < 0.001f) {
             block()
             return
         }
+        ensureDocFonts()
         val faces = docFacesForScale()
         val saved = Array(faces.size) { i ->
             val f = faces[i]
@@ -378,6 +432,16 @@ object Fonts : Disposable {
         } finally {
             for (i in faces.indices) {
                 faces[i].data.setScale(saved[i][0], saved[i][1])
+            }
+            // Any fallback doc face lazily created during [block] inherited the scaled
+            // primary; unscale it so it does not stay stuck at the scaled size.
+            val after = docFacesForScale()
+            if (after.size > faces.size) {
+                for (f in after) {
+                    if (faces.none { it === f }) {
+                        f.data.setScale(f.data.scaleX / scale, f.data.scaleY / scale)
+                    }
+                }
             }
         }
     }
@@ -403,7 +467,7 @@ object Fonts : Disposable {
     fun warmGlyphs(text: String) {
         if (text.isEmpty()) return
         ensureCreated()
-        val needsFb = textNeedsFallback(text)
+        val needsFb = textNeedsFallbackForWarm(text)
         if (needsFb) {
             ensureFallback()
             // Lazily create the display fallback atlas before warming Han.
@@ -444,7 +508,7 @@ object Fonts : Disposable {
     // ── Measure / draw with fallback ───────────────────────────────────────
 
     fun textWidth(primary: BitmapFont, text: String): Float {
-        if (textNeedsFallback(text)) ensureFallback()
+        if (textNeedsFallback(primary, text)) ensureFallback()
         return FallbackText.width(primary, fallbackFor(primary), text)
     }
 
@@ -455,7 +519,7 @@ object Fonts : Disposable {
      */
     fun textHeight(primary: BitmapFont, text: String): Float {
         if (text.isEmpty()) return 0f
-        if (textNeedsFallback(text)) ensureFallback()
+        if (textNeedsFallback(primary, text)) ensureFallback()
         return FallbackText.height(primary, fallbackFor(primary), text)
     }
 
@@ -467,7 +531,7 @@ object Fonts : Disposable {
         y: Float,
         color: Color,
     ) {
-        if (textNeedsFallback(text)) ensureFallback()
+        if (textNeedsFallback(primary, text)) ensureFallback()
         FallbackText.draw(batch, primary, fallbackFor(primary), text, x, y, color)
     }
 
@@ -478,7 +542,7 @@ object Fonts : Disposable {
      */
     fun wrappedHeight(primary: BitmapFont, text: String, wrapWidth: Float, align: Int): Float {
         if (text.isEmpty()) return 0f
-        if (textNeedsFallback(text)) ensureFallback()
+        if (textNeedsFallback(primary, text)) ensureFallback()
         return FallbackText.wrappedHeight(primary, fallbackFor(primary), text, wrapWidth, align)
     }
 
@@ -493,10 +557,31 @@ object Fonts : Disposable {
         align: Int,
         color: Color,
     ) {
-        if (textNeedsFallback(text)) ensureFallback()
+        if (textNeedsFallback(primary, text)) ensureFallback()
         FallbackText.drawWrapped(
             batch, primary, fallbackFor(primary), text, x, y, wrapWidth, align, color,
         )
+    }
+
+    /** Returns the already-instantiated fallback face for [primary], or null without creating one. */
+    private fun existingFallbackFor(primary: BitmapFont): BitmapFont? = when {
+        primary === body || (docBodySharesBody && primary === docBody) -> fbBody
+        primary === label -> fbLabel
+        primary === labelActive -> fbLabelActive
+        primary === button -> fbButton
+        primary === buttonBold -> fbButtonBold
+        primary === small -> fbSmall
+        primary === smallBold -> fbSmallBold
+        primary === wallCount -> fbWallCount
+        primary === display -> fbDisplay
+        primary === tileLabel -> fbTileLabel
+        primaryDocsCreated && primary === docBody -> fbDocBody ?: fbBody
+        primaryDocsCreated && primary === docBodyBold -> fbDocBodyBold
+        primaryDocsCreated && primary === docBodyItalic -> fbDocBodyItalic
+        primaryDocsCreated && primary === docBodyBoldItalic -> fbDocBodyBoldItalic
+        primaryDocsCreated && primary === docHeading1 -> fbDocHeading1
+        primaryDocsCreated && primary === docHeading2 -> fbDocHeading2
+        else -> fbBody
     }
 
     fun fallbackFor(primary: BitmapFont): BitmapFont? {
@@ -506,39 +591,49 @@ object Fonts : Disposable {
         return when {
             // body and docBody share the same atlas when aliased.
             primary === body || (docBodySharesBody && primary === docBody) ->
-                fbBody ?: generateFallbackFace(22, Color.WHITE)?.also { fbBody = it }
+                fbBody ?: generateFallbackFace(22, Color.WHITE, primaryScale = primary)?.also { fbBody = it }
             primary === label ->
                 fbLabel
-                    ?: generateFallbackFace(20, AppPalette.seatInk)?.also { fbLabel = it }
+                    ?: generateFallbackFace(20, AppPalette.seatInk, primaryScale = primary)?.also { fbLabel = it }
             primary === labelActive ->
                 fbLabelActive
-                    ?: generateFallbackFace(28, Color.WHITE)?.also { fbLabelActive = it }
+                    ?: generateFallbackFace(28, Color.WHITE, primaryScale = primary)?.also { fbLabelActive = it }
             primary === button ->
-                fbButton ?: generateFallbackFace(18, Color.WHITE)?.also { fbButton = it }
+                fbButton ?: generateFallbackFace(18, Color.WHITE, primaryScale = primary)?.also { fbButton = it }
             primary === buttonBold ->
                 fbButtonBold
-                    ?: generateFallbackFace(18, Color.WHITE, bold = true)?.also {
+                    ?: generateFallbackFace(18, Color.WHITE, bold = true, primaryScale = primary)?.also {
                         fbButtonBold = it
                     }
             primary === small ->
                 fbSmall
-                    ?: generateFallbackFace(14, AppPalette.tint(AppPalette.headerInk, 0.6f))?.also { fbSmall = it }
+                    ?: generateFallbackFace(14, AppPalette.tint(AppPalette.headerInk, 0.6f), primaryScale = primary)
+                        ?.also { fbSmall = it }
             primary === smallBold ->
                 fbSmallBold
-                    ?: generateFallbackFace(14, AppPalette.tint(AppPalette.headerInk, 0.6f), bold = true)?.also {
-                        fbSmallBold = it
-                    }
+                    ?: generateFallbackFace(
+                        14,
+                        AppPalette.tint(AppPalette.headerInk, 0.6f),
+                        bold = true,
+                        primaryScale = primary,
+                    )?.also { fbSmallBold = it }
             primary === wallCount ->
                 fbWallCount
-                    ?: generateFallbackFace(26, Color.WHITE, bold = true)?.also { fbWallCount = it }
+                    ?: generateFallbackFace(26, Color.WHITE, bold = true, primaryScale = primary)?.also {
+                        fbWallCount = it
+                    }
             primary === display ->
-                fbDisplay ?: generateFallbackFace(48, Color.WHITE)?.also { fbDisplay = it }
+                fbDisplay ?: generateFallbackFace(48, Color.WHITE, primaryScale = primary)?.also { fbDisplay = it }
             // The tile-label face is shadow-free (see [tileLabel]), so its fallback must
             // be too — a shadowed one would put the dark fringe straight back.
             primary === tileLabel ->
                 fbTileLabel
-                    ?: generateFallbackFace(TILE_LABEL_DESIGN_SIZE, Color.WHITE, shadowed = false)
-                        ?.also { fbTileLabel = it }
+                    ?: generateFallbackFace(
+                        TILE_LABEL_DESIGN_SIZE,
+                        Color.WHITE,
+                        shadowed = false,
+                        primaryScale = primary,
+                    )?.also { fbTileLabel = it }
             // Doc faces are lazy: `buildPrimaryDocs` creates them *and* sets
             // `primaryDocsCreated`, only when a document first needs them. Reading one
             // here without that flag threw `UninitializedPropertyAccessException` for any
@@ -547,29 +642,35 @@ object Fonts : Disposable {
             // branches instead of trusting callers to always pass a chrome face.
             primaryDocsCreated && primary === docBody ->
                 fbDocBody
-                    ?: (fbBody ?: generateFallbackFace(22, Color.WHITE)?.also { fbBody = it })
+                    ?: (fbBody ?: generateFallbackFace(22, Color.WHITE, primaryScale = primary)?.also { fbBody = it })
                         ?.also { fbDocBody = it }
             primaryDocsCreated && primary === docBodyBold ->
                 fbDocBodyBold
-                    ?: generateFallbackFace(22, Color.WHITE, bold = true)?.also { fbDocBodyBold = it }
+                    ?: generateFallbackFace(22, Color.WHITE, bold = true, primaryScale = primary)?.also {
+                        fbDocBodyBold = it
+                    }
             primaryDocsCreated && primary === docBodyItalic ->
                 fbDocBodyItalic
-                    ?: generateFallbackFace(22, Color.WHITE, italic = true)?.also {
+                    ?: generateFallbackFace(22, Color.WHITE, italic = true, primaryScale = primary)?.also {
                         fbDocBodyItalic = it
                     }
             primaryDocsCreated && primary === docBodyBoldItalic ->
                 fbDocBodyBoldItalic
-                    ?: generateFallbackFace(22, Color.WHITE, bold = true, italic = true)?.also {
+                    ?: generateFallbackFace(22, Color.WHITE, bold = true, italic = true, primaryScale = primary)?.also {
                         fbDocBodyBoldItalic = it
                     }
             primaryDocsCreated && primary === docHeading1 ->
                 fbDocHeading1
-                    ?: generateFallbackFace(30, Color.WHITE, bold = true)?.also { fbDocHeading1 = it }
+                    ?: generateFallbackFace(30, Color.WHITE, bold = true, primaryScale = primary)?.also {
+                        fbDocHeading1 = it
+                    }
             primaryDocsCreated && primary === docHeading2 ->
                 fbDocHeading2
-                    ?: generateFallbackFace(24, Color.WHITE, bold = true)?.also { fbDocHeading2 = it }
+                    ?: generateFallbackFace(24, Color.WHITE, bold = true, primaryScale = primary)?.also {
+                        fbDocHeading2 = it
+                    }
             else ->
-                fbBody ?: generateFallbackFace(22, Color.WHITE)?.also { fbBody = it }
+                fbBody ?: generateFallbackFace(22, Color.WHITE, primaryScale = primary)?.also { fbBody = it }
         }
     }
 
@@ -602,14 +703,14 @@ object Fonts : Disposable {
      * temporarily scaled by [scale], restoring both afterwards — including when
      * [block] throws.
      *
-     * Used to *shrink* a face that is rasterized larger than it is drawn
-     * ([display] in dense chrome). Bitmap faces are never upscaled past their
-     * atlas size; a [scale] of 1 skips the dance entirely.
+     * Does **not** eagerly open fallback generators or allocate an unused fallback
+     * atlas: pure-ASCII callers pay zero fallback work. If [block] itself triggers
+     * fallback creation for [primary], [fallbackFor] inherits [primary]'s active scale
+     * and the `finally` block restores it back alongside [primary].
      */
     fun <T> withFaceScale(primary: BitmapFont, scale: Float, block: () -> T): T {
         if (scale == 1f) return block()
-        ensureFallback()
-        val fallback = fallbackFor(primary)
+        val fallback = existingFallbackFor(primary)
         val pSx = primary.data.scaleX
         val pSy = primary.data.scaleY
         val fSx = fallback?.data?.scaleX
@@ -622,55 +723,68 @@ object Fonts : Disposable {
             block()
         } finally {
             primary.data.setScale(pSx, pSy)
-            if (fallback != null && fSx != null && fSy != null) {
-                fallback.data.setScale(fSx, fSy)
+            val afterFallback = existingFallbackFor(primary)
+            if (afterFallback != null) {
+                if (afterFallback === fallback && fSx != null && fSy != null) {
+                    afterFallback.data.setScale(fSx, fSy)
+                } else {
+                    // Fallback was lazily created during [block] at primary's scaled size.
+                    afterFallback.data.setScale(pSx, pSy)
+                }
             }
         }
     }
 
-    private fun textNeedsFallback(text: String): Boolean {
-        if (fallbackCreated) return false
-        if (activeProfile.primaryIsCjk) {
-            // CJK primary: needs fallback (Roboto) if any character is Cyrillic
-            for (c in text) {
-                val code = c.code
-                if (code in 0x400..0x4FF) return true
-            }
-            return false
-        }
-        // Heuristic: any BMP char outside Latin-1 / general punctuation that
-        // Roboto may lack — mainly Han/Kana. Cheap scan; ensureFallback is idempotent.
+    /**
+     * True when [text] contains a non-ASCII glyph that [primary] itself cannot draw.
+     * Asking [primary] directly (backed by [CachingFreeTypeFontData]) avoids opening
+     * the CJK fallback for symbols or scripts Roboto already covers (`→`, `Δ`, Greek,
+     * Latin Extended-A, Cyrillic).
+     */
+    private fun textNeedsFallback(primary: BitmapFont, text: String): Boolean {
+        if (fallbackCreated || fallbackAttempted) return false
         for (c in text) {
             val code = c.code
             if (code < 0x80) continue
-            // Cyrillic + common punctuation Roboto has
-            if (code in 0x400..0x4FF) continue
-            if (code in 0x2000..0x206F) continue
-            if (code in 0xA0..0xFF) continue
-            return true
+            if (!FallbackText.hasUsableGlyph(primary, c)) return true
+        }
+        return false
+    }
+
+    /** Fallback check for [warmGlyphs] using the primary generator's cmap directly. */
+    private fun textNeedsFallbackForWarm(text: String): Boolean {
+        if (fallbackCreated || fallbackAttempted) return false
+        val gen = primaryRegularGen ?: return false
+        for (c in text) {
+            val code = c.code
+            if (code < 0x80 || c.isISOControl()) continue
+            if (!gen.hasGlyph(code)) return true
         }
         return false
     }
 
     private fun buildPrimary(profile: ScriptProfile) {
-        FreeTypeFontGenerator.setMaxTextureSize(MAX_FONT_TEXTURE_SIZE)
         uiScale = computeUiScale()
         activeProfile = profile
 
-        val family = try {
-            FontFaceResolver.resolvePrimary(profile)
+        val t0 = System.nanoTime()
+        val opened = try {
+            FontFaceResolver.resolvePrimaryOpened(profile)
         } catch (t: Throwable) {
             Gdx.app.error("Fonts", "resolvePrimary failed: ${t.message}", t)
-            FontFaceResolver.robotoFamily()
+            FontFaceResolver.OpenedFamily(FontFaceResolver.robotoFamily())
         }
+        val family = opened.family
 
-        val t0 = System.nanoTime()
-        val regular = openGen(family.regular)
-        val bold =
-            if (sameFace(family.bold, family.regular)) regular
-            else openGen(family.bold)
+        val regular = opened.regularGen ?: openGen(family.regular)
+        val bold = when {
+            opened.boldGen != null -> opened.boldGen
+            sameFace(family.bold, family.regular) -> regular
+            else -> openGen(family.bold)
+        }
         // Italic / bold-italic open only when document faces are first requested.
 
+        primaryFamily = family
         primaryRegularGen = regular
         primaryBoldGen = bold
         primaryItalicGen = null
@@ -690,13 +804,14 @@ object Fonts : Disposable {
         // changes weight only — never the line height a caller has laid out.
         smallBold = generate(bold, 14, AppPalette.tint(AppPalette.headerInk, 0.6f), seedChars = PRIMARY_SEED_CHARS)
         wallCount = generate(bold, 26, Color.WHITE, seedChars = PRIMARY_SEED_CHARS)
-        display = generate(regular, 48, Color.WHITE, seedChars = PRIMARY_SEED_CHARS)
+        display = generate(regular, 48, Color.WHITE, seedChars = DISPLAY_SEED_CHARS, sparse = true)
         tileLabel = generate(
             regular,
             TILE_LABEL_DESIGN_SIZE,
             Color.WHITE,
             seedChars = TILE_LABEL_SEED_CHARS,
             shadowed = false,
+            sparse = true,
         )
 
         primaryCreated = true
@@ -723,11 +838,7 @@ object Fonts : Disposable {
 
         // Open italic faces only now (unused on pure chrome cold start).
         if (primaryItalicGen == null || primaryBoldItalicGen == null) {
-            val family = try {
-                FontFaceResolver.resolvePrimary(activeProfile)
-            } catch (_: Throwable) {
-                FontFaceResolver.robotoFamily()
-            }
+            val family = primaryFamily ?: FontFaceResolver.robotoFamily()
             val italic =
                 when {
                     sameFace(family.italic, family.regular) -> regular
@@ -785,7 +896,22 @@ object Fonts : Disposable {
         FreeTypeFontGenerator(face.file, face.faceIndex)
 
     /**
-     * Recover the glyph atlases after the app was backgrounded or re-created.
+     * Drop process-global font state inherited from a prior GL context (Android
+     * activity recreation in the same process) before bootstrapping into the new
+     * context. No-op on a genuine cold process start when nothing has been built yet.
+     *
+     * Dead GL textures are abandoned rather than `glDeleteTextures`-disposed because
+     * the new context may already have reissued those names; native FreeType
+     * generators are still closed cleanly.
+     */
+    fun invalidateForNewContext() {
+        if (!primaryCreated && !fallbackCreated && !fallbackAttempted) return
+        Gdx.app?.log("Fonts", "invalidating inherited faces for new GL context")
+        disposeAllFonts(disposeTextures = false)
+    }
+
+    /**
+     * Recover the glyph atlases after a real GL context loss.
      *
      * **Always regenerates the faces.** A cheaper re-upload was tried and is not
      * safe on Android: `glIsTexture` keeps reporting the page texture as live
@@ -794,14 +920,6 @@ object Fonts : Disposable {
      * glyphs and every glyph added incrementally is lost. Regenerating is the only
      * sequence that has been observed to be correct on a device that actually
      * reproduces the failure.
-     *
-     * Costs ~300 ms on a hardware-accelerated desktop, i.e. a brief stall on the
-     * first frame back. That is the accepted price of correctness here. The same
-     * work measured **2151 ms** on a software-rendered browser (2026-09-17),
-     * which is longer than the caller's background-gap threshold — so the caller
-     * must restart its frame clock afterwards
-     * ([inego.zungjunggame.app.FrameStallRecovery.onRebuilt]), or the rebuild's
-     * own duration re-triggers it on every frame.
      */
     fun recoverAfterBackgrounding(reason: String) {
         if (!primaryCreated && !fallbackCreated) return
@@ -812,13 +930,7 @@ object Fonts : Disposable {
     /**
      * Evict every face and rebuild it from scratch. Needed when the driver
      * discarded or wiped the page textures: they cannot be revived by
-     * re-uploading, so the only recovery is a fresh `FreeTypeFontGenerator` pass
-     * (~300 ms hardware-accelerated; 2151 ms measured on a software-rendered
-     * browser, 2026-09-17).
-     *
-     * [reason] is logged. It used to be hard-coded to "context loss", which named
-     * a cause this method cannot know: a backgrounding, a new runtime, a forced
-     * diagnostic marker and a merely slow frame all land here.
+     * re-uploading, so the only recovery is a fresh `FreeTypeFontGenerator` pass.
      *
      * Callers must be on the render thread.
      */
@@ -861,27 +973,46 @@ object Fonts : Disposable {
 
     /**
      * Creates a single lightweight face specifically for cold-start bootstrap presentation.
-     * Only glyphs present in [seedChars] (plus metrics probe chars) are rasterized.
+     * Only glyphs present in [seedChars] (plus metrics probe chars) are rasterized into a
+     * non-incremental minimal atlas (typically 128×128).
      */
     fun createBootstrapFace(locale: AppLocale, seedChars: String): BootstrapFace {
-        FreeTypeFontGenerator.setMaxTextureSize(MAX_FONT_TEXTURE_SIZE)
         uiScale = computeUiScale()
         val profile = locale.scriptProfile
-        val family = try {
-            FontFaceResolver.resolvePrimary(profile)
+        val opened = try {
+            FontFaceResolver.resolvePrimaryOpened(profile)
         } catch (t: Throwable) {
             Gdx.app?.error("Fonts", "resolvePrimary for bootstrap failed: ${t.message}", t)
-            FontFaceResolver.robotoFamily()
+            FontFaceResolver.OpenedFamily(FontFaceResolver.robotoFamily())
         }
-        val gen = openGen(family.regular)
+        val gen = opened.regularGen ?: openGen(opened.family.regular)
+        if (opened.boldGen != null && opened.boldGen !== opened.regularGen) {
+            disposeGenerators(opened.boldGen)
+        }
         val font = generate(
             gen = gen,
             designSize = 22,
             color = AppPalette.shadowInk,
             seedChars = "$METRICS_SEED_CHARS$seedChars",
             shadowed = true,
+            incremental = false,
         )
         return BootstrapFace(font, gen)
+    }
+
+    /**
+     * Atlas page side (power of two) for an incremental face at [pixelSize].
+     *
+     * LibGDX's `FreeTypeFontGenerator` sizes every incremental `PixmapPacker` directly
+     * to `maxTextureSize`, so a blanket 2048 allocates and uploads a 16 MB RGBA8888
+     * page for every single face (including 2-glyph fallback faces). Sizing per face
+     * drops typical pages to 256×256 (256 KB) or 512×512 (1 MB); `PixmapPacker` adds
+     * another page automatically if a face ever overflows.
+     */
+    private fun atlasPageSize(pixelSize: Int, sparse: Boolean): Int = when {
+        sparse -> if (pixelSize <= 40) 256 else 512
+        pixelSize <= 36 -> 512
+        else -> 1024
     }
 
     /**
@@ -896,9 +1027,15 @@ object Fonts : Disposable {
         color: Color,
         seedChars: String = PRIMARY_SEED_CHARS,
         shadowed: Boolean = true,
+        sparse: Boolean = false,
+        incremental: Boolean = true,
     ): BitmapFont {
+        val pixelSize = (designSize * uiScale).roundToInt().coerceAtLeast(designSize)
+        FreeTypeFontGenerator.setMaxTextureSize(
+            if (incremental) atlasPageSize(pixelSize, sparse) else MAX_STATIC_TEXTURE_SIZE,
+        )
         val param = FreeTypeFontGenerator.FreeTypeFontParameter().apply {
-            this.size = (designSize * uiScale).roundToInt().coerceAtLeast(designSize)
+            this.size = pixelSize
             this.color = color
             if (shadowed) {
                 val shadow = (1f * uiScale).roundToInt().coerceAtLeast(1)
@@ -913,26 +1050,41 @@ object Fonts : Disposable {
             minFilter = Texture.TextureFilter.Linear
             magFilter = Texture.TextureFilter.Linear
             characters = seedChars
-            incremental = true
+            this.incremental = incremental
         }
-        val font = gen.generateFont(param)
+        val data = CachingFreeTypeFontData()
+        val font = gen.generateFont(param, data)
         if (font.data.xHeight <= 0f) {
             font.data.xHeight = font.data.capHeight * 0.5f
         }
         font.data.setScale(1f)
         font.setUseIntegerPositions(true)
+        if (incremental) {
+            // `generateData` leaves `PixmapPacker.packToTexture = false` until the first
+            // `getGlyphs()` run. Priming with an already-seeded glyph enables fast
+            // `glTexSubImage2D` immediately so an early `getGlyph()` probe (such as
+            // `FallbackText.hasUsableGlyph`) never dirties the whole page and triggers a
+            // full-atlas re-upload.
+            val primer = seedChars.firstOrNull { !it.isISOControl() }
+            if (primer != null) {
+                primerLayout.setText(font, primer.toString())
+            }
+            data.cacheMissing = true
+        }
         return font
     }
 
-    private fun disposeFallbackOnly() {
-        // fbDocBody may alias fbBody — identity-dedupe before dispose.
-        disposeFontList(
-            fbBody, fbLabel, fbLabelActive, fbButton, fbButtonBold, fbSmall, fbSmallBold,
-            fbWallCount, fbDisplay,
-            fbTileLabel,
-            fbDocBody, fbDocBodyBold, fbDocBodyItalic, fbDocBodyBoldItalic,
-            fbDocHeading1, fbDocHeading2,
-        )
+    private fun disposeFallbackOnly(disposeTextures: Boolean = true) {
+        if (disposeTextures) {
+            // fbDocBody may alias fbBody — identity-dedupe before dispose.
+            disposeFontList(
+                fbBody, fbLabel, fbLabelActive, fbButton, fbButtonBold, fbSmall, fbSmallBold,
+                fbWallCount, fbDisplay,
+                fbTileLabel,
+                fbDocBody, fbDocBodyBold, fbDocBodyItalic, fbDocBodyBoldItalic,
+                fbDocHeading1, fbDocHeading2,
+            )
+        }
         fbBody = null
         fbLabel = null
         fbLabelActive = null
@@ -950,16 +1102,11 @@ object Fonts : Disposable {
         fbDocHeading1 = null
         fbDocHeading2 = null
         if (fallbackOwnsGenerators) {
-            for (g in linkedSetOfNotNull(
+            disposeGenerators(
                 fallbackRegularGen, fallbackBoldGen, fallbackItalicGen, fallbackBoldItalicGen,
-            )) {
-                try {
-                    g.dispose()
-                } catch (_: Throwable) {
-                    // ignore
-                }
-            }
+            )
         }
+        fallbackFamily = null
         fallbackRegularGen = null
         fallbackBoldGen = null
         fallbackItalicGen = null
@@ -968,40 +1115,38 @@ object Fonts : Disposable {
         fallbackOwnsGenerators = true
     }
 
-    private fun disposeAllFonts() {
-        disposeFallbackOnly()
+    private fun disposeAllFonts(disposeTextures: Boolean = true) {
+        disposeFallbackOnly(disposeTextures)
         fallbackAttempted = false
         if (primaryCreated) {
-            disposeFontList(
-                if (::body.isInitialized) body else null,
-                if (::label.isInitialized) label else null,
-                if (::labelActive.isInitialized) labelActive else null,
-                if (::button.isInitialized) button else null,
-                if (::buttonBold.isInitialized) buttonBold else null,
-                if (::small.isInitialized) small else null,
-                if (::wallCount.isInitialized) wallCount else null,
-                if (::display.isInitialized) display else null,
-                if (::tileLabel.isInitialized) tileLabel else null,
-                // docBody may alias body
-                if (::docBody.isInitialized && !docBodySharesBody) docBody else null,
-                if (::docBodyBold.isInitialized) docBodyBold else null,
-                if (::docBodyItalic.isInitialized) docBodyItalic else null,
-                if (::docBodyBoldItalic.isInitialized) docBodyBoldItalic else null,
-                if (::docHeading1.isInitialized) docHeading1 else null,
-                if (::docHeading2.isInitialized) docHeading2 else null,
-            )
+            if (disposeTextures) {
+                disposeFontList(
+                    if (::body.isInitialized) body else null,
+                    if (::label.isInitialized) label else null,
+                    if (::labelActive.isInitialized) labelActive else null,
+                    if (::button.isInitialized) button else null,
+                    if (::buttonBold.isInitialized) buttonBold else null,
+                    if (::small.isInitialized) small else null,
+                    if (::smallBold.isInitialized) smallBold else null,
+                    if (::wallCount.isInitialized) wallCount else null,
+                    if (::display.isInitialized) display else null,
+                    if (::tileLabel.isInitialized) tileLabel else null,
+                    // docBody may alias body
+                    if (::docBody.isInitialized && !docBodySharesBody) docBody else null,
+                    if (::docBodyBold.isInitialized) docBodyBold else null,
+                    if (::docBodyItalic.isInitialized) docBodyItalic else null,
+                    if (::docBodyBoldItalic.isInitialized) docBodyBoldItalic else null,
+                    if (::docHeading1.isInitialized) docHeading1 else null,
+                    if (::docHeading2.isInitialized) docHeading2 else null,
+                )
+            }
             if (primaryOwnsGenerators) {
-                for (g in linkedSetOfNotNull(
+                disposeGenerators(
                     primaryRegularGen, primaryBoldGen, primaryItalicGen, primaryBoldItalicGen,
-                )) {
-                    try {
-                        g.dispose()
-                    } catch (_: Throwable) {
-                        // ignore
-                    }
-                }
+                )
             }
         }
+        primaryFamily = null
         primaryRegularGen = null
         primaryBoldGen = null
         primaryItalicGen = null
@@ -1012,6 +1157,16 @@ object Fonts : Disposable {
         primaryRegularLabel = null
         cjkCapable = false
         uiScale = 1f
+    }
+
+    private fun disposeGenerators(vararg gens: FreeTypeFontGenerator?) {
+        for (g in linkedSetOfNotNull(*gens)) {
+            try {
+                g.dispose()
+            } catch (_: Throwable) {
+                // ignore
+            }
+        }
     }
 
     private fun disposeFontList(vararg fonts: BitmapFont?) {

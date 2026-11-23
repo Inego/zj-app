@@ -46,6 +46,20 @@ object FontFaceResolver {
         val cjkCapable: Boolean,
     )
 
+    /**
+     * A resolved [family] together with any [FreeTypeFontGenerator]s already opened
+     * during CJK probing. Handing the open generators directly to [Fonts] avoids
+     * opening and parsing a 15–30 MB system TTC (or 8 MB bundled OTF) twice.
+     *
+     * Ownership of non-null generators transfers to the caller; if [boldGen] is the
+     * same instance as [regularGen], dispose it only once.
+     */
+    internal data class OpenedFamily(
+        val family: Family,
+        val regularGen: FreeTypeFontGenerator? = null,
+        val boldGen: FreeTypeFontGenerator? = null,
+    )
+
     /** Han probe characters (common in Zung Jung pattern names). */
     private val CJK_PROBE = intArrayOf(
         '中'.code,
@@ -73,11 +87,27 @@ object FontFaceResolver {
 
     /** Primary family for [profile] (Roboto or script CJK). */
     fun resolvePrimary(profile: ScriptProfile): Family {
+        val opened = resolvePrimaryOpened(profile)
+        disposeOpened(opened)
+        return opened.family
+    }
+
+    /**
+     * Primary family for [profile], retaining any [FreeTypeFontGenerator]s opened
+     * during CJK probing so [Fonts] does not re-open the same font file.
+     */
+    internal fun resolvePrimaryOpened(profile: ScriptProfile): OpenedFamily {
         return when (profile) {
-            ScriptProfile.LatinCyrillic -> robotoFamily()
-            ScriptProfile.Hans -> resolveCjkFamily(CjkScript.Hans) ?: robotoFamily()
-            ScriptProfile.Hant -> resolveCjkFamily(CjkScript.Hant) ?: resolveCjkFamily(CjkScript.Hans) ?: robotoFamily()
-            ScriptProfile.Jpan -> resolveCjkFamily(CjkScript.Jpan) ?: resolveCjkFamily(CjkScript.Hans) ?: robotoFamily()
+            ScriptProfile.LatinCyrillic -> OpenedFamily(robotoFamily())
+            ScriptProfile.Hans -> resolveCjkFamilyOpened(CjkScript.Hans) ?: OpenedFamily(robotoFamily())
+            ScriptProfile.Hant ->
+                resolveCjkFamilyOpened(CjkScript.Hant)
+                    ?: resolveCjkFamilyOpened(CjkScript.Hans)
+                    ?: OpenedFamily(robotoFamily())
+            ScriptProfile.Jpan ->
+                resolveCjkFamilyOpened(CjkScript.Jpan)
+                    ?: resolveCjkFamilyOpened(CjkScript.Hans)
+                    ?: OpenedFamily(robotoFamily())
         }
     }
 
@@ -89,17 +119,42 @@ object FontFaceResolver {
      * - Returns null only when CJK cannot be found for a Latin primary.
      */
     fun resolveFallback(profile: ScriptProfile): Family? {
+        val opened = resolveFallbackOpened(profile) ?: return null
+        disposeOpened(opened)
+        return opened.family
+    }
+
+    /**
+     * Fallback family for [profile], retaining any [FreeTypeFontGenerator]s opened
+     * during CJK probing so [Fonts] does not open the same TTC/OTF twice.
+     */
+    internal fun resolveFallbackOpened(profile: ScriptProfile): OpenedFamily? {
         return when (profile) {
             ScriptProfile.LatinCyrillic -> {
                 try {
-                    resolveCjkFamily(CjkScript.Hans)
+                    resolveCjkFamilyOpened(CjkScript.Hans)
                 } catch (t: Throwable) {
                     Gdx.app.error(TAG, "resolveFallback CJK failed: ${t.message}", t)
                     null
                 }
             }
             // CJK primaries already cover Latin poorly but adequately; Roboto fills gaps.
-            ScriptProfile.Hans, ScriptProfile.Hant, ScriptProfile.Jpan -> robotoFamily()
+            ScriptProfile.Hans, ScriptProfile.Hant, ScriptProfile.Jpan -> OpenedFamily(robotoFamily())
+        }
+    }
+
+    private fun disposeOpened(opened: OpenedFamily) {
+        try {
+            opened.regularGen?.dispose()
+        } catch (_: Throwable) {
+            // ignore
+        }
+        if (opened.boldGen != null && opened.boldGen !== opened.regularGen) {
+            try {
+                opened.boldGen.dispose()
+            } catch (_: Throwable) {
+                // ignore
+            }
         }
     }
 
@@ -109,22 +164,37 @@ object FontFaceResolver {
 
     private enum class CjkScript { Hans, Hant, Jpan }
 
-    private fun resolveCjkFamily(script: CjkScript): Family? {
+    private data class ProbedFace(
+        val face: Face,
+        val generator: FreeTypeFontGenerator,
+    )
+
+    private fun resolveCjkFamilyOpened(script: CjkScript): OpenedFamily? {
         // Native platforms already have CJK in the OS; prefer that so Desktop
         // `run` (workingDir = assets/) does not switch to bundled Noto, and so
-        // we never open an 8 MB asset when YaHei / DroidSans is right there.
+        // we never open an 8 MB asset when YaHei / DroidSans is right there.
         // WebGL has no absolute/external files — bundled Noto is the only path.
         val preferSystem = Gdx.app.type != Application.ApplicationType.WebGL
         if (preferSystem) {
-            val systemRegular = firstCjkFace(*systemRegularCandidates(script))
+            val systemRegular = firstCjkFaceOpened(systemRegularCandidates(script), reuse = null)
             if (systemRegular != null) {
-                val systemBold = firstCjkFace(*systemBoldCandidates(script)) ?: systemRegular
-                return familyFrom(systemRegular, systemBold)
+                val systemBold = firstCjkFaceOpened(systemBoldCandidates(script), reuse = systemRegular)
+                    ?: systemRegular
+                return OpenedFamily(
+                    family = familyFrom(systemRegular.face, systemBold.face),
+                    regularGen = systemRegular.generator,
+                    boldGen = systemBold.generator,
+                )
             }
         }
-        val bundledRegular = firstCjkFace(*bundledRegularCandidates(script)) ?: return null
-        val bold = firstCjkFace(*bundledBoldCandidates(script)) ?: bundledRegular
-        return familyFrom(bundledRegular, bold)
+        val bundledRegular = firstCjkFaceOpened(bundledRegularCandidates(script), reuse = null) ?: return null
+        val bundledBold = firstCjkFaceOpened(bundledBoldCandidates(script), reuse = bundledRegular)
+            ?: bundledRegular
+        return OpenedFamily(
+            family = familyFrom(bundledRegular.face, bundledBold.face),
+            regularGen = bundledRegular.generator,
+            boldGen = bundledBold.generator,
+        )
     }
 
     private fun familyFrom(regular: Face, bold: Face): Family =
@@ -216,26 +286,40 @@ object FontFaceResolver {
         val label: String,
     )
 
-    private fun firstCjkFace(vararg candidates: Candidate): Face? {
+    private fun firstCjkFaceOpened(
+        candidates: Array<Candidate>,
+        reuse: ProbedFace?,
+    ): ProbedFace? {
         val preferSmall = Gdx.app.type == Application.ApplicationType.Android
         if (preferSmall) {
             for (c in candidates) {
-                val face = tryCandidate(c, maxBytes = ANDROID_PREFERRED_MAX_BYTES) ?: continue
+                val face = tryCandidateOpened(c, maxBytes = ANDROID_PREFERRED_MAX_BYTES, reuse = reuse)
+                    ?: continue
                 return face
             }
         }
         for (c in candidates) {
-            val face = tryCandidate(c, maxBytes = Long.MAX_VALUE) ?: continue
+            val face = tryCandidateOpened(c, maxBytes = Long.MAX_VALUE, reuse = reuse) ?: continue
             return face
         }
         return null
     }
 
-    private fun tryCandidate(c: Candidate, maxBytes: Long): Face? {
+    private fun tryCandidateOpened(
+        c: Candidate,
+        maxBytes: Long,
+        reuse: ProbedFace?,
+    ): ProbedFace? {
         val handle = try {
             c.lazyHandle()
         } catch (_: Throwable) {
             return null
+        }
+        if (reuse != null &&
+            reuse.face.faceIndex == c.faceIndex &&
+            reuse.face.file.path() == handle.path()
+        ) {
+            return reuse
         }
         if (!handleExists(handle)) return null
         if (looksLikeVariableFont(c.label)) {
@@ -247,8 +331,8 @@ object FontFaceResolver {
             Gdx.app.debug(TAG, "Defer large font ${c.label} (${len}B > $maxBytes)")
             return null
         }
-        if (!probeCjk(handle, c.faceIndex)) return null
-        return Face(handle, c.faceIndex, c.label)
+        val gen = probeAndOpenCjk(handle, c.faceIndex) ?: return null
+        return ProbedFace(Face(handle, c.faceIndex, c.label), gen)
     }
 
     private fun handleExists(handle: FileHandle): Boolean =
@@ -273,8 +357,14 @@ object FontFaceResolver {
             n.contains("vftc")
     }
 
-    private fun probeCjk(file: FileHandle, faceIndex: Int): Boolean {
+    /**
+     * Open [file] at [faceIndex] and verify it carries both Han and x-height Latin
+     * metrics. Returns the open generator on success (caller owns disposal); disposes
+     * and returns null on any mismatch or error.
+     */
+    private fun probeAndOpenCjk(file: FileHandle, faceIndex: Int): FreeTypeFontGenerator? {
         var gen: FreeTypeFontGenerator? = null
+        var keep = false
         return try {
             gen = FreeTypeFontGenerator(file, faceIndex)
             val hasHan = CJK_PROBE.any { code ->
@@ -284,7 +374,7 @@ object FontFaceResolver {
                     false
                 }
             }
-            if (!hasHan) return false
+            if (!hasHan) return null
             val hasMetrics = XHEIGHT_PROBE.any { code ->
                 try {
                     gen.hasGlyph(code)
@@ -297,16 +387,20 @@ object FontFaceResolver {
                     TAG,
                     "Skip ${file.path()} face=$faceIndex: Han present but no x-height Latin",
                 )
+                return null
             }
-            hasMetrics
+            keep = true
+            gen
         } catch (t: Throwable) {
             Gdx.app.log(TAG, "Skip font ${file.path()} face=$faceIndex: ${t.message}")
-            false
+            null
         } finally {
-            try {
-                gen?.dispose()
-            } catch (_: Throwable) {
-                // ignore
+            if (!keep) {
+                try {
+                    gen?.dispose()
+                } catch (_: Throwable) {
+                    // ignore
+                }
             }
         }
     }

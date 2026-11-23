@@ -66,6 +66,7 @@ data class BoardHitBoxes(
 class PlayTableView(
     private val assets: TileAssets = TileAssets(),
     private val drawer: TileDrawer = TileDrawer(assets),
+    private val ownsAssets: Boolean = true,
 ) : ParkableChrome, GestureSurface<ParkRelease>, Disposable {
     private val font get() = Fonts.body
     private val glyphLayout = GlyphLayout()
@@ -2168,7 +2169,7 @@ class PlayTableView(
         winCurveDrawer.dispose()
         claimPanel.dispose()
         uiChip.dispose()
-        assets.dispose()
+        if (ownsAssets) assets.dispose()
     }
 }
 

@@ -45,21 +45,23 @@ import kotlin.math.min
  * Nothing republishes the controls as hit regions, so the id of the option a
  * press landed on never has to travel through an action payload.
  */
-class TutorialQuizOverlay : Disposable, GestureSurface<TutorialQuizOverlay.PointerUpResult> {
+class TutorialQuizOverlay(
+    private val sharedTileAssets: (() -> TileAssets)? = null,
+) : Disposable, GestureSurface<TutorialQuizOverlay.PointerUpResult> {
     private val glyphLayout = GlyphLayout()
-    private var tileAssets: TileAssets? = null
+    private var ownedTileAssets: TileAssets? = null
     private var tileDrawer: TileDrawer? = null
 
     /** Quiz prompt: same rich pipeline as coach body. */
-    private val promptBlock = RichTextBlock()
+    private val promptBlock = RichTextBlock(sharedTileAssets = sharedTileAssets)
     private var lastPromptMarkup: String? = null
 
     private fun whitePixel(): Texture = WhitePixel.get()
 
     private fun drawer(): TileDrawer {
         tileDrawer?.let { return it }
-        val assets = TileAssets()
-        tileAssets = assets
+        val assets = sharedTileAssets?.invoke()
+            ?: TileAssets().also { ownedTileAssets = it }
         val d = TileDrawer(assets)
         tileDrawer = d
         return d
@@ -676,8 +678,8 @@ class TutorialQuizOverlay : Disposable, GestureSurface<TutorialQuizOverlay.Point
 
     override fun dispose() {
         tileDrawer = null
-        tileAssets?.dispose()
-        tileAssets = null
+        ownedTileAssets?.dispose()
+        ownedTileAssets = null
         promptBlock.dispose()
         lastPromptMarkup = null
     }

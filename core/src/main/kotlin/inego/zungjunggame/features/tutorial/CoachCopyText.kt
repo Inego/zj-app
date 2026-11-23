@@ -2,6 +2,7 @@ package inego.zungjunggame.features.tutorial
 
 import com.badlogic.gdx.Gdx
 import inego.zungjunggame.i18n.L10n
+import inego.zungjunggame.render.assets.TileAssets
 import inego.zungjunggame.render.reference.CatalogLinkPolicy
 import inego.zungjunggame.render.richtext.RichDoc
 import inego.zungjunggame.render.richtext.RichTextBlock
@@ -21,17 +22,19 @@ import kotlin.math.sqrt
  * substituted in as inline tile markup before the block is parsed. The block is
  * re-parsed only when the markup actually changes, not every frame.
  */
-internal class CoachCopyText : AutoCloseable {
+internal class CoachCopyText(
+    sharedTileAssets: (() -> TileAssets)? = null,
+) : AutoCloseable {
 
     /** Coach / complete body: shared rich pipeline (markup, tiles, emphasis). */
-    private val bodyBlock = RichTextBlock()
+    private val bodyBlock = RichTextBlock(sharedTileAssets = sharedTileAssets)
 
     /**
      * Scratch block for the other beats in this beat's copy band. Measuring a
      * sibling must not disturb [bodyBlock]'s layout or its link geometry, so it
      * gets its own block; it never draws.
      */
-    private val bandBlock = RichTextBlock()
+    private val bandBlock = RichTextBlock(sharedTileAssets = sharedTileAssets)
 
     /** Last markup fed to [bodyBlock] (avoid re-parse every frame). */
     private var lastBodyMarkup: String? = null
