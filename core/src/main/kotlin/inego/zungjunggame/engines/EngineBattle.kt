@@ -137,12 +137,10 @@ object EngineBattle {
         for (hand in 0 until totalHands) {
             val handSeed = mixSeed(gameSeed, HAND_MIX xor hand.toLong())
             val dealRng = Random(mixSeed(handSeed, DEAL_MIX))
-            val choiceRng = Random(mixSeed(handSeed, CHOICE_MIX))
             val handResult = GameplayLoop.playGame(
                 engines = engines,
                 seatToEngine = seatToEngine,
                 initialRng = dealRng,
-                choiceRng = choiceRng,
                 eastSeat = hand % NUM_PLAYERS,
                 // New players only ever play with patternless hands allowed.
                 allowChickenHands = true,
@@ -429,7 +427,6 @@ object EngineBattle {
     private const val SEAT_MIX: Long = 0x517CC1B727220A95L
     private const val HAND_MIX: Long = 0x2545F4914F6CDD1DL
     private const val DEAL_MIX: Long = -7046029254386353131L
-    private const val CHOICE_MIX: Long = -4658895280553007687L
 
     /** Wall-clock throttle between progress lines (the summary is always printed). */
     private const val PROGRESS_INTERVAL_NANOS: Long = 1_000_000_000L

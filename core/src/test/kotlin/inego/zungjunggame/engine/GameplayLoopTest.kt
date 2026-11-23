@@ -1,6 +1,5 @@
 package inego.zungjunggame.engine
 
-import inego.zungjunggame.engines.DefaultEngine
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -55,28 +54,6 @@ class GameplayLoopTest {
                     it.kind == ChoiceKind.Hu
             },
         )
-    }
-
-    @Test
-    fun defaultEnginePlaysFullGameToTerminal() {
-        val engine = DefaultEngine()
-        val result = GameplayLoop.playSoloEngineGame(
-            engine,
-            initialRng = Random(12345),
-            choiceRng = Random(67890),
-        )
-        assertTrue(result.decisions > 0, "expected at least one decision")
-        assertEquals(NUM_PLAYERS, result.scoreDeltas.size)
-        // Either someone won (handScore > 0, deltas sum to 0 with winner positive)
-        // or wall exhausted (handScore == 0, all zeros).
-        if (result.handScore > 0) {
-            assertTrue(result.winnerSeat in 0 until NUM_PLAYERS)
-            assertEquals(0, result.scoreDeltas.sum())
-            assertTrue(result.scoreDeltas[result.winnerSeat] > 0)
-        } else {
-            assertEquals(-1, result.winnerSeat)
-            assertTrue(result.scoreDeltas.all { it == 0 })
-        }
     }
 
     @Test

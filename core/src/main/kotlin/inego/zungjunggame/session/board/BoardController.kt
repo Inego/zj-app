@@ -6,7 +6,6 @@ import inego.zungjunggame.engine.ChoiceKind
 import inego.zungjunggame.engine.ChoiceList
 import inego.zungjunggame.engine.GameState
 import inego.zungjunggame.engines.PlayingEngine
-import kotlin.random.Random
 
 /**
  * Single apply-choice path for human input and engine picks.
@@ -97,7 +96,6 @@ class BoardController(
     fun tryApplyEngineOrTrivialPass(
         state: GameState,
         engine: PlayingEngine,
-        rng: Random,
     ): Boolean {
         val legal = state.enumerateChoices()
         if (legal.isEmpty()) return false
@@ -112,7 +110,7 @@ class BoardController(
         val allowed = allowedChoices(state)
         if (allowed.isEmpty()) return false
         val list = toChoiceList(allowed)
-        val decision = engine.select(state, list, rng)
+        val decision = engine.select(state, list)
         val index = decision.choiceIndex.coerceIn(0, list.size - 1)
         commit(state, list[index])
         return true

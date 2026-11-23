@@ -46,14 +46,12 @@ object GameplayLoop {
      * Play one full game with [engines] seated by [seatToEngine]
      * (`seatToEngine[seat] = engineIndex`).
      *
-     * @param initialRng used only for the initial deal shuffle
-     * @param choiceRng used by engines for tie-breaking
+     * @param initialRng used for the initial deal shuffle
      */
     fun playGame(
         engines: List<PlayingEngine>,
         seatToEngine: IntArray = IntArray(NUM_PLAYERS) { it % engines.size },
         initialRng: Random = Random(System.nanoTime()),
-        choiceRng: Random = Random(System.nanoTime()),
         eastSeat: Int = 0,
         allowChickenHands: Boolean = false,
     ): GameResult {
@@ -78,7 +76,7 @@ object GameplayLoop {
                 "seatToEngine[${state.currentPlayer}] = $engineIndex out of range"
             }
             val engine = engines[engineIndex]
-            val decision = engine.select(state, choices, choiceRng)
+            val decision = engine.select(state, choices)
             require(decision.choiceIndex in 0 until choices.size) {
                 "${engine.name()} returned out-of-range choice index ${decision.choiceIndex}"
             }
@@ -107,11 +105,9 @@ object GameplayLoop {
     fun playSoloEngineGame(
         engine: PlayingEngine,
         initialRng: Random = Random(System.nanoTime()),
-        choiceRng: Random = Random(System.nanoTime()),
     ): GameResult = playGame(
         engines = listOf(engine),
         seatToEngine = IntArray(NUM_PLAYERS) { 0 },
         initialRng = initialRng,
-        choiceRng = choiceRng,
     )
 }

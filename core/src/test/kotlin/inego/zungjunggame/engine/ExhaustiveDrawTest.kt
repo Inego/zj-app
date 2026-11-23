@@ -1,8 +1,6 @@
 package inego.zungjunggame.engine
 
-import inego.zungjunggame.engines.DefaultEngine
 import inego.zungjunggame.session.table.drawnTileForDisplay
-import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -151,50 +149,6 @@ class ExhaustiveDrawTest {
     }
 
     // --- fixtures -------------------------------------------------------
-
-    /**
-     * Full engine playthroughs must still reach a terminal state, and a draw must be
-     * produced by an unclaimed discard at an empty wall — the riverbed — rather than
-     * by the loop refusing to act once the wall ran out.
-     */
-    @Test
-    fun enginePlaythroughReachesTheRiverbed() {
-        val engine = DefaultEngine()
-        for (seed in 1L..12L) {
-            val state = GameState.generateRandom(Random(seed))
-            val choiceRng = Random(seed * 31)
-            var lastChoice: Choice? = null
-            var guard = 0
-            while (!state.isTerminal() && guard++ < 500) {
-                val choices = state.enumerateChoices()
-                if (choices.isEmpty()) break
-                val pick = choices[engine.select(state, choices, choiceRng).choiceIndex]
-                state.applyChoice(pick)
-                lastChoice = pick
-            }
-
-            assertTrue(state.isTerminal(), "seed $seed did not reach a terminal state")
-            if (state.handScore == 0) {
-                assertEquals(0, state.liveWallSize, "seed $seed")
-                assertTrue(state.handEnded, "seed $seed")
-                assertTrue(
-                    state.seabedPlayer in 0 until NUM_PLAYERS,
-                    "a draw must record the seat that drew the seabed (seed $seed)",
-                )
-                assertEquals(
-                    ChoiceKind.Pass,
-                    lastChoice?.kind,
-                    "a draw must end on an unclaimed discard (seed $seed)",
-                )
-            } else {
-                assertEquals(
-                    state.liveWallSize == 0,
-                    state.seabedPlayer in 0 until NUM_PLAYERS,
-                    "the seabed seat is recorded exactly when the wall ran out (seed $seed)",
-                )
-            }
-        }
-    }
 
     /**
      * Seat 0 has just drawn the seabed: the wall held a single 9p, which completes

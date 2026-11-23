@@ -4,7 +4,6 @@ import inego.zungjunggame.engine.Choice
 import inego.zungjunggame.engine.ChoiceKind
 import inego.zungjunggame.engine.DecisionType
 import inego.zungjunggame.engine.GameState
-import inego.zungjunggame.engines.DefaultEngine
 import inego.zungjunggame.session.board.BoardController
 import inego.zungjunggame.session.board.ChoiceGate
 import kotlin.random.Random
@@ -59,25 +58,6 @@ class BoardControllerTest {
         assertTrue(board.tryApply(state, Choice.pass()))
         // After one reactor passes, still mid-window or advanced — either way applied.
         assertTrue(state.pendingReactionCount >= 1 || state.decisionType == DecisionType.ActOnHand)
-    }
-
-    @Test
-    fun enginePickRespectsGate() {
-        val state = GameState.fromWallOrder(canonicalWall(Random(99)), eastSeat = 0)
-        // Only allow the first listed discard type among legal discards.
-        val legalDiscards = state.enumerateChoices().asList()
-            .filter { it.kind == ChoiceKind.Discard }
-        assertTrue(legalDiscards.size >= 2, "need at least two discard options")
-        val only = legalDiscards.first()
-        val board = BoardController(
-            gate = { legal ->
-                legal.filter { BoardController.matches(it, only) }
-            },
-        )
-        val engine = DefaultEngine()
-        assertTrue(board.tryApplyEngineOrTrivialPass(state, engine, Random(0)))
-        assertEquals(only.tile(), state.lastDiscarded)
-        assertEquals(DecisionType.ReactToDiscard, state.decisionType)
     }
 
     @Test

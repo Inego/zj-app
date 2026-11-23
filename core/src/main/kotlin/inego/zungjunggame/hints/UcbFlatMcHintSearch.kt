@@ -198,7 +198,7 @@ class UcbFlatMcHintSearch(
     ) {
         work.copyFrom(rootAfterChoice[armIndex])
         determinizer.determinize(work, humanSeat, rng)
-        val r = playout.runToTerminal(work, humanSeat, rng)
+        val r = playout.runToTerminal(work, humanSeat)
         arms[armIndex].record(r.scoreDelta, r.won, r.handValue)
         totalPlayouts++
     }

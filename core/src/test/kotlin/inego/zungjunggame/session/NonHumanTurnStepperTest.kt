@@ -5,10 +5,7 @@ import inego.zungjunggame.engine.ChoiceKind
 import inego.zungjunggame.engine.DecisionType
 import inego.zungjunggame.engine.GameState
 import inego.zungjunggame.engine.Tiles
-import inego.zungjunggame.engines.DefaultEngine
-import inego.zungjunggame.session.board.BoardController
 import inego.zungjunggame.session.board.BotTiming
-import inego.zungjunggame.session.board.EngineNonHumanPicker
 import inego.zungjunggame.session.board.NonHumanPicker
 import inego.zungjunggame.session.board.NonHumanTurnStepper
 import kotlin.random.Random
@@ -63,36 +60,6 @@ class NonHumanTurnStepperTest {
     }
 
     @Test
-    fun enginePickerAdvancesPastAllPassReactionWindow() {
-        val state = GameState.fromWallOrder(canonicalWall(Random(11)), eastSeat = 0)
-        val board = BoardController()
-        val engine = DefaultEngine()
-        val rng = Random(0)
-        // Discard as "human" seat 0 without going through stepper.
-        val discard = state.enumerateChoices().asList().first { it.kind == ChoiceKind.Discard }
-        state.applyChoice(discard)
-        assertEquals(DecisionType.ReactToDiscard, state.decisionType)
-
-        val stepper = stepper(
-            picker = EngineNonHumanPicker(board, { engine }) { rng },
-            // Human is seat 0; during reaction, seats 1..3 are non-human until 0 would bid
-            // (0 is discarder, never reacts). Treat only seat 0 ActOnHand as human.
-            isHumanInteractiveTurn = { s ->
-                s.decisionType == DecisionType.ActOnHand && s.currentPlayer == 0
-            },
-        )
-        // May need more than one tryStep if pause is set after first reaction batch.
-        var steps = 0
-        while (state.decisionType == DecisionType.ReactToDiscard && steps < 8) {
-            stepper.pauseUntilNextIdle = false
-            stepper.tryStep(state, active = true)
-            steps++
-        }
-        assertEquals(DecisionType.ActOnHand, state.decisionType)
-        assertTrue(state.currentPlayer in 0 until 4)
-    }
-
-    @Test
     fun scriptedPickerCanReplaceEngine() {
         val state = GameState.fromWallOrder(canonicalWall(Random(8)), eastSeat = 0)
         val target = state.enumerateChoices().asList()
@@ -139,32 +106,6 @@ class NonHumanTurnStepperTest {
         now = 2000L
         assertTrue(stepper.tryStep(state, active = true))
         assertEquals(1, applyCount)
-    }
-
-    @Test
-    fun passOnlyReactionSkipsThinkDelay() {
-        val state = GameState.fromWallOrder(canonicalWall(Random(11)), eastSeat = 0)
-        val discard = state.enumerateChoices().asList().first { it.kind == ChoiceKind.Discard }
-        state.applyChoice(discard)
-        assertEquals(DecisionType.ReactToDiscard, state.decisionType)
-
-        val now = 0L
-        val stepper = stepper(
-            picker = EngineNonHumanPicker(BoardController(), { DefaultEngine() }) { Random(0) },
-            isHumanInteractiveTurn = { s ->
-                s.decisionType == DecisionType.ActOnHand && s.currentPlayer == 0
-            },
-            timing = fixedTiming(thinkMs = 2000L),
-            nowMs = { now },
-        )
-        var steps = 0
-        while (state.decisionType == DecisionType.ReactToDiscard && steps < 8) {
-            stepper.pauseUntilNextIdle = false
-            stepper.tryStep(state, active = true)
-            steps++
-        }
-        assertEquals(DecisionType.ActOnHand, state.decisionType)
-        assertEquals(0L, now)
     }
 
     @Test

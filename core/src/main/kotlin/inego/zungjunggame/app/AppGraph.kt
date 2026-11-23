@@ -496,9 +496,7 @@ class AppGraph(
                 ).isHumanInteractiveTurn
             },
             isAnimating = { table.isAnimating() },
-            picker = EngineNonHumanPicker(board, { freePlayHost.botEngine() }) {
-                sessionRegistry.liveHand.choiceRng
-            },
+            picker = EngineNonHumanPicker(board) { freePlayHost.botEngine() },
             timing = BotTiming(),
             isHumanSeat = { it == sessionRegistry.playHost.humanSeat },
         )
@@ -515,7 +513,6 @@ class AppGraph(
                 scoreOverlay = scoreTablePort,
                 breakdown = breakdownPort,
                 newGameSetup = setupPort,
-                liveChoiceRng = { sessionRegistry.liveHand.choiceRng },
                 sessionKind = { sessionRegistry.kind },
                 requestConfirmNextHand = {
                     sessionEffects.confirm(ConfirmPrompt.AbandonHand)

@@ -45,7 +45,7 @@ data class PairHunterConfig(
  * - Always takes a legal [ChoiceKind.Hu] (highest score).
  *
  * [rank] returns every co-best index deterministically; [select] (interface
- * default) RNG-breaks ties.
+ * default) breaks ties deterministically with no RNG.
  */
 class PairHunterEngine(
     private val config: PairHunterConfig = PairHunterConfig.defaults(),

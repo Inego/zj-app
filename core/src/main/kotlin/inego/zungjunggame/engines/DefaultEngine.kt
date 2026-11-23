@@ -70,7 +70,7 @@ fun patternFloorPoints(ps: PlayerState, seatWind: Int = Tiles.EAST): Int =
  * - Shape bias among finalists
  *
  * [rank] returns every co-best index (deterministic). [select] (interface
- * default) RNG-breaks ties for real play. HINT uses [rank] only.
+ * default) breaks ties deterministically with no RNG. HINT uses [rank] only.
  *
  * Logic is kept in sync with the heuristic playing engines in zj-self-play;
  * class names here stay stable across upstream revisions.

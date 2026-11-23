@@ -3,7 +3,6 @@ package inego.zungjunggame.hints
 import inego.zungjunggame.engine.ChoiceList
 import inego.zungjunggame.engine.GameState
 import inego.zungjunggame.engines.PlayingEngine
-import kotlin.random.Random
 
 /**
  * One finished playout outcome from the human seat's perspective.
@@ -23,7 +22,7 @@ data class McPlayoutResult(
  *
  * Call [runToTerminal] after the root choice is already applied on [work] and the
  * unknown tiles have been determinized. Uses [PlayingEngine.selectIndex] so
- * DefaultEngine co-best ties are broken by [rng].
+ * playouts match the engine's deterministic tie-breaking.
  *
  * Reuses one [ChoiceList] across decisions to avoid per-step allocations (critical
  * on mobile, where GC pressure hurts MC throughput far more than on desktop).
@@ -37,7 +36,7 @@ class McPlayoutRunner(
      * Play [work] to terminal with [engine] for every seat.
      * Mutates [work]. Does not copy or determinize.
      */
-    fun runToTerminal(work: GameState, humanSeat: Int, rng: Random): McPlayoutResult {
+    fun runToTerminal(work: GameState, humanSeat: Int): McPlayoutResult {
         var guard = 0
         while (!work.isTerminal()) {
             if (++guard > MAX_DECISIONS) break
@@ -47,7 +46,7 @@ class McPlayoutRunner(
                 work.applyChoice(choices[0])
                 continue
             }
-            val index = engine.selectIndex(work, choices, rng)
+            val index = engine.selectIndex(work, choices)
             check(index in 0 until choices.size) {
                 "${engine.name()} returned out-of-range index $index"
             }

@@ -2,7 +2,6 @@ package inego.zungjunggame.session.board
 
 import inego.zungjunggame.engine.GameState
 import inego.zungjunggame.engines.PlayingEngine
-import kotlin.random.Random
 
 /**
  * Applies one decision for a non-human seat (or a scripted force).
@@ -30,8 +29,7 @@ fun interface NonHumanPicker {
 class EngineNonHumanPicker(
     private val board: BoardController,
     private val engine: () -> PlayingEngine,
-    private val rng: () -> Random,
 ) : NonHumanPicker {
     override fun applyOne(state: GameState): Boolean =
-        board.tryApplyEngineOrTrivialPass(state, engine(), rng())
+        board.tryApplyEngineOrTrivialPass(state, engine())
 }

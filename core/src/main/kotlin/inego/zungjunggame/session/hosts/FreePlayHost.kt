@@ -17,7 +17,6 @@ import inego.zungjunggame.session.allowsScoreTable
 import inego.zungjunggame.session.board.BoardController
 import inego.zungjunggame.state.StateSlot
 import inego.zungjunggame.ui.stack.SessionKind
-import kotlin.random.Random
 
 /**
  * Free-play session host: multi-hand [inego.zungjunggame.session.GameSession] chrome, New Game setup,
@@ -66,12 +65,6 @@ class FreePlayHost(
     private val scoreOverlay: FreePlayScoreTablePort,
     private val breakdown: FreePlayBreakdownPort,
     private val newGameSetup: FreePlaySetupPort,
-    /**
-     * Live board RNG ([inego.zungjunggame.session.LiveHand.choiceRng]): free-play [session] or the hosted
-     * tutorial runner. Used by the default non-human picker so AI picks stay
-     * on the active board after exclusivity switches.
-     */
-    private val liveChoiceRng: () -> Random,
     private val sessionKind: () -> SessionKind,
     /** Confirm abandon mid-hand before dealing the next hand. */
     private val requestConfirmNextHand: () -> Unit,
@@ -168,7 +161,7 @@ class FreePlayHost(
 
     /** Free-play non-human picker (restored when leaving tutorial). */
     fun engineNonHumanPicker(): EngineNonHumanPicker =
-        EngineNonHumanPicker(board, { botEngine() }, liveChoiceRng)
+        EngineNonHumanPicker(board) { botEngine() }
 
     /**
      * The policy the bot seats play: the live game's level, resolved per decision
@@ -298,7 +291,7 @@ class FreePlayHost(
         if (sessionKind() == SessionKind.Tutorial) return
         val state = liveHand.state ?: return
         if (!TableViewState.fromGameState(state, liveHand.humanSeat).isHumanInteractiveTurn) return
-        if (!board.tryApplyEngineOrTrivialPass(state, engine, liveHand.choiceRng)) return
+        if (!board.tryApplyEngineOrTrivialPass(state, engine)) return
         onHumanBoardApplied()
     }
 
