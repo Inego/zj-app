@@ -77,7 +77,15 @@ enum class HintMode(
  * local bot/hint settings would be meaningless.
  */
 data class LocalGameConfig(
-    val rules: GameConfig = GameConfig.DEFAULT,
+    val rules: GameConfig = DEFAULT_RULES,
     val botLevel: BotLevel = BotLevel.DEFAULT,
     val hintMode: HintMode = HintMode.DEFAULT,
-)
+) {
+    companion object {
+        /** Default rules for a new install's local New Game setup: 4 rounds (16 hands), patternless hands allowed. */
+        val DEFAULT_RULES: GameConfig = GameConfig(
+            rounds = GameConfig.DEFAULT_ROUNDS,
+            allowChickenHands = true,
+        )
+    }
+}
