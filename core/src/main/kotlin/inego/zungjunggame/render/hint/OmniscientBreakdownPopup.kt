@@ -188,10 +188,18 @@ object OmniscientBreakdownPopup {
         }
 
         val headerMetaGap = Fonts.px(8f)
-        var headerW = scoreW
-        if (capNote != null) headerW += headerMetaGap + capW
-        if (stepsNote != null) headerW += headerMetaGap + stepsW
-        if (exactTag != null) headerW += headerMetaGap + exactW
+        val leftHeaderW = when {
+            stepsNote != null && exactTag != null -> stepsW + headerMetaGap + exactW
+            stepsNote != null -> stepsW
+            exactTag != null -> exactW
+            else -> 0f
+        }
+        val rightHeaderW = scoreW + if (capNote != null) headerMetaGap + capW else 0f
+        val headerW = if (hasWin && leftHeaderW > 0f) {
+            leftHeaderW + colGap + rightHeaderW
+        } else {
+            rightHeaderW
+        }
 
         val rowsW = if (rows.isNotEmpty()) maxNameW + colGap + maxPtsW else 0f
         val innerW = max(max(winRowW, handRowW), max(headerW, rowsW))
@@ -288,23 +296,22 @@ object OmniscientBreakdownPopup {
         val headerTop = cursorTop
 
         if (hasWin) {
+            val scoreX = contentRight - scoreW
             Fonts.withFaceScale(scoreFont, SCORE_SCALE) {
-                Fonts.drawText(batch, scoreFont, scoreText, contentLeft, headerTop, AppPalette.accentBright)
+                Fonts.drawText(batch, scoreFont, scoreText, scoreX, headerTop, AppPalette.accentBright)
             }
             Fonts.withFaceScale(rowFont, ROW_SCALE) {
-                var metaX = contentLeft + scoreW
                 val metaY = headerTop - (scoreH - metaCapH) * 0.5f
-                if (capNote != null) {
-                    metaX += headerMetaGap
-                    Fonts.drawText(batch, rowFont, capNote, metaX, metaY, META_INK)
-                    metaX += capW
-                }
+                var leftX = contentLeft
                 if (stepsNote != null) {
-                    metaX += headerMetaGap
-                    Fonts.drawText(batch, rowFont, stepsNote, metaX, metaY, META_INK)
+                    Fonts.drawText(batch, rowFont, stepsNote, leftX, metaY, META_INK)
+                    leftX += stepsW + headerMetaGap
                 }
                 if (exactTag != null) {
-                    Fonts.drawText(batch, rowFont, exactTag, contentRight - exactW, metaY, META_INK)
+                    Fonts.drawText(batch, rowFont, exactTag, leftX, metaY, META_INK)
+                }
+                if (capNote != null) {
+                    Fonts.drawText(batch, rowFont, capNote, scoreX - headerMetaGap - capW, metaY, META_INK)
                 }
             }
         } else {
