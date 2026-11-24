@@ -255,10 +255,12 @@ class BoardComponent(
         val menuPresent = BoardMenuChrome.presentIn(snapshot.kind)
         var drawn = false
         var menuRect: Rect? = null
+        var drawnArea: SlideChromeLayout.BoardArea? = null
         if (snapshot.boardHosted) {
             val tableView = boardTableView(snapshot, view.inputs.revealedSeats)
             if (tableView != null) {
                 val area = tutorialBoardArea(frame)
+                drawnArea = area
                 val safe = boardSafeInsets(frame)
                 val menu = boardMenuSquare(area, c.worldHeight, safe, menuPresent)
                 val board = table()
@@ -310,6 +312,17 @@ class BoardComponent(
             menuButton.render(
                 batch = canvas.batch,
                 whitePixel = WhitePixel.get(),
+                pointerWorldX = c.pointerX,
+                pointerWorldY = c.pointerY,
+            )
+        }
+        if (drawn) {
+            val area = drawnArea!!
+            table().renderHoverOverlays(
+                batch = canvas.batch,
+                screenW = area.width,
+                screenH = area.height,
+                inputs = view.inputs,
                 pointerWorldX = c.pointerX,
                 pointerWorldY = c.pointerY,
             )

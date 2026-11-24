@@ -12,6 +12,7 @@ import inego.zungjunggame.engine.GameState
 import inego.zungjunggame.engine.HandScoreDetails
 import inego.zungjunggame.engine.NUM_PLAYERS
 import inego.zungjunggame.engine.NUM_TILE_TYPES
+import inego.zungjunggame.engine.PlayerState
 import inego.zungjunggame.engine.Scoring
 import inego.zungjunggame.engine.Tiles
 import inego.zungjunggame.engines.DefaultEngine
@@ -24,6 +25,29 @@ import kotlin.math.max
 import kotlin.math.sqrt
 import kotlin.random.Random
 
+/** One declared meld in a winning hand snapshot for [OmniscientHintArmSnapshot]. */
+data class OmniscientWinningMeld(
+    /** Tile types in ascending display order (3 for chow/pung, 4 for kong). */
+    val tiles: List<Int>,
+    /** True for a concealed kong (outer two tiles rendered face-down, matching the table). */
+    val concealedKong: Boolean = false,
+)
+
+/**
+ * Immutable snapshot of the human seat's winning hand at the terminal state of
+ * an arm's best known line.
+ */
+data class OmniscientWinningHand(
+    /** Standing concealed tiles in ascending tile-type order, excluding [winningTile] when separated. */
+    val concealedTiles: List<Int>,
+    /** Declared melds (open chows/pungs/kongs and concealed kongs) in exposure order. */
+    val melds: List<OmniscientWinningMeld>,
+    /** Completing tile (self-drawn or claimed discard), or `-1` if not uniquely identified. */
+    val winningTile: Int = -1,
+    /** Absolute seat that supplied [winningTile] on a discard/rob win, or `-1` for self-draw. */
+    val winSourceSeat: Int = -1,
+)
+
 /** Immutable per-option snapshot produced by [OmniscientHintSearch]. */
 data class OmniscientHintArmSnapshot(
     val choice: Choice,
@@ -33,6 +57,8 @@ data class OmniscientHintArmSnapshot(
     val bestSteps: Int = 0,
     /** Full pattern breakdown for [bestScore], or null when [bestScore] is 0. */
     val bestDetails: HandScoreDetails?,
+    /** Winning hand tiles for [bestScore], or null when [bestScore] is 0. */
+    val bestWinningHand: OmniscientWinningHand? = null,
     val playouts: Int,
     /** True when every branch under this root option has been proven exact. */
     val solved: Boolean,
@@ -175,6 +201,7 @@ class OmniscientHintSearch(
                     arm.playouts = 1
                     if (sc > 0) {
                         arm.bestDetails = cloneDetails(Scoring.computeHandScoreDetails(armStates[i]))
+                        arm.bestWinningHand = captureWinningHand(armStates[i], humanSeat)
                     }
                 }
             }
@@ -515,6 +542,7 @@ class OmniscientHintSearch(
                 computeShaping(work, humanSeat)
             }
             var capturedDetails: HandScoreDetails? = null
+            var capturedHand: OmniscientWinningHand? = null
 
             for (p in path.indices) {
                 val node = path[p]
@@ -529,8 +557,10 @@ class OmniscientHintSearch(
                     node.bestSteps = stepsFromNode
                     if (capturedDetails == null) {
                         capturedDetails = cloneDetails(Scoring.computeHandScoreDetails(work))
+                        capturedHand = captureWinningHand(work, humanSeat)
                     }
                     node.bestDetails = capturedDetails
+                    node.bestWinningHand = capturedHand
                 }
             }
             if (cur.solved) {
@@ -555,6 +585,7 @@ class OmniscientHintSearch(
             arm.bestWinScore = winScore
             arm.bestSteps = steps
             arm.bestDetails = cloneDetails(Scoring.computeHandScoreDetails(terminalState))
+            arm.bestWinningHand = captureWinningHand(terminalState, humanSeat)
         }
     }
 
@@ -596,6 +627,7 @@ class OmniscientHintSearch(
                     bestScore = arm.bestWinScore,
                     bestSteps = steps,
                     bestDetails = arm.bestDetails,
+                    bestWinningHand = arm.bestWinningHand,
                     playouts = arm.playouts,
                     solved = arm.solved,
                 ),
@@ -697,6 +729,7 @@ class OmniscientHintSearch(
                     arm.playouts = 1
                     if (sc > 0) {
                         arm.bestDetails = cloneDetails(Scoring.computeHandScoreDetails(armStates[i]))
+                        arm.bestWinningHand = captureWinningHand(armStates[i], humanSeat)
                     }
                 }
             }
@@ -720,6 +753,7 @@ class OmniscientHintSearch(
         var bestWinScore: Int = 0
         var bestSteps: Int = Int.MAX_VALUE
         var bestDetails: HandScoreDetails? = null
+        var bestWinningHand: OmniscientWinningHand? = null
         var sumReward: Double = 0.0
         var sumRewardSq: Double = 0.0
 
@@ -1365,6 +1399,75 @@ class OmniscientHintSearch(
         uncappedTotal = d.uncappedTotal,
         components = ArrayList(d.components),
     )
+
+    private fun captureWinningHand(state: GameState, humanSeat: Int): OmniscientWinningHand {
+        val ps = state.players[humanSeat]
+        val claimedWin =
+            state.decisionType == DecisionType.ReactToDiscard &&
+                state.lastDiscarded in 0 until NUM_TILE_TYPES
+        val winningTile = when {
+            claimedWin -> state.lastDiscarded
+            state.lastDrawnPlayer == humanSeat &&
+                state.lastDrawnTile in 0 until NUM_TILE_TYPES &&
+                ps.concealed[state.lastDrawnTile] > 0 -> state.lastDrawnTile
+            else -> -1
+        }
+
+        val concealed = ArrayList<Int>(14)
+        var skippedWinningCopy = claimedWin || winningTile < 0
+        for (t in 0 until NUM_TILE_TYPES) {
+            val count = ps.concealed[t]
+            if (count <= 0) continue
+            val keep = if (!skippedWinningCopy && t == winningTile) {
+                skippedWinningCopy = true
+                count - 1
+            } else {
+                count
+            }
+            repeat(keep) { concealed.add(t) }
+        }
+
+        val melds = ArrayList<OmniscientWinningMeld>(ps.meldCount)
+        for (i in 0 until ps.meldCount) {
+            when (ps.meldKind[i]) {
+                PlayerState.MELD_CHOW -> {
+                    val ci = ps.meldValue[i]
+                    val first = (ci / 7) * 9 + (ci % 7)
+                    melds.add(OmniscientWinningMeld(listOf(first, first + 1, first + 2)))
+                }
+                PlayerState.MELD_SET -> {
+                    val tile = ps.meldValue[i]
+                    when (ps.pungsKongs[tile]) {
+                        PlayerState.PK_OPEN_PUNG ->
+                            melds.add(OmniscientWinningMeld(listOf(tile, tile, tile)))
+                        PlayerState.PK_OPEN_KONG ->
+                            melds.add(OmniscientWinningMeld(listOf(tile, tile, tile, tile)))
+                        PlayerState.PK_CONCEALED_KONG ->
+                            melds.add(
+                                OmniscientWinningMeld(
+                                    listOf(tile, tile, tile, tile),
+                                    concealedKong = true,
+                                ),
+                            )
+                    }
+                }
+            }
+        }
+
+        val winSourceSeat = when {
+            !claimedWin -> -1
+            state.winSource in 0 until NUM_PLAYERS -> state.winSource
+            state.lastDiscarder in 0 until NUM_PLAYERS -> state.lastDiscarder
+            else -> -1
+        }
+
+        return OmniscientWinningHand(
+            concealedTiles = concealed,
+            melds = melds,
+            winningTile = winningTile,
+            winSourceSeat = winSourceSeat,
+        )
+    }
 
     private fun statesMatch(a: GameState, b: GameState): Boolean {
         if (a.liveWallSize != b.liveWallSize ||

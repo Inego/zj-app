@@ -852,6 +852,7 @@ class PlayTableView(
         refreshRecommendation(view.myChoices.asList(), view.isHumanInteractiveTurn, inputs.hintsEnabled)
 
         val layout = computeTableLayout(screenW, screenH)
+        lastRenderLayout = layout
         val live = interact == TableInteract.Play
         val hoverX = if (live) pointerWorldX else Float.NaN
         val hoverY = if (live) pointerWorldY else Float.NaN
@@ -1265,6 +1266,27 @@ class PlayTableView(
                 shutdownMessage = shutdownMessage,
             )
         }
+    }
+
+    /**
+     * Transient hover/hold overlays ([TouchTileMagnifier] and [OmniscientBreakdownPopup]).
+     *
+     * Painted as a separate pass after board HUD chrome ("Patternless OK", hand
+     * counter, menu button) so floating hover popups are never covered by felt HUD
+     * labels while still letting parked HINT / claim controls stay behind that HUD.
+     */
+    fun renderHoverOverlays(
+        batch: SpriteBatch,
+        screenW: Float,
+        screenH: Float,
+        inputs: TableRenderInputs,
+        pointerWorldX: Float = Float.NaN,
+        pointerWorldY: Float = Float.NaN,
+    ) {
+        val layout = lastRenderLayout ?: return
+        val live = interact == TableInteract.Play
+        val hoverX = if (live) pointerWorldX else Float.NaN
+        val hoverY = if (live) pointerWorldY else Float.NaN
 
         val hoveredHand = humanHandHits.getOrNull(hoveredHandIndex)
         var magnifierTopY = Float.NaN
@@ -1322,11 +1344,14 @@ class PlayTableView(
                 if (arm != null) {
                     OmniscientBreakdownPopup.draw(
                         batch = batch,
+                        drawer = drawer,
                         arm = arm,
                         anchorX = hoveredClaim.cx,
                         anchorTopY = hoveredClaim.cy + hoveredClaim.h * 0.5f + Fonts.px(24f),
                         screenW = screenW,
                         screenH = screenH,
+                        humanSeat = inputs.humanSeat,
+                        tileAspect = tileAspect,
                         glyphLayout = glyphLayout,
                     )
                 }
@@ -1344,11 +1369,14 @@ class PlayTableView(
                     }
                     OmniscientBreakdownPopup.draw(
                         batch = batch,
+                        drawer = drawer,
                         arm = arm,
                         anchorX = if (isTouch) pointerWorldX else hoveredHand.worldX,
                         anchorTopY = anchorTopY,
                         screenW = screenW,
                         screenH = screenH,
+                        humanSeat = inputs.humanSeat,
+                        tileAspect = tileAspect,
                         glyphLayout = glyphLayout,
                     )
                 }
@@ -1357,6 +1385,8 @@ class PlayTableView(
     }
 
     // ── Layout + seat slot collection ────────────────────────────────────────
+
+    private var lastRenderLayout: TableLayout? = null
 
     private data class TableLayout(
         val handW: Float,

@@ -3,10 +3,14 @@ package inego.zungjunggame.render.hint
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
+import inego.zungjunggame.engine.NUM_PLAYERS
 import inego.zungjunggame.hints.OmniscientHintArmSnapshot
+import inego.zungjunggame.hints.OmniscientWinningHand
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.render.seats.PlayerLabels
+import inego.zungjunggame.render.tiles.TileDrawer
 import inego.zungjunggame.render.ui.AppPalette
 import inego.zungjunggame.render.ui.HandsTableText
 import inego.zungjunggame.render.ui.OverlayChrome
@@ -14,23 +18,35 @@ import inego.zungjunggame.render.ui.OverlayViewport
 import kotlin.math.max
 
 /**
- * Floating hover popup for Omniscient hints: shows an enlarged best-known
- * winning score, step count, and full Zung Jung pattern breakdown above the
- * hovered hand tile or claim button.
+ * Floating hover popup for Omniscient hints: shows the winning hand strip,
+ * enlarged best-known winning score, step count, and full Zung Jung pattern
+ * breakdown above the hovered hand tile or claim button.
  */
 object OmniscientBreakdownPopup {
     private const val SCORE_SCALE = 1.45f
     private const val ROW_SCALE = 0.84f
+    private const val TILE_HEIGHT_DP = 32f
+    private const val WIN_ROW_GAP_DP = 8f
+    private const val WIN_SOURCE_TEXT_GAP_DP = 10f
+    private const val HAND_BOTTOM_GAP_DP = 10f
+    private const val MIN_HAND_SCALE = 0.45f
+    private const val TILE_GAP_FRACTION = 0.06f
+    private const val MELD_GAP_FRACTION = 0.42f
+    private val PANEL_FILL: Color = AppPalette.tint(AppPalette.panel, 0.80f)
     private val DIVIDER_COLOR: Color = AppPalette.tint(AppPalette.panelRim, 0.35f)
     private val META_INK: Color = AppPalette.inkMuted
+    private val FACE_TINT: Color = AppPalette.faceTint
 
     fun draw(
         batch: SpriteBatch,
+        drawer: TileDrawer,
         arm: OmniscientHintArmSnapshot,
         anchorX: Float,
         anchorTopY: Float,
         screenW: Float,
         screenH: Float,
+        humanSeat: Int = 0,
+        tileAspect: Float = 3f / 4f,
         glyphLayout: GlyphLayout = GlyphLayout(),
     ) {
         Fonts.ensureCreated()
@@ -99,10 +115,21 @@ object OmniscientBreakdownPopup {
             null
         }
         val exactTag = if (hasWin && arm.solved) L10n.get("hint.omniscient.exact") else null
+        val winningHand = if (hasWin) arm.bestWinningHand else null
+        val hasWinTileRow = winningHand != null && winningHand.winningTile >= 0
+        val winSourceText = if (hasWinTileRow) {
+            PlayerLabels.winSourceLabel(
+                discarder = winningHand.winSourceSeat.takeIf { it >= 0 },
+                humanSeat = humanSeat,
+            )
+        } else {
+            null
+        }
 
         var stepsW = 0f
         var capW = 0f
         var exactW = 0f
+        var winSourceW = 0f
         var maxNameW = 0f
         var maxPtsW = 0f
         var rowH = 0f
@@ -114,12 +141,50 @@ object OmniscientBreakdownPopup {
             if (stepsNote != null) stepsW = Fonts.textWidth(rowFont, stepsNote)
             if (capNote != null) capW = Fonts.textWidth(rowFont, capNote)
             if (exactTag != null) exactW = Fonts.textWidth(rowFont, exactTag)
+            if (winSourceText != null) winSourceW = Fonts.textWidth(rowFont, winSourceText)
             for ((name, pts) in rows) {
                 val nw = Fonts.textWidth(rowFont, name)
                 if (nw > maxNameW) maxNameW = nw
                 val pw = Fonts.textWidth(rowFont, pts)
                 if (pw > maxPtsW) maxPtsW = pw
             }
+        }
+
+        val safeRect = OverlayViewport.available(screenW, screenH, marginPx = 0f)
+        val maxInnerW = max(1f, safeRect.width - (screenMargin + padX) * 2f)
+
+        val baseTileH = Fonts.px(TILE_HEIGHT_DP)
+        val baseTileW = baseTileH * tileAspect
+        val baseTileGap = baseTileW * TILE_GAP_FRACTION
+        val baseMeldGap = baseTileW * MELD_GAP_FRACTION
+        val winSourceGap = Fonts.px(WIN_SOURCE_TEXT_GAP_DP)
+        val rawHandRowW = if (winningHand != null) {
+            measureHandRowWidth(winningHand, baseTileW, baseTileGap, baseMeldGap)
+        } else {
+            0f
+        }
+        val hasHandRow = winningHand != null && rawHandRowW > 0f
+        val handScale = if (hasHandRow && rawHandRowW > maxInnerW) {
+            (maxInnerW / rawHandRowW).coerceAtLeast(MIN_HAND_SCALE)
+        } else {
+            1f
+        }
+        val tileW = baseTileW * handScale
+        val tileH = baseTileH * handScale
+        val tileGap = baseTileGap * handScale
+        val meldGap = baseMeldGap * handScale
+        val handRowW = if (hasHandRow) rawHandRowW * handScale else 0f
+        val winRowW = if (hasWinTileRow) {
+            tileW + if (!winSourceText.isNullOrEmpty()) winSourceGap + winSourceW else 0f
+        } else {
+            0f
+        }
+        val winRowGap = Fonts.px(WIN_ROW_GAP_DP)
+        val handBottomGap = Fonts.px(HAND_BOTTOM_GAP_DP)
+        val handBlockH = when {
+            hasWinTileRow && hasHandRow -> tileH + winRowGap + tileH + handBottomGap
+            hasWinTileRow || hasHandRow -> tileH + handBottomGap
+            else -> 0f
         }
 
         val headerMetaGap = Fonts.px(8f)
@@ -129,7 +194,7 @@ object OmniscientBreakdownPopup {
         if (exactTag != null) headerW += headerMetaGap + exactW
 
         val rowsW = if (rows.isNotEmpty()) maxNameW + colGap + maxPtsW else 0f
-        val innerW = max(headerW, rowsW)
+        val innerW = max(max(winRowW, handRowW), max(headerW, rowsW))
         val cardW = innerW + padX * 2f
 
         val rowsBlockH = if (rows.isNotEmpty()) {
@@ -137,15 +202,16 @@ object OmniscientBreakdownPopup {
         } else {
             0f
         }
-        val cardH = padY * 2f + scoreH + rowsBlockH
+        val cardH = padY * 2f + handBlockH + scoreH + rowsBlockH
 
-        // Clamp within safe viewport bounds
-        val avail = OverlayViewport.available(screenW, screenH)
-        val minLeft = avail.left + screenMargin
-        val maxLeft = max(minLeft, avail.right - screenMargin - cardW)
+        // Clamp within safe viewport bounds: keep a small horizontal margin,
+        // but allow touching the top/bottom safe edges when vertically tight
+        // (e.g. Android landscape with ready-hand wait row underneath).
+        val minLeft = safeRect.left + screenMargin
+        val maxLeft = max(minLeft, safeRect.right - screenMargin - cardW)
         val cardLeft = (anchorX - cardW * 0.5f).coerceIn(minLeft, maxLeft)
-        val minBottom = avail.bottom + screenMargin
-        val maxBottom = max(minBottom, avail.top - screenMargin - cardH)
+        val minBottom = safeRect.bottom
+        val maxBottom = max(minBottom, safeRect.top - cardH)
         val cardBottom = (anchorTopY + gapAboveAnchor).coerceIn(minBottom, maxBottom)
 
         OverlayChrome.drawPanel(
@@ -155,14 +221,71 @@ object OmniscientBreakdownPopup {
             cardBottom,
             cardW,
             cardH,
-            AppPalette.panel,
+            PANEL_FILL,
             AppPalette.panelRim,
             max(1.5f, Fonts.px(2f)),
         )
 
         val contentLeft = cardLeft + padX
         val contentRight = cardLeft + cardW - padX
-        val headerTop = cardBottom + cardH - padY
+        var cursorTop = cardBottom + cardH - padY
+
+        if (hasWinTileRow) {
+            val relativeSource = if (winningHand.winSourceSeat >= 0) {
+                ((winningHand.winSourceSeat - humanSeat) % NUM_PLAYERS + NUM_PLAYERS) % NUM_PLAYERS
+            } else {
+                -1
+            }
+            val winRowLeft = when (relativeSource) {
+                3 -> contentLeft // from Left
+                1 -> contentRight - winRowW // from Right
+                else -> contentLeft + (innerW - winRowW) * 0.5f // Opposite or self-draw
+            }
+            val tileOnRight = relativeSource == 1
+            val winTileLeft = if (tileOnRight) winRowLeft + winRowW - tileW else winRowLeft
+            val winCx = winTileLeft + tileW * 0.5f
+            val winCy = cursorTop - tileH * 0.5f
+            batch.setColor(Color.WHITE)
+            drawer.drawGlow(
+                batch = batch,
+                cx = winCx,
+                cy = winCy,
+                w = tileW,
+                h = tileH,
+                color = TileDrawer.WIN_DISCARD_GLOW_COLOR,
+                expand = 1.55f,
+            )
+            batch.setColor(FACE_TINT)
+            drawer.drawOpen(batch, winningHand.winningTile, winCx, winCy, tileW, tileH)
+            batch.setColor(Color.WHITE)
+            if (!winSourceText.isNullOrEmpty()) {
+                Fonts.withFaceScale(rowFont, ROW_SCALE) {
+                    val textX = if (tileOnRight) winRowLeft else winRowLeft + tileW + winSourceGap
+                    val textY = winCy + rowH * 0.5f
+                    Fonts.drawText(batch, rowFont, winSourceText, textX, textY, AppPalette.ink)
+                }
+            }
+            cursorTop -= tileH + if (hasHandRow) winRowGap else handBottomGap
+        }
+
+        if (hasHandRow) {
+            val handLeft = contentLeft + (innerW - handRowW) * 0.5f
+            val handCy = cursorTop - tileH * 0.5f
+            drawHandRow(
+                batch = batch,
+                drawer = drawer,
+                hand = winningHand,
+                startX = handLeft,
+                cy = handCy,
+                tileW = tileW,
+                tileH = tileH,
+                tileGap = tileGap,
+                meldGap = meldGap,
+            )
+            cursorTop -= tileH + handBottomGap
+        }
+
+        val headerTop = cursorTop
 
         if (hasWin) {
             Fonts.withFaceScale(scoreFont, SCORE_SCALE) {
@@ -206,5 +329,75 @@ object OmniscientBreakdownPopup {
                 }
             }
         }
+    }
+
+    private fun measureHandRowWidth(
+        hand: OmniscientWinningHand,
+        tileW: Float,
+        tileGap: Float,
+        meldGap: Float,
+    ): Float {
+        var w = 0f
+        var hasLeft = false
+        val concealedCount = hand.concealedTiles.size
+        if (concealedCount > 0) {
+            w += concealedCount * tileW + (concealedCount - 1) * tileGap
+            hasLeft = true
+        }
+        for (meld in hand.melds) {
+            val n = meld.tiles.size
+            if (n == 0) continue
+            if (hasLeft) w += meldGap
+            w += n * tileW + (n - 1) * tileGap
+            hasLeft = true
+        }
+        return w
+    }
+
+    private fun drawHandRow(
+        batch: SpriteBatch,
+        drawer: TileDrawer,
+        hand: OmniscientWinningHand,
+        startX: Float,
+        cy: Float,
+        tileW: Float,
+        tileH: Float,
+        tileGap: Float,
+        meldGap: Float,
+    ) {
+        var x = startX
+        var hasLeft = false
+
+        if (hand.concealedTiles.isNotEmpty()) {
+            batch.setColor(FACE_TINT)
+            for ((i, tile) in hand.concealedTiles.withIndex()) {
+                val cx = x + tileW * 0.5f
+                drawer.drawOpen(batch, tile, cx, cy, tileW, tileH)
+                x += tileW
+                if (i < hand.concealedTiles.lastIndex) x += tileGap
+            }
+            hasLeft = true
+        }
+
+        for (meld in hand.melds) {
+            val tiles = meld.tiles
+            if (tiles.isEmpty()) continue
+            if (hasLeft) x += meldGap
+            for ((i, tile) in tiles.withIndex()) {
+                val cx = x + tileW * 0.5f
+                if (meld.concealedKong && (i == 0 || i == tiles.lastIndex)) {
+                    batch.setColor(Color.WHITE)
+                    drawer.drawClosed(batch, cx, cy, tileW, tileH)
+                } else {
+                    batch.setColor(FACE_TINT)
+                    drawer.drawOpen(batch, tile, cx, cy, tileW, tileH)
+                }
+                x += tileW
+                if (i < tiles.lastIndex) x += tileGap
+            }
+            hasLeft = true
+        }
+
+        batch.setColor(Color.WHITE)
     }
 }
