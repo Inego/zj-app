@@ -29,8 +29,8 @@ import kotlin.test.assertTrue
  * The sweep drives the production helpers (`replaceMenuCardWith` /
  * `raiseCardOverMenu`) and the production transitions over a real [Router] built
  * from the production [RouteSpecs], so it exercises the seam the app uses rather
- * than a fake of it. The straggler cases are pinned directly: the online score
- * table replaces, and the setup the finished-game path raises replaces.
+ * than a fake of it. The straggler case is pinned directly: the online score
+ * table replaces.
  */
 class MenuRaisePolicyTest {
 
@@ -137,20 +137,5 @@ class MenuRaisePolicyTest {
 
         assertFalse(env.has(menuRoute), "the online menu card must not survive the ledger")
         assertTrue(env.has(Route.Modal(RouteIds.SCORE_TABLE)))
-    }
-
-    /**
-     * The finished-game path in `FreePlayHost.requestNewGame` calls
-     * `showNewGameSetup()` directly instead of going through the confirm; the
-     * route-backed setup port is the one raise site, so that path replaces too.
-     */
-    @Test
-    fun setupRaisedFromAFinishedGameReplacesTheMenuCard() {
-        val env = Env(online = false)
-
-        env.transitions.openNewGameSetup()
-
-        assertFalse(env.has(menuRoute), "the setup card must take the menu card's place")
-        assertTrue(env.has(Route.Modal(RouteIds.NEW_GAME_SETUP)))
     }
 }

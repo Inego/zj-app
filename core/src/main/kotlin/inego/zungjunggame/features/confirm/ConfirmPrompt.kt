@@ -26,10 +26,6 @@ enum class ConfirmPrompt(
     AbandonHand(
         titleKey = "confirm.abandon_hand",
     ),
-    /** Start a new game over the running one. */
-    NewGame(
-        titleKey = "confirm.new_game",
-    ),
     /** Start the running lesson over from its first step. */
     RestartLesson(
         titleKey = "confirm.restart_lesson",

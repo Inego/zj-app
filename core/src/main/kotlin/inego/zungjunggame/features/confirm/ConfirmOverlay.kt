@@ -83,7 +83,7 @@ class ConfirmOverlay : Disposable, GestureSurface<ConfirmOverlay.PointerResult> 
         None,
     }
 
-    /** @param titleKey L10n key for the question (e.g. `confirm.new_game`). */
+    /** @param titleKey L10n key for the question (e.g. `confirm.abandon_hand`). */
     fun setQuestion(titleKey: String) {
         this.titleKey = titleKey
     }

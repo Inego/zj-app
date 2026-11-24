@@ -93,7 +93,7 @@ internal class AppSessionEffects(
     }
 
     override fun requestNewGame() {
-        freePlayHost.requestNewGame(hand)
+        freePlayHost.requestNewGame()
     }
 
     override fun startFromSetup() {
@@ -169,7 +169,6 @@ internal class AppSessionEffects(
         dismissConfirm()
         when (prompt) {
             ConfirmPrompt.AbandonHand -> freePlayHost.onConfirmNextHand()
-            ConfirmPrompt.NewGame -> freePlayHost.onConfirmNewGame()
             ConfirmPrompt.RestartLesson -> restartTutorialLesson()
             ConfirmPrompt.LogOut -> logout()
             ConfirmPrompt.Forfeit -> {

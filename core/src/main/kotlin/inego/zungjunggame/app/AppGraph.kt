@@ -445,8 +445,7 @@ class AppGraph(
         // router is built below, so it is resolved lazily.
         val setupRoute = Route.Modal(RouteIds.NEW_GAME_SETUP)
         val setupPort = object : FreePlaySetupPort {
-            // REPLACE: the setup card takes the game-menu card's place, so the
-            // active-game confirm path and the finished-game direct path agree.
+            // REPLACE: the setup card takes the game-menu card's place over the board.
             override fun show() = transitions.openNewGameSetup()
 
             // Taking the draft and closing the card are one step: the route's state
@@ -544,9 +543,6 @@ class AppGraph(
                 sessionKind = { sessionRegistry.kind },
                 requestConfirmNextHand = {
                     sessionEffects.confirm(ConfirmPrompt.AbandonHand)
-                },
-                requestConfirmNewGame = {
-                    sessionEffects.confirm(ConfirmPrompt.NewGame)
                 },
                 clearTutorialForFreePlayStart = { tutorialHost.clearForFreePlayStart() },
                 leaveOnlineForFreePlayStart = { onlineCoordinator.leaveOnlineForLocalPlay() },

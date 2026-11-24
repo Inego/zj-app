@@ -68,8 +68,6 @@ class FreePlayHost(
     private val sessionKind: () -> SessionKind,
     /** Confirm abandon mid-hand before dealing the next hand. */
     private val requestConfirmNextHand: () -> Unit,
-    /** Confirm abandon in-progress free-play before opening New Game setup. */
-    private val requestConfirmNewGame: () -> Unit,
     /** Drop mid-lesson host + save before free-play setup Start. */
     private val clearTutorialForFreePlayStart: () -> Unit,
     /**
@@ -326,23 +324,12 @@ class FreePlayHost(
     }
 
     /**
-     * Menu / last-hand CTA: open New Game setup. Confirms first only when a
-     * game is still in progress (scores would be abandoned). A finished finite
-     * game skips the prompt — there is nothing mid-game left to protect.
+     * Menu / last-hand CTA: open New Game setup directly.
      * No-op in tutorial or online — those contexts leave via Exit to main menu.
      */
-    fun requestNewGame(liveHand: LiveHand) {
+    fun requestNewGame() {
         if (sessionKind() != SessionKind.FreePlay) return
-        if (!liveHand.active || liveHand.state == null) {
-            showNewGameSetup()
-            return
-        }
-        session.maybeRecordFinishedHand()
-        if (session.isGameComplete()) {
-            showNewGameSetup()
-            return
-        }
-        requestConfirmNewGame()
+        showNewGameSetup()
     }
 
     /**
@@ -374,11 +361,6 @@ class FreePlayHost(
     /** After shared confirm Yes for abandon mid-hand. */
     fun onConfirmNextHand() {
         applyDealResult(session.dealHand())
-    }
-
-    /** After shared confirm Yes for new game mid-run. */
-    fun onConfirmNewGame() {
-        showNewGameSetup()
     }
 
     override fun dispose() {

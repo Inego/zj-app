@@ -66,7 +66,7 @@ import inego.zungjunggame.ui.Scope
  * - Ctrl+R: open Zung Jung reference (full-screen; × or Esc exits;
  *   history ← / Backspace goes back inside the browser)
  * - Hand end: Enter presses Next hand when that button is available
- * - Confirm dialog (abandon hand / new game mid-run): Yes/No click, or Y/N/Enter/Esc
+ * - Confirm dialog (abandon hand): Yes/No click, or Y/N/Enter/Esc
  * - New Game setup: Enter starts, Esc cancels · F11: fullscreen
  * - Scroll wheel: score table / reference mode
  *

@@ -11,7 +11,6 @@ import inego.zungjunggame.ui.stack.Route
 import inego.zungjunggame.ui.testFrame
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -113,21 +112,6 @@ class ConfirmComponentTest {
         component.onGestureRelease(yes.centerX, yes.centerY + 40f, frame)
 
         assertTrue(emitted.isEmpty())
-    }
-
-    /**
-     * The question is the route's, so a card the stack restores asks the same thing
-     * it asked before; a confirm route that names no question is not a card.
-     */
-    @Test
-    fun questionComesFromTheRoute() {
-        val prompt = component(ConfirmPrompt.NewGame.route()).prompt
-
-        assertEquals(ConfirmPrompt.NewGame, prompt)
-        assertEquals("confirm.new_game", prompt.titleKey)
-        assertFailsWith<IllegalArgumentException> {
-            component(Route.Modal(ConfirmPrompt.AbandonHand.route().id))
-        }
     }
 
     @Test
