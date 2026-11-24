@@ -205,12 +205,7 @@ class BoardComponent(
         // The playable rect this frame laid the table into. A layer above that is
         // composed into the same space (the hand-end card) reads it from here
         // instead of deriving a pane of its own.
-        val paneRect = Rect(
-            left = 0f,
-            bottom = area.bottomReserve,
-            width = area.width,
-            height = (area.height - area.bottomReserve).coerceAtLeast(0f),
-        )
+        val paneRect = boardParkBounds(area, boardSafeInsets(frame))
         val regions = measurement.anchors + (BoardAnchors.PANE to paneRect)
         return Layout(
             hitRegions = hitRegions,
@@ -268,6 +263,7 @@ class BoardComponent(
                 board.topRightChrome = menu
                 board.topHud = menuPresent
                 board.safeInsets = BoardMenuChrome.tableInsets(area.width, area.height, safe, menu)
+                board.parkBounds = boardParkBounds(area, safe)
                 val input = view.renderInput
                 // The player's remembered HINT / claim-row places live in
                 // `ui.prefs`; the board hands them in before painting so the
@@ -340,6 +336,28 @@ class BoardComponent(
  */
 private fun boardSafeInsets(frame: Frame): SafeArea.Insets =
     if (frame.space != null) SafeArea.Insets() else SafeArea.current()
+
+/**
+ * Playable game board rect in table coordinates, flush to its edges with no
+ * outer margin: inside [safe] on a full-screen board, or inside the embedded
+ * tutorial pane above [SlideChromeLayout.BoardArea.bottomReserve] (where [safe]
+ * is already zeros because the tutorial shell excludes window cutouts).
+ */
+internal fun boardParkBounds(
+    area: SlideChromeLayout.BoardArea,
+    safe: SafeArea.Insets,
+): Rect {
+    val left = safe.left.coerceAtLeast(0f)
+    val bottom = maxOf(area.bottomReserve, safe.bottom).coerceAtLeast(0f)
+    val right = (area.width - safe.right).coerceAtMost(area.width)
+    val top = (area.height - safe.top).coerceAtMost(area.height)
+    return Rect(
+        left = left,
+        bottom = bottom,
+        width = (right - left).coerceAtLeast(1f),
+        height = (top - bottom).coerceAtLeast(1f),
+    )
+}
 
 /** The table view a board frame paints and measures from, or null when none is hosted. */
 internal fun boardTableView(snapshot: SessionSnapshot, revealedSeats: Set<Int>): TableViewState? =
@@ -419,6 +437,7 @@ object DefaultBoardMeasure : BoardMeasure {
         board.topRightChrome = menu
         board.topHud = menuPresent
         board.safeInsets = BoardMenuChrome.tableInsets(area.width, area.height, safeInsets, menu)
+        board.parkBounds = boardParkBounds(area, safeInsets)
         val tableView = boardTableView(session, view.inputs.revealedSeats)
         val boxes = board.refreshHits(
             tableView,

@@ -114,7 +114,8 @@ class HintButtonOverlay(
         screenW: Float,
         screenH: Float,
         edgeInsetBottom: Float,
-    ): Hit = layout(rowRightX, rowCenterY, handH, screenW, screenH, edgeInsetBottom).hit
+        bounds: Rect? = null,
+    ): Hit = layout(rowRightX, rowCenterY, handH, screenW, screenH, edgeInsetBottom, bounds).hit
 
     fun layout(
         rowRightX: Float,
@@ -123,6 +124,7 @@ class HintButtonOverlay(
         screenW: Float,
         screenH: Float,
         edgeInsetBottom: Float,
+        bounds: Rect? = null,
     ): Layout {
         val touch = InputProfile.detect() == InputProfile.Touch
         // Android draws the whole chip — plate *and* label — at two thirds of its
@@ -162,7 +164,7 @@ class HintButtonOverlay(
         // can move it anywhere on the board.
         val restLeft = restCx - btnW * 0.5f
         val restBottom = restCy - btnH * 0.5f
-        val bounds = OverlayViewport.available(screenW, screenH)
+        val parkBounds = bounds ?: OverlayViewport.available(screenW, screenH, marginPx = 0f)
         val placed = ParkGeometry.place(
             restLeft = restLeft,
             restBottom = restBottom,
@@ -170,7 +172,7 @@ class HintButtonOverlay(
             blockH = btnH,
             parkX = park.parkX,
             parkY = park.parkY,
-            bounds = bounds,
+            bounds = parkBounds,
         )
         val cx = placed.left + btnW * 0.5f
         val cy = placed.bottom + btnH * 0.5f
@@ -186,7 +188,7 @@ class HintButtonOverlay(
             restBottom = restBottom,
             parkX = placed.parkX,
             parkY = placed.parkY,
-            bounds = bounds,
+            bounds = parkBounds,
             labelScale = labelScale,
         )
     }
@@ -203,8 +205,9 @@ class HintButtonOverlay(
         pointerWorldY: Float,
         mode: Mode = Mode.Idle,
         metricText: String? = null,
+        bounds: Rect? = null,
     ) {
-        val geom = layout(rowRightX, rowCenterY, handH, screenW, screenH, edgeInsetBottom)
+        val geom = layout(rowRightX, rowCenterY, handH, screenW, screenH, edgeInsetBottom, bounds)
         park.setPark(geom.parkX, geom.parkY)
         park.setGeometry(geom.restLeft, geom.restBottom, geom.width, geom.height, geom.bounds)
         val buttonHit = geom.hit

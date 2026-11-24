@@ -835,10 +835,11 @@ class ScoreBreakdownOverlay : Disposable, ParkableChrome, GestureSurface<ScoreBr
 
     /**
      * The rect the park clamps against. A card handed a pane (the tutorial's
-     * board) uses it flush; otherwise it is the window's safe area.
+     * board) uses it flush; otherwise it is the full safe-area board with no
+     * outer margin so the card and its buttons can sit flush against any edge.
      */
     private fun clampBounds(): Rect =
-        lastBounds ?: OverlayViewport.available(lastScreenW, lastScreenH)
+        lastBounds ?: OverlayViewport.available(lastScreenW, lastScreenH, marginPx = 0f)
 
     /**
      * Place a collapsed block without [render] (unit tests; no Gdx / fonts).

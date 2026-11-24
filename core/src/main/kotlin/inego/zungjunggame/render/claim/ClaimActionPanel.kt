@@ -140,8 +140,10 @@ class ClaimActionPanel(
         anchorY: Float,
         tileH: Float,
         tileAspect: Float,
+        bounds: Rect? = null,
     ): List<ButtonHit> =
-        layoutRow(claimedTile, choices, screenW, screenH, anchorY, tileH, tileAspect)?.buttons ?: emptyList()
+        layoutRow(claimedTile, choices, screenW, screenH, anchorY, tileH, tileAspect, bounds)?.buttons
+            ?: emptyList()
 
     // ── ParkableChrome ───────────────────────────────────────────────────────
     // The whole row parks as one block: the drop target is the felt, not a
@@ -215,6 +217,7 @@ class ClaimActionPanel(
         decisionSlackMs: Long? = null,
         decisionBaseMs: Long? = null,
         preparing: Boolean = false,
+        bounds: Rect? = null,
     ) {
         val claimed = if (view.isPendingDiscard) view.lastDiscarded else -1
         render(
@@ -238,6 +241,7 @@ class ClaimActionPanel(
             decisionSlackMs = decisionSlackMs,
             decisionBaseMs = decisionBaseMs,
             preparing = preparing,
+            bounds = bounds,
         )
     }
 
@@ -262,6 +266,7 @@ class ClaimActionPanel(
         decisionSlackMs: Long? = null,
         decisionBaseMs: Long? = null,
         preparing: Boolean = false,
+        bounds: Rect? = null,
     ) {
         val claimed =
             if (state.decisionType == DecisionType.ReactToDiscard &&
@@ -292,6 +297,7 @@ class ClaimActionPanel(
             decisionSlackMs = decisionSlackMs,
             decisionBaseMs = decisionBaseMs,
             preparing = preparing,
+            bounds = bounds,
         )
     }
 
@@ -332,6 +338,7 @@ class ClaimActionPanel(
         anchorY: Float,
         tileH: Float,
         tileAspect: Float,
+        bounds: Rect? = null,
     ): RowLayout? {
         val specs = buildSpecs(claimedTile, choices)
         if (specs.isEmpty()) return null
@@ -389,7 +396,7 @@ class ClaimActionPanel(
         // instead of pinning one end off-screen.
         val restLeft = screenW * 0.5f - totalW * 0.5f
         val restBottom = anchorY - maxH * 0.5f
-        val bounds = OverlayViewport.available(screenW, screenH)
+        val parkBounds = bounds ?: OverlayViewport.available(screenW, screenH, marginPx = 0f)
         val placed = ParkGeometry.place(
             restLeft = restLeft,
             restBottom = restBottom,
@@ -397,7 +404,7 @@ class ClaimActionPanel(
             blockH = maxH,
             parkX = park.parkX,
             parkY = park.parkY,
-            bounds = bounds,
+            bounds = parkBounds,
         )
         var xLeft = placed.left
         val rowCy = placed.bottom + maxH * 0.5f
@@ -425,7 +432,7 @@ class ClaimActionPanel(
             restBottom = restBottom,
             parkX = placed.parkX,
             parkY = placed.parkY,
-            bounds = bounds,
+            bounds = parkBounds,
             tileW = tileW,
             tileGap = tileGap,
             padY = padY,
@@ -454,11 +461,12 @@ class ClaimActionPanel(
         decisionSlackMs: Long? = null,
         decisionBaseMs: Long? = null,
         preparing: Boolean = false,
+        bounds: Rect? = null,
     ) {
         hits.clear()
         hoveredIndex = -1
 
-        val row = layoutRow(claimedTile, choices, screenW, screenH, anchorY, tileH, tileAspect)
+        val row = layoutRow(claimedTile, choices, screenW, screenH, anchorY, tileH, tileAspect, bounds)
             ?: return
         hits.addAll(row.buttons)
         park.setPark(row.parkX, row.parkY)

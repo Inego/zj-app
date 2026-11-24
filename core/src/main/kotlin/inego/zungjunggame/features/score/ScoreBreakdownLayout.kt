@@ -303,10 +303,11 @@ internal data class ScoreBreakdownLayout(
                 input.details.totalScore,
             )
             val colGap = Fonts.px(28f)
-            // The card's world: the window's safe area, or the pane a provider
-            // hands it (the tutorial board), which already sits inside it.
+            // The card's world: the pane a provider hands it (the tutorial board),
+            // or the full safe-area board with no outer margin so the card and its
+            // buttons can sit flush against any board edge.
             val avail = input.bounds
-                ?: OverlayViewport.available(input.screenW, input.screenH)
+                ?: OverlayViewport.available(input.screenW, input.screenH, marginPx = 0f)
             // One inset for the card's sides and its bottom; the header band owns
             // the top. The card is capped by its world (the window, or the pane
             // it belongs to), so every dp of padding here comes straight out of

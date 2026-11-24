@@ -22,6 +22,7 @@ import inego.zungjunggame.render.seats.PlayerAreaLayout
 import inego.zungjunggame.render.seats.SeatLabelDrawer
 import inego.zungjunggame.render.seats.SeatSide
 import inego.zungjunggame.render.tiles.*
+import inego.zungjunggame.render.ui.OverlayViewport
 import inego.zungjunggame.render.ui.ParkChromeGroup
 import inego.zungjunggame.render.ui.ParkRelease
 import inego.zungjunggame.render.ui.ParkableChrome
@@ -377,8 +378,9 @@ class PlayTableView(
         val panelTileH = layout.handH * 0.72f
         val anchorY = layout.humanRowTopY + layout.rowGap + panelTileH * 1.15f
         val claimed = if (view.isPendingDiscard) view.lastDiscarded else -1
+        val parkArea = effectiveParkBounds(screenW, screenH)
         val claim = if (live && panelChoices != null) {
-            claimPanel.buttons(claimed, panelChoices, screenW, screenH, anchorY, panelTileH, tileAspect)
+            claimPanel.buttons(claimed, panelChoices, screenW, screenH, anchorY, panelTileH, tileAspect, parkArea)
         } else {
             emptyList()
         }
@@ -399,6 +401,7 @@ class PlayTableView(
                 screenW = screenW,
                 screenH = screenH,
                 edgeInsetBottom = layout.humanEdgeInsetBottom,
+                bounds = parkArea,
             )
         } else {
             null
@@ -502,6 +505,7 @@ class PlayTableView(
             anchorY = anchorY,
             tileH = panelTileH,
             tileAspect = tileAspect,
+            bounds = effectiveParkBounds(screenW, screenH),
         )
     }
 
@@ -1133,6 +1137,7 @@ class PlayTableView(
             )
         }
 
+        val parkArea = effectiveParkBounds(screenW, screenH)
         if (humanChoices != null) {
             claimPanel.render(
                 batch = batch,
@@ -1155,6 +1160,7 @@ class PlayTableView(
                 decisionSlackMs = decisionSlackMs,
                 decisionBaseMs = decisionBaseMs,
                 preparing = decisionPreparing,
+                bounds = parkArea,
             )
         } else {
             claimPanel.clear()
@@ -1234,6 +1240,7 @@ class PlayTableView(
                 } else {
                     null
                 },
+                bounds = parkArea,
             )
         }
 
@@ -1528,6 +1535,22 @@ class PlayTableView(
      * so the cutout is not inset a second time.
      */
     var safeInsets: SafeArea.Insets? = null
+
+    /**
+     * Playable board rect that parkable board chrome (claim row, HINT button) may
+     * sit flush within, with no outer margin. Set by the host so an embedded
+     * tutorial pane clamps cleanly above [bottomReservePx] and full-screen boards
+     * use the safe area directly. Null falls back to [safeInsetSnapshot] flush.
+     */
+    var parkBounds: Rect? = null
+
+    private fun effectiveParkBounds(screenW: Float, screenH: Float): Rect =
+        parkBounds ?: OverlayViewport.available(
+            screenW = screenW,
+            screenH = screenH,
+            safe = safeInsetSnapshot(),
+            marginPx = 0f,
+        )
 
     /**
      * The square a top-right control (the board menu) floats in, in this table's
