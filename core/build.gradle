@@ -46,7 +46,16 @@ object AppVersion {
   }
 }
 
-sourceSets.main.kotlin.srcDirs += generatedAppVersionDir
+sourceSets {
+  main.kotlin.srcDirs += generatedAppVersionDir
+  // Host-only JVM build tool (`TileAtlasPacker`): uses `java.awt` / `javax.imageio`
+  // to pre-bake tile tier atlases during the build and never enters `core.jar`,
+  // Android DEX, or TeaVM Wasm.
+  tilePacker {
+    compileClasspath += main.output + configurations.compileClasspath
+    runtimeClasspath += output + compileClasspath
+  }
+}
 compileKotlin.dependsOn 'generateAppVersion'
 
 // Unit tests read assets/ off the filesystem (ReferenceCatalog and i18n fall back to
@@ -94,21 +103,43 @@ tasks.register('packLanguagePacks', JavaExec) {
   args "${project.rootDir}/assets", languagePacksDir.get().asFile.absolutePath
 }
 
+// Pre-bakes exact-3:4 composited tile face atlases for every physical-height
+// tier in TileAtlasLayout into build/tile-atlases/tiles/atlas_<height>.png.
+// Authoring PNGs stay untouched in assets/tiles/; stageAssets drops the raw
+// PNGs and stages only the packed atlases.
+def tileAtlasesDir = layout.buildDirectory.dir('tile-atlases')
+tasks.register('packTileAtlases', JavaExec) {
+  group = 'build'
+  description = 'Composites and downscales assets/tiles/*.png into multi-resolution tier atlases.'
+  dependsOn 'tilePackerClasses'
+  classpath = sourceSets.tilePacker.runtimeClasspath
+  mainClass = 'inego.zungjunggame.render.assets.TileAtlasPacker'
+  inputs.files(sourceSets.tilePacker.output, sourceSets.main.output)
+    .withPropertyName('tilePackerClasses')
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+  inputs.dir("${project.rootDir}/assets/tiles")
+    .withPropertyName('tileAssets')
+    .withPathSensitivity(PathSensitivity.RELATIVE)
+  outputs.dir(tileAtlasesDir)
+  args "${project.rootDir}/assets", tileAtlasesDir.get().asFile.absolutePath
+}
+
 // Stage 4: the runnable asset trees, owned here because the packer is and every
 // launcher has `:core` on its classpath.
 //
 // `stageAssets` is the startup set the Wasm preload manifest bakes: the authoring
-// loose reference markdown and the `ui*.properties` bundles are dropped (they now
-// ride inside the zips), and `assets.txt` is not a preload list. `lang/index.txt`
-// is the one packed artifact in it, so the game can list packs without opening
+// loose reference markdown, the `ui*.properties` bundles, and the raw 600×800
+// tile PNGs are dropped (replaced by language zips and pre-baked tile tier
+// atlases), and `assets.txt` is not a preload list. `lang/index.txt` is the one
+// packed language artifact in it, so the game can list packs without opening
 // one. `stageRuntimeAssets` adds the zips; desktop and Android read them as plain
 // internal files. Sync (not Copy) so a removed authoring file disappears.
 def stagedAssetsDir = layout.buildDirectory.dir('staged-assets')
 def stagedRuntimeDir = layout.buildDirectory.dir('staged-runtime')
 tasks.register('stageAssets', Sync) {
   group = 'build'
-  description = 'Stage the startup asset set: no zips, no loose markdown/properties.'
-  dependsOn 'packLanguagePacks'
+  description = 'Stage the startup asset set: pre-baked tile atlases, no zips, no loose markdown/properties.'
+  dependsOn 'packLanguagePacks', 'packTileAtlases'
   inputs.dir("${project.rootDir}/assets")
     .withPropertyName('authoringAssets')
     .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -118,6 +149,7 @@ tasks.register('stageAssets', Sync) {
     // Provenance note, not a runtime asset.
     exclude 'audio/README.md'
     exclude 'i18n/ui*.properties'
+    exclude 'tiles/**'
     exclude 'assets.txt'
     exclude 'lang/**'
     // A diagnostic the app wrote *into the asset tree* on the developer's own
@@ -131,6 +163,9 @@ tasks.register('stageAssets', Sync) {
   }
   from(languagePacksDir) {
     include 'lang/index.txt'
+  }
+  from(tileAtlasesDir) {
+    include 'tiles/atlas_*.png'
   }
   into stagedAssetsDir
 }

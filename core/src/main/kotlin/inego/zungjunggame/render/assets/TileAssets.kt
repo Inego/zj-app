@@ -3,17 +3,23 @@ package inego.zungjunggame.render.assets
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Pixmap
 import com.badlogic.gdx.graphics.Texture
+import com.badlogic.gdx.graphics.g2d.TextureRegion
 import com.badlogic.gdx.utils.Disposable
 import inego.zungjunggame.engine.NUM_TILE_TYPES
-import inego.zungjunggame.engine.Tiles
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
 import kotlin.math.sqrt
 
 /**
- * Loads face textures (FluffyStuff Regular) and builds procedural closed-tile backs.
- * Maps engine tile type indices (0..33) to drawable assets.
+ * Loads pre-baked tile face tier atlases lazily by physical drawn height and
+ * builds procedural closed-tile backs and glow masks. Maps engine tile type
+ * indices (0..33) to drawable regions.
+ *
+ * Open tile faces are pre-composited and Lanczos-downscaled at build time
+ * (`:core:packTileAtlases`) into exact-3:4 tier atlases ([TileAtlasLayout]).
+ * Each tier loads on first draw at a matching physical height, keeping startup
+ * decode and VRAM proportional to what the current display actually draws.
  *
  * Every texture here is **replaced**, never re-uploaded in place ([reload]): an
  * unmanaged texture whose context is gone is only reachable again through a fresh
@@ -25,18 +31,16 @@ class TileAssets : Disposable {
     /**
      * All of these are **unmanaged** textures: when the driver discards the EGL
      * context their GL objects vanish and nothing restores them. Hence [reload],
-     * driven by [TextureRecovery]. The procedural faces keep their source pixmaps
-     * so they can be rebuilt rather than merely re-uploaded.
+     * driven by [TextureRecovery]. Tier atlases are loaded lazily into
+     * [tierTextures] on first draw; [reload] rebuilds only the tiers that have
+     * been loaded so context recovery stays just as lean as startup.
      */
-    private var frontTex: Texture = loadTexture("tiles/Front.png")
-    private var symbolTex: Array<Texture> = Array(NUM_TILE_TYPES) { i ->
-        loadTexture("tiles/${assetNameForTile(i)}.png")
-    }
+    private var tierTextures: Array<Texture?> = arrayOfNulls(TileAtlasLayout.TIERS.size)
+    private var tierRegions: Array<Array<TextureRegion>?> = arrayOfNulls(TileAtlasLayout.TIERS.size)
     private var closedBlueTex: Texture = createClosedTileTexture(TileBackColor.Blue)
     private var glowTex: Texture = createGlowTexture()
     private var outlineGlowTex: Texture = createOutlineGlowTexture()
 
-    val front: Texture get() = frontTex
     val closedBlue: Texture get() = closedBlueTex
 
     /** Soft white radial ring used as a play-mode focus halo behind a tile. */
@@ -55,19 +59,35 @@ class TileAssets : Disposable {
     private val recoveryKey = "TileAssets@${System.identityHashCode(this)}"
 
     init {
-        // The fields above already hold freshly uploaded textures, so register for
-        // future recoveries only — running it now would dispose and rebuild them.
+        // The procedural fields above already hold freshly uploaded textures, so
+        // register for future recoveries only — running it now would rebuild them.
         TextureRecovery.registerOnly(recoveryKey, ::reload)
     }
 
-    fun symbol(tileType: Int): Texture {
+    /**
+     * Composited open-face region for [tileType] at the resolution tier best
+     * suited to [physicalHeightPx] framebuffer pixels (1.0×–2.0× downscale).
+     * Lazily loads that tier's atlas on first request.
+     */
+    fun face(tileType: Int, physicalHeightPx: Float): TextureRegion {
         require(tileType in 0 until NUM_TILE_TYPES) { "tileType out of range: $tileType" }
-        return symbolTex[tileType]
+        val tierIdx = TileAtlasLayout.tierIndexForHeight(physicalHeightPx)
+        val regions = tierRegions[tierIdx] ?: loadTier(tierIdx)
+        return regions[tileType]
+    }
+
+    private fun loadTier(tierIdx: Int): Array<TextureRegion> {
+        val tier = TileAtlasLayout.TIERS[tierIdx]
+        val tex = loadAtlasTexture(TileAtlasLayout.atlasPath(tier))
+        val regions = sliceTierRegions(tex, tier)
+        tierTextures[tierIdx] = tex
+        tierRegions[tierIdx] = regions
+        return regions
     }
 
     /**
-     * Rebuild every texture from its original source. File-backed faces are
-     * re-read; the procedural ones are regenerated from their pixmaps.
+     * Rebuild every live texture from its original source. Loaded tier atlases
+     * are re-read; the procedural textures are regenerated from scratch.
      *
      * Build-then-publish: the complete replacement set is created first and only
      * then published, so a build failure part-way leaves the previous fields
@@ -82,9 +102,9 @@ class TileAssets : Disposable {
      * [buildThenSwap].
      */
     private fun reload() {
+        val loadedTierIndices = tierTextures.indices.filter { tierTextures[it] != null }
         val previous = buildList {
-            add(frontTex)
-            addAll(symbolTex)
+            for (idx in loadedTierIndices) tierTextures[idx]?.let(::add)
             add(closedBlueTex)
             add(glowTex)
             add(outlineGlowTex)
@@ -94,21 +114,28 @@ class TileAssets : Disposable {
             dispose = { it.disposeNow() },
             disposePrevious = false,
             build = { track ->
-                val front = track(loadTexture("tiles/Front.png"))
-                val symbols = Array(NUM_TILE_TYPES) { i ->
-                    track(loadTexture("tiles/${assetNameForTile(i)}.png"))
+                val rebuiltTiers = loadedTierIndices.map { idx ->
+                    track(loadAtlasTexture(TileAtlasLayout.atlasPath(TileAtlasLayout.TIERS[idx])))
                 }
                 val closedBlue = track(createClosedTileTexture(TileBackColor.Blue))
                 val glow = track(createGlowTexture())
                 val outlineGlow = track(createOutlineGlowTexture())
-                listOf(front) + symbols.toList() + listOf(closedBlue, glow, outlineGlow)
+                rebuiltTiers + listOf(closedBlue, glow, outlineGlow)
             },
             publish = { set ->
-                frontTex = set[0]
-                symbolTex = set.subList(1, 1 + NUM_TILE_TYPES).toTypedArray()
-                closedBlueTex = set[1 + NUM_TILE_TYPES]
-                glowTex = set[2 + NUM_TILE_TYPES]
-                outlineGlowTex = set[3 + NUM_TILE_TYPES]
+                val newTextures = arrayOfNulls<Texture>(TileAtlasLayout.TIERS.size)
+                val newRegions = arrayOfNulls<Array<TextureRegion>>(TileAtlasLayout.TIERS.size)
+                for ((pos, tierIdx) in loadedTierIndices.withIndex()) {
+                    val tex = set[pos]
+                    newTextures[tierIdx] = tex
+                    newRegions[tierIdx] = sliceTierRegions(tex, TileAtlasLayout.TIERS[tierIdx])
+                }
+                tierTextures = newTextures
+                tierRegions = newRegions
+                val base = loadedTierIndices.size
+                closedBlueTex = set[base]
+                glowTex = set[base + 1]
+                outlineGlowTex = set[base + 2]
             },
         )
     }
@@ -123,8 +150,9 @@ class TileAssets : Disposable {
 
     override fun dispose() {
         TextureRecovery.unregister(recoveryKey)
-        frontTex.disposeNow()
-        symbolTex.forEach { it.disposeNow() }
+        tierTextures.forEach { it?.disposeNow() }
+        tierTextures.fill(null)
+        tierRegions.fill(null)
         closedBlueTex.disposeNow()
         glowTex.disposeNow()
         outlineGlowTex.disposeNow()
@@ -132,48 +160,26 @@ class TileAssets : Disposable {
 
     companion object {
         /** Engine tile type → FluffyStuff asset basename (no extension). */
-        fun assetNameForTile(tileType: Int): String = when (tileType) {
-            Tiles.CHAR_1 -> "Man1"
-            Tiles.CHAR_2 -> "Man2"
-            Tiles.CHAR_3 -> "Man3"
-            Tiles.CHAR_4 -> "Man4"
-            Tiles.CHAR_5 -> "Man5"
-            Tiles.CHAR_6 -> "Man6"
-            Tiles.CHAR_7 -> "Man7"
-            Tiles.CHAR_8 -> "Man8"
-            Tiles.CHAR_9 -> "Man9"
-            Tiles.DOT_1 -> "Pin1"
-            Tiles.DOT_2 -> "Pin2"
-            Tiles.DOT_3 -> "Pin3"
-            Tiles.DOT_4 -> "Pin4"
-            Tiles.DOT_5 -> "Pin5"
-            Tiles.DOT_6 -> "Pin6"
-            Tiles.DOT_7 -> "Pin7"
-            Tiles.DOT_8 -> "Pin8"
-            Tiles.DOT_9 -> "Pin9"
-            Tiles.BAMBOO_1 -> "Sou1"
-            Tiles.BAMBOO_2 -> "Sou2"
-            Tiles.BAMBOO_3 -> "Sou3"
-            Tiles.BAMBOO_4 -> "Sou4"
-            Tiles.BAMBOO_5 -> "Sou5"
-            Tiles.BAMBOO_6 -> "Sou6"
-            Tiles.BAMBOO_7 -> "Sou7"
-            Tiles.BAMBOO_8 -> "Sou8"
-            Tiles.BAMBOO_9 -> "Sou9"
-            Tiles.EAST -> "Ton"
-            Tiles.SOUTH -> "Nan"
-            Tiles.WEST -> "Shaa"
-            Tiles.NORTH -> "Pei"
-            Tiles.RED -> "Chun"
-            Tiles.GREEN -> "Hatsu"
-            Tiles.WHITE -> "Haku"
-            else -> error("Unknown tile type $tileType")
-        }
+        fun assetNameForTile(tileType: Int): String = TileAtlasLayout.assetNameForTile(tileType)
 
-        private fun loadTexture(path: String): Texture =
+        private fun loadAtlasTexture(path: String): Texture =
             Texture(path).also {
                 it.setFilter(Texture.TextureFilter.Linear, Texture.TextureFilter.Linear)
+                it.setWrap(Texture.TextureWrap.ClampToEdge, Texture.TextureWrap.ClampToEdge)
             }
+
+        private fun sliceTierRegions(
+            texture: Texture,
+            tier: TileAtlasLayout.Tier,
+        ): Array<TextureRegion> = Array(NUM_TILE_TYPES) { tileType ->
+            TextureRegion(
+                texture,
+                TileAtlasLayout.cellX(tier, tileType),
+                TileAtlasLayout.cellY(tier, tileType),
+                tier.tileW,
+                tier.tileH,
+            )
+        }
 
         private enum class TileBackColor(
             val face: Color,

@@ -1,5 +1,6 @@
 package inego.zungjunggame.render.tiles
 
+import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.GlyphLayout
@@ -14,12 +15,11 @@ import kotlin.math.min
 import inego.zungjunggame.render.ui.AppPalette
 
 /**
- * Low-level tile drawing: open face (ivory + symbol) or closed back, centered,
- * with optional rotation in degrees (libGDX counter-clockwise).
+ * Low-level tile drawing: open face (composited ivory + symbol) or closed back,
+ * centered, with optional rotation in degrees (libGDX counter-clockwise).
  */
 class TileDrawer(
     private val assets: TileAssets,
-    private val symbolInset: Float = 0.12f,
 ) {
     /**
      * Nine-patch over the **current** `assets.outlineGlow`.
@@ -226,10 +226,21 @@ class TileDrawer(
         label: String? = null,
         forceLabel: Boolean = false,
     ) {
-        drawTexture(batch, assets.front, cx, cy, w, h, rotationDeg, scaleX, scaleY)
-        val sw = w * (1f - symbolInset * 2f)
-        val sh = h * (1f - symbolInset * 2f)
-        drawTexture(batch, assets.symbol(tileType), cx, cy, sw, sh, rotationDeg, scaleX, scaleY)
+        val backBufferScale = Gdx.graphics?.backBufferScale ?: 1f
+        val physicalH = max(h * abs(scaleY), w * abs(scaleX) * (4f / 3f)) * backBufferScale
+        val region = assets.face(tileType, physicalH)
+        batch.draw(
+            region,
+            cx - w / 2f,
+            cy - h / 2f,
+            w / 2f,
+            h / 2f,
+            w,
+            h,
+            scaleX,
+            scaleY,
+            rotationDeg,
+        )
         if (!label.isNullOrEmpty() && (forceLabel || TileLabels.enabled)) {
             drawTileLabel(batch, label, cx, cy, w, h, rotationDeg, scaleX, scaleY)
         }
