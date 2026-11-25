@@ -524,7 +524,8 @@ class ClaimActionPanel(
             armByChoice[choiceKey(arm.choice)] = arm
         }
         val (maxOmniScore, minOmniSteps) = OmniscientHintLabels.bestOutcome(omniscientHintArms)
-        val minOmniStepsAll = OmniscientHintLabels.minSteps(omniscientHintArms)
+        val minOmniWinSteps = OmniscientHintLabels.minSteps(omniscientHintArms)
+        val minOmniLossSteps = OmniscientHintLabels.minLossSteps(omniscientHintArms)
         val omniByChoice = HashMap<Long, OmniscientHintArmSnapshot>(omniscientHintArms.size.coerceAtLeast(1))
         for (arm in omniscientHintArms) {
             omniByChoice[choiceKey(arm.choice)] = arm
@@ -551,7 +552,7 @@ class ClaimActionPanel(
                     gapAboveChoice = Fonts.px(3f),
                     arm = omniArm,
                     isBest = OmniscientHintLabels.isBestArm(omniArm, maxOmniScore, minOmniSteps),
-                    isFastest = OmniscientHintLabels.isFastestArm(omniArm, minOmniStepsAll),
+                    isFastest = OmniscientHintLabels.isFastestArm(omniArm, minOmniWinSteps, minOmniLossSteps),
                     maxWidth = hit.w * 0.96f,
                     glyphLayout = glyphLayout,
                 )

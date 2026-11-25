@@ -18,6 +18,35 @@ object ZjSettlement {
     const val NON_DISCARDER_CAP = 25
 
     /**
+     * Zero-allocation payment delta for a single [seat] on one finished hand.
+     *
+     * @param handValue pattern score of the winning hand (`0` = exhaustive draw)
+     * @param winnerSeat absolute seat of the winner, or `-1` on a draw
+     * @param discarderSeat seat that discarded the winning tile, or `-1` if
+     *   self-draw / exhaustive draw
+     * @param seat absolute seat whose signed payment delta to return
+     */
+    fun computeDeltaForSeat(
+        handValue: Int,
+        winnerSeat: Int,
+        discarderSeat: Int = -1,
+        seat: Int,
+    ): Int {
+        if (handValue <= 0 || winnerSeat !in 0 until NUM_PLAYERS) return 0
+        if (seat == winnerSeat) return 3 * handValue
+        val winOnDiscard =
+            discarderSeat in 0 until NUM_PLAYERS && discarderSeat != winnerSeat
+        if (!winOnDiscard || handValue <= NON_DISCARDER_CAP) return -handValue
+        val excess = handValue - NON_DISCARDER_CAP
+        return if (seat == discarderSeat) {
+            // Own full share + excess for each of the other two losers.
+            -(handValue + 2 * excess)
+        } else {
+            -NON_DISCARDER_CAP
+        }
+    }
+
+    /**
      * @param handValue pattern score of the winning hand (`0` = exhaustive draw)
      * @param winnerSeat absolute seat of the winner, or `-1` on a draw
      * @param discarderSeat seat that discarded the winning tile, or `-1` if
@@ -30,32 +59,8 @@ object ZjSettlement {
     ): IntArray {
         val deltas = IntArray(NUM_PLAYERS)
         if (handValue <= 0 || winnerSeat !in 0 until NUM_PLAYERS) return deltas
-
-        val winOnDiscard =
-            discarderSeat in 0 until NUM_PLAYERS && discarderSeat != winnerSeat
-        val applyCap = winOnDiscard && handValue > NON_DISCARDER_CAP
-
-        if (!applyCap) {
-            for (player in 0 until NUM_PLAYERS) {
-                if (player == winnerSeat) continue
-                deltas[player] -= handValue
-                deltas[winnerSeat] += handValue
-            }
-            return deltas
-        }
-
-        val excess = handValue - NON_DISCARDER_CAP
         for (player in 0 until NUM_PLAYERS) {
-            if (player == winnerSeat) continue
-            val payment =
-                if (player == discarderSeat) {
-                    // Own full share + excess for each of the other two losers.
-                    handValue + 2 * excess
-                } else {
-                    NON_DISCARDER_CAP
-                }
-            deltas[player] -= payment
-            deltas[winnerSeat] += payment
+            deltas[player] = computeDeltaForSeat(handValue, winnerSeat, discarderSeat, player)
         }
         return deltas
     }

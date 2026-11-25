@@ -119,6 +119,8 @@ object AppPalette {
     val dangerInkSoft = Color(0.96f, 0.78f, 0.74f, 1f)
     val dangerInkBright = Color(1f, 0.86f, 0.82f, 1f)
     val dangerInkStrong = Color(1f, 0.35f, 0.30f, 1f)
+    /** Darker, calmer red for the least-bad loss when no winning line exists. */
+    val dangerMuted = Color(0.82f, 0.45f, 0.42f, 1f)
     /** The rim a hovered but non-semantic control takes. */
     val hoverRim = tint(accentBright, 0.95f)
 

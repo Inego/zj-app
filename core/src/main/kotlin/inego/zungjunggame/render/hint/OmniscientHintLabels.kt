@@ -32,10 +32,15 @@ object OmniscientHintLabels {
     private val OUTLINE_COLOR: Color = AppPalette.tint(AppPalette.panelDeep, 0.90f)
     private val BEST_INK: Color = AppPalette.accentBright
     private val WIN_INK: Color = AppPalette.inkStrong
+    private val BEST_LOSS_INK: Color = AppPalette.dangerMuted
+    private val LOSS_INK: Color = AppPalette.dangerInkStrong
     private val EMPTY_INK: Color = AppPalette.inkMuted
     private val BOLT_INK: Color = AppPalette.accentBright
     private const val BOLT_HEIGHT_RATIO = 1.08f
     private const val BOLT_ASPECT = 0.62f
+
+    /** Sentinel score meaning no arm has a best outcome to highlight yet. */
+    const val NO_BEST_SCORE: Int = Int.MIN_VALUE
 
     /** Reusable 4-vertex (20-float) buffer for drawing vector triangles via [WhitePixel]. */
     private val triVerts = FloatArray(20)
@@ -52,23 +57,40 @@ object OmniscientHintLabels {
         0.707f, 0.707f,
     )
 
-    /** Best `(score, minSteps)` across [arms], where faster wins break ties on top score. */
+    /**
+     * Best `(score, minSteps)` across [arms], where higher signed score wins
+     * (win `> 0` > draw `0` > smaller loss `< 0`) and fewer steps break ties.
+     *
+     * While some arms are still unprobed (`!hasOutcome`), only a winning outcome
+     * (`> 0`) is promoted so an immediate terminal loss does not flash as best
+     * before Phase 0 finishes probing the remaining options.
+     */
     fun bestOutcome(arms: List<OmniscientHintArmSnapshot>): Pair<Int, Int> {
-        var maxScore = 0
+        var maxScore = NO_BEST_SCORE
         var minSteps = Int.MAX_VALUE
+        var allProbed = arms.isNotEmpty()
         for (arm in arms) {
-            if (arm.bestScore <= 0) continue
+            if (!arm.hasOutcome) {
+                allProbed = false
+                continue
+            }
             val steps = if (arm.bestSteps > 0) arm.bestSteps else Int.MAX_VALUE
-            if (arm.bestScore > maxScore || (arm.bestScore == maxScore && steps < minSteps)) {
+            if (maxScore == NO_BEST_SCORE ||
+                arm.bestScore > maxScore ||
+                (arm.bestScore == maxScore && steps < minSteps)
+            ) {
                 maxScore = arm.bestScore
                 minSteps = steps
             }
+        }
+        if (maxScore == NO_BEST_SCORE || (maxScore <= 0 && !allProbed)) {
+            return NO_BEST_SCORE to Int.MAX_VALUE
         }
         return maxScore to minSteps
     }
 
     fun isBestArm(arm: OmniscientHintArmSnapshot, maxScore: Int, minStepsAtMax: Int): Boolean {
-        if (maxScore <= 0 || arm.bestScore != maxScore) return false
+        if (maxScore == NO_BEST_SCORE || !arm.hasOutcome || arm.bestScore != maxScore) return false
         val steps = if (arm.bestSteps > 0) arm.bestSteps else Int.MAX_VALUE
         return steps == minStepsAtMax
     }
@@ -77,15 +99,36 @@ object OmniscientHintLabels {
     fun minSteps(arms: List<OmniscientHintArmSnapshot>): Int {
         var best = Int.MAX_VALUE
         for (arm in arms) {
-            if (arm.bestScore > 0 && arm.bestSteps in 1 until best) {
+            if (arm.hasOutcome && arm.bestScore > 0 && arm.bestSteps in 1 until best) {
                 best = arm.bestSteps
             }
         }
         return best
     }
 
-    fun isFastestArm(arm: OmniscientHintArmSnapshot, minStepsAll: Int): Boolean =
-        minStepsAll < Int.MAX_VALUE && arm.bestScore > 0 && arm.bestSteps == minStepsAll
+    /** Lowest positive step count across all losing [arms], or [Int.MAX_VALUE] if none lose. */
+    fun minLossSteps(arms: List<OmniscientHintArmSnapshot>): Int {
+        var best = Int.MAX_VALUE
+        for (arm in arms) {
+            if (arm.hasOutcome && arm.bestScore < 0 && arm.bestSteps in 1 until best) {
+                best = arm.bestSteps
+            }
+        }
+        return best
+    }
+
+    fun isFastestArm(
+        arm: OmniscientHintArmSnapshot,
+        minWinSteps: Int,
+        minLossSteps: Int = Int.MAX_VALUE,
+    ): Boolean {
+        if (!arm.hasOutcome) return false
+        return when {
+            arm.bestScore > 0 -> minWinSteps < Int.MAX_VALUE && arm.bestSteps == minWinSteps
+            arm.bestScore < 0 -> minLossSteps < Int.MAX_VALUE && arm.bestSteps == minLossSteps
+            else -> false
+        }
+    }
 
     /**
      * Draw one outlined score (plus a High Voltage bolt when [isFastest]) centered
@@ -105,14 +148,15 @@ object OmniscientHintLabels {
     ) {
         Fonts.ensureCreated()
         val font = Fonts.tileLabel
-        val hasWin = arm.bestScore > 0
-        val showBolt = hasWin && isFastest
+        val hasWin = arm.hasOutcome && arm.bestScore > 0
+        val hasLoss = arm.hasOutcome && arm.bestScore < 0
+        val showBolt = (hasWin || hasLoss) && isFastest
         val mainText = when {
-            hasWin -> arm.bestScore.toString()
-            arm.playouts > 0 || arm.solved -> "\u2014"
+            hasWin || hasLoss -> arm.bestScore.toString()
+            arm.hasOutcome -> "\u2014"
             else -> "\u2026"
         }
-        val baseScale = if (hasWin && isBest) BEST_BASE_SCALE else BASE_SCALE
+        val baseScale = if (arm.hasOutcome && isBest) BEST_BASE_SCALE else BASE_SCALE
         val outlinePx = max(1f, Fonts.px(1.25f))
         val rawBoltGap = if (showBolt) Fonts.px(1.5f) else 0f
 
@@ -152,16 +196,19 @@ object OmniscientHintLabels {
             val baseBottom = choiceTopY + gapAboveChoice + effOutline
             val mainBaseline = baseBottom + mainH
             val mainInk = when {
-                !hasWin -> EMPTY_INK
+                !arm.hasOutcome -> EMPTY_INK
+                hasLoss -> if (isBest) BEST_LOSS_INK else LOSS_INK
                 isBest -> BEST_INK
-                else -> WIN_INK
+                hasWin -> WIN_INK
+                else -> EMPTY_INK
             }
 
             drawOutlined(batch, font, mainText, contentLeft, mainBaseline, effOutline, mainInk)
             if (showBolt) {
                 val boltLeft = contentLeft + mainW + effBoltGap
                 val boltBottom = baseBottom + (mainH - boltH) * 0.5f
-                drawOutlinedBolt(batch, boltLeft, boltBottom, boltW, boltH, effOutline)
+                val boltInk = if (hasLoss) mainInk else BOLT_INK
+                drawOutlinedBolt(batch, boltLeft, boltBottom, boltW, boltH, effOutline, boltInk)
             }
         } finally {
             font.data.setScale(prevScaleX, prevScaleY)
@@ -181,6 +228,7 @@ object OmniscientHintLabels {
         w: Float,
         h: Float,
         outlinePx: Float,
+        ink: Color,
     ) {
         val outlineBits = OUTLINE_COLOR.toFloatBits()
         for (i in OUTLINE_OFFSETS.indices step 2) {
@@ -193,7 +241,7 @@ object OmniscientHintLabels {
                 outlineBits,
             )
         }
-        drawBoltFill(batch, left, bottom, w, h, BOLT_INK.toFloatBits())
+        drawBoltFill(batch, left, bottom, w, h, ink.toFloatBits())
     }
 
     private fun drawBoltFill(
@@ -284,7 +332,8 @@ object OmniscientHintLabels {
     ) {
         if (arms.isEmpty() || hits.isEmpty()) return
         val (maxScore, minStepsAtMax) = bestOutcome(arms)
-        val minStepsAll = minSteps(arms)
+        val minWinSteps = minSteps(arms)
+        val minLossSteps = minLossSteps(arms)
         val byTile = HashMap<Int, OmniscientHintArmSnapshot>(arms.size)
         for (arm in arms) {
             if (arm.choice.kind == ChoiceKind.Discard) {
@@ -297,7 +346,7 @@ object OmniscientHintLabels {
         for (hit in hits) {
             val arm = byTile[hit.tileType] ?: continue
             val isBest = isBestArm(arm, maxScore, minStepsAtMax)
-            val isFastest = isFastestArm(arm, minStepsAll)
+            val isFastest = isFastestArm(arm, minWinSteps, minLossSteps)
             drawScoreBadge(
                 batch = batch,
                 cx = hit.worldX,

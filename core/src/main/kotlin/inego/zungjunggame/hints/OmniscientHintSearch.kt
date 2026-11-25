@@ -51,17 +51,30 @@ data class OmniscientWinningHand(
 /** Immutable per-option snapshot produced by [OmniscientHintSearch]. */
 data class OmniscientHintArmSnapshot(
     val choice: Choice,
-    /** Highest Zung Jung hand score found for the human seat under this option (0 if no win found yet). */
+    /**
+     * Best known terminal outcome for the human seat under this option:
+     * - `> 0`: highest Zung Jung winning hand score for the human seat,
+     * - `0`: exhaustive draw when [hasOutcome] is true, or unprobed when [hasOutcome] is false,
+     * - `< 0`: smallest loss (signed Zung Jung payment delta for the human seat, e.g. `-10`, `-25`).
+     */
     val bestScore: Int,
-    /** Fewest human choices (including this root option) to reach [bestScore], or 0 when [bestScore] is 0. */
+    /** Fewest human choices (including this root option) to reach [bestScore], or 0 when unprobed. */
     val bestSteps: Int = 0,
-    /** Full pattern breakdown for [bestScore], or null when [bestScore] is 0. */
+    /** Full pattern breakdown for a human win (`bestScore > 0`), or null on loss/draw/unprobed. */
     val bestDetails: HandScoreDetails?,
-    /** Winning hand tiles for [bestScore], or null when [bestScore] is 0. */
+    /** Winning hand tiles for a human win (`bestScore > 0`), or null on loss/draw/unprobed. */
     val bestWinningHand: OmniscientWinningHand? = null,
     val playouts: Int,
     /** True when every branch under this root option has been proven exact. */
     val solved: Boolean,
+    /** True once at least one terminal outcome (win, draw, or loss) has been observed. */
+    val hasOutcome: Boolean = playouts > 0 || solved,
+    /** Absolute seat that won in the best outcome (`humanSeat` on win, opponent seat on loss, `-1` on draw/unprobed). */
+    val bestWinnerSeat: Int = -1,
+    /** Absolute discarder seat for a discard/rob win in the best outcome, or `-1` for self-draw/draw/unprobed. */
+    val bestWinSourceSeat: Int = -1,
+    /** Winning opponent's total hand score when [bestScore] `< 0`, or `0` otherwise. */
+    val bestOpponentHandScore: Int = 0,
 )
 
 /** Immutable full search snapshot published by [OmniscientHintSearch] to the UI thread. */
@@ -69,7 +82,8 @@ data class OmniscientHintSnapshot(
     val arms: List<OmniscientHintArmSnapshot>,
     val totalPlayouts: Int,
     /**
-     * Indices into [arms] sharing the highest positive [OmniscientHintArmSnapshot.bestScore],
+     * Indices into [arms] sharing the best [OmniscientHintArmSnapshot.bestScore]
+     * (highest win `> 0`, then draw `0`, then smallest loss `< 0`),
      * tie-broken by the fewest [OmniscientHintArmSnapshot.bestSteps].
      */
     val bestIndices: IntArray,
@@ -192,17 +206,7 @@ class OmniscientHintSearch(
                 val arm = armNodes[i]
                 arm.macroChoices = tape
                 if (armStates[i].isTerminal()) {
-                    arm.terminal = true
-                    arm.solved = true
-                    val sc = terminalHumanScore(armStates[i], humanSeat)
-                    arm.bestWinScore = sc
-                    arm.bestSteps = if (sc > 0) 1 else Int.MAX_VALUE
-                    arm.visits = 1
-                    arm.playouts = 1
-                    if (sc > 0) {
-                        arm.bestDetails = cloneDetails(Scoring.computeHandScoreDetails(armStates[i]))
-                        arm.bestWinningHand = captureWinningHand(armStates[i], humanSeat)
-                    }
+                    initTerminalNode(arm, armStates[i], humanSeat)
                 }
             }
         }
@@ -424,6 +428,8 @@ class OmniscientHintSearch(
                     return true
                 }
                 if (phase0SeekerIdx < seekers.size) {
+                    val targetWin = if (arm.bestScore > 0) arm.bestScore else 0
+                    val targetSteps = if (arm.bestScore > 0) arm.bestSteps else Int.MAX_VALUE
                     val packed = runPlayout(
                         state = work,
                         humanSeat = humanSeat,
@@ -431,8 +437,8 @@ class OmniscientHintSearch(
                         humanEngine = humanEngine,
                         tmpChoices = tmpChoices,
                         seeker = seekers[phase0SeekerIdx],
-                        minTargetScore = arm.bestWinScore,
-                        minTargetSteps = arm.bestSteps,
+                        minTargetScore = targetWin,
+                        minTargetSteps = targetSteps,
                         initialSteps = 1,
                         eps = 0.0,
                         skipLowHuProb = 1.0,
@@ -475,7 +481,7 @@ class OmniscientHintSearch(
             var cur = armNodes[armIdx]
             path.add(cur)
             work.copyFrom(armStates[armIdx])
-            val scale = max(cur.bestWinScore.toDouble(), 100.0)
+            val scale = max(if (cur.bestScore == NO_OUTCOME) 0.0 else abs(cur.bestScore).toDouble(), 100.0)
 
             while (!cur.solved) {
                 if (!cur.expanded) {
@@ -511,15 +517,16 @@ class OmniscientHintSearch(
 
             // Each node along [path] represents one human decision (root arm = 1, child = 2, ...).
             val stepsInTree = path.size
-            val winScore: Int
+            val outcomeScore: Int
             val totalSteps: Int
             if (work.isTerminal()) {
-                winScore = terminalHumanScore(work, humanSeat)
+                outcomeScore = terminalHumanOutcome(work, humanSeat)
                 totalSteps = stepsInTree
             } else {
                 val r = rng.nextDouble()
-                val targetScore = armNodes[armIdx].bestWinScore
-                val targetSteps = armNodes[armIdx].bestSteps
+                val rootBest = armNodes[armIdx].bestScore
+                val targetScore = if (rootBest > 0) rootBest else 0
+                val targetSteps = if (rootBest > 0) armNodes[armIdx].bestSteps else Int.MAX_VALUE
                 val packed = when {
                     seekers.isNotEmpty() && r < 0.35 -> {
                         val sk = seekers[rng.nextInt(seekers.size)]
@@ -532,35 +539,61 @@ class OmniscientHintSearch(
                         runPlayout(work, humanSeat, opponentEngine, humanEngine, tmpChoices, null, targetScore, targetSteps, stepsInTree, 0.35, 0.85, rng)
                     }
                 }
-                winScore = unpackScore(packed)
+                outcomeScore = unpackScore(packed)
                 totalSteps = unpackSteps(packed)
             }
 
-            val reward = if (winScore > 0) {
-                winScore.toDouble() + 0.01 / max(1, totalSteps)
-            } else {
-                computeShaping(work, humanSeat)
-            }
+            val reward = computePlayoutReward(outcomeScore, totalSteps, work, humanSeat)
             var capturedDetails: HandScoreDetails? = null
             var capturedHand: OmniscientWinningHand? = null
+            var capturedWinner = -1
+            var capturedWinSource = -1
+            var capturedOpponentHandScore = 0
+            var captured = false
 
             for (p in path.indices) {
                 val node = path[p]
-                // Steps from this node's own human choice to the terminal win (root p=0 => totalSteps).
+                // Steps from this node's own human choice to the terminal outcome (root p=0 => totalSteps).
                 val stepsFromNode = max(1, totalSteps - p)
                 node.visits++
                 node.playouts++
                 node.sumReward += reward
                 node.sumRewardSq += reward * reward
-                if (isBetterOutcome(winScore, stepsFromNode, node.bestWinScore, node.bestSteps)) {
-                    node.bestWinScore = winScore
+                if (isBetterOutcome(outcomeScore, stepsFromNode, node.bestScore, node.bestSteps)) {
+                    node.bestScore = outcomeScore
                     node.bestSteps = stepsFromNode
-                    if (capturedDetails == null) {
-                        capturedDetails = cloneDetails(Scoring.computeHandScoreDetails(work))
-                        capturedHand = captureWinningHand(work, humanSeat)
+                    if (outcomeScore > 0) {
+                        if (!captured) {
+                            capturedWinner = humanSeat
+                            capturedWinSource = terminalWinSourceSeat(work)
+                            capturedDetails = cloneDetails(Scoring.computeHandScoreDetails(work))
+                            capturedHand = captureWinningHand(work, humanSeat)
+                            captured = true
+                        }
+                        node.bestWinnerSeat = capturedWinner
+                        node.bestWinSourceSeat = capturedWinSource
+                        node.bestOpponentHandScore = 0
+                        node.bestDetails = capturedDetails
+                        node.bestWinningHand = capturedHand
+                    } else if (outcomeScore < 0) {
+                        if (!captured) {
+                            capturedWinner = terminalWinnerSeat(work)
+                            capturedWinSource = terminalWinSourceSeat(work)
+                            capturedOpponentHandScore = work.handScore
+                            captured = true
+                        }
+                        node.bestWinnerSeat = capturedWinner
+                        node.bestWinSourceSeat = capturedWinSource
+                        node.bestOpponentHandScore = capturedOpponentHandScore
+                        node.bestDetails = null
+                        node.bestWinningHand = null
+                    } else {
+                        node.bestWinnerSeat = -1
+                        node.bestWinSourceSeat = -1
+                        node.bestOpponentHandScore = 0
+                        node.bestDetails = null
+                        node.bestWinningHand = null
                     }
-                    node.bestDetails = capturedDetails
-                    node.bestWinningHand = capturedHand
                 }
             }
             if (cur.solved) {
@@ -571,21 +604,58 @@ class OmniscientHintSearch(
         }
     }
 
-    private fun recordRootProbe(arm: Node, winScore: Int, steps: Int, terminalState: GameState, humanSeat: Int) {
-        val reward = if (winScore > 0) {
-            winScore.toDouble() + 0.01 / max(1, steps)
-        } else {
-            computeShaping(terminalState, humanSeat)
-        }
+    private fun initTerminalNode(node: Node, terminalState: GameState, humanSeat: Int) {
+        node.terminal = true
+        node.solved = true
+        val sc = terminalHumanOutcome(terminalState, humanSeat)
+        node.bestScore = sc
+        node.bestSteps = if (sc != NO_OUTCOME) 1 else Int.MAX_VALUE
+        node.visits = 1
+        node.playouts = 1
+        applyOutcomeMetadata(node, sc, terminalState, humanSeat)
+    }
+
+    private fun recordRootProbe(arm: Node, outcomeScore: Int, steps: Int, terminalState: GameState, humanSeat: Int) {
+        val reward = computePlayoutReward(outcomeScore, steps, terminalState, humanSeat)
         arm.visits++
         arm.playouts++
         arm.sumReward += reward
         arm.sumRewardSq += reward * reward
-        if (isBetterOutcome(winScore, steps, arm.bestWinScore, arm.bestSteps)) {
-            arm.bestWinScore = winScore
+        if (isBetterOutcome(outcomeScore, steps, arm.bestScore, arm.bestSteps)) {
+            arm.bestScore = outcomeScore
             arm.bestSteps = steps
-            arm.bestDetails = cloneDetails(Scoring.computeHandScoreDetails(terminalState))
-            arm.bestWinningHand = captureWinningHand(terminalState, humanSeat)
+            applyOutcomeMetadata(arm, outcomeScore, terminalState, humanSeat)
+        }
+    }
+
+    private fun applyOutcomeMetadata(
+        node: Node,
+        outcomeScore: Int,
+        terminalState: GameState,
+        humanSeat: Int,
+    ) {
+        when {
+            outcomeScore > 0 -> {
+                node.bestWinnerSeat = humanSeat
+                node.bestWinSourceSeat = terminalWinSourceSeat(terminalState)
+                node.bestOpponentHandScore = 0
+                node.bestDetails = cloneDetails(Scoring.computeHandScoreDetails(terminalState))
+                node.bestWinningHand = captureWinningHand(terminalState, humanSeat)
+            }
+            outcomeScore < 0 && outcomeScore != NO_OUTCOME -> {
+                node.bestWinnerSeat = terminalWinnerSeat(terminalState)
+                node.bestWinSourceSeat = terminalWinSourceSeat(terminalState)
+                node.bestOpponentHandScore = terminalState.handScore
+                node.bestDetails = null
+                node.bestWinningHand = null
+            }
+            else -> {
+                node.bestWinnerSeat = -1
+                node.bestWinSourceSeat = -1
+                node.bestOpponentHandScore = 0
+                node.bestDetails = null
+                node.bestWinningHand = null
+            }
         }
     }
 
@@ -611,34 +681,43 @@ class OmniscientHintSearch(
 
     private fun publishSnapshot(armNodes: Array<Node>, evalsPerSec: Float = 0f) {
         var total = 0
-        var maxScore = 0
+        var maxScore = NO_OUTCOME
         var minStepsAtMax = Int.MAX_VALUE
+        var allProbed = armNodes.isNotEmpty()
         val list = ArrayList<OmniscientHintArmSnapshot>(armNodes.size)
         for (arm in armNodes) {
             total += arm.playouts
-            val steps = if (arm.bestWinScore > 0 && arm.bestSteps < Int.MAX_VALUE) arm.bestSteps else 0
-            if (isBetterOutcome(arm.bestWinScore, arm.bestSteps, maxScore, minStepsAtMax)) {
-                maxScore = arm.bestWinScore
+            val hasOutcome = arm.bestScore != NO_OUTCOME
+            if (!hasOutcome) allProbed = false
+            val score = if (hasOutcome) arm.bestScore else 0
+            val steps = if (hasOutcome && arm.bestSteps < Int.MAX_VALUE) arm.bestSteps else 0
+            if (hasOutcome && isBetterOutcome(arm.bestScore, arm.bestSteps, maxScore, minStepsAtMax)) {
+                maxScore = arm.bestScore
                 minStepsAtMax = arm.bestSteps
             }
             list.add(
                 OmniscientHintArmSnapshot(
                     choice = arm.humanChoice,
-                    bestScore = arm.bestWinScore,
+                    bestScore = score,
                     bestSteps = steps,
                     bestDetails = arm.bestDetails,
                     bestWinningHand = arm.bestWinningHand,
                     playouts = arm.playouts,
                     solved = arm.solved,
+                    hasOutcome = hasOutcome,
+                    bestWinnerSeat = arm.bestWinnerSeat,
+                    bestWinSourceSeat = arm.bestWinSourceSeat,
+                    bestOpponentHandScore = arm.bestOpponentHandScore,
                 ),
             )
         }
-        val bestIndices = if (maxScore <= 0) {
+        val hasBest = maxScore != NO_OUTCOME && (maxScore > 0 || allProbed)
+        val bestIndices = if (!hasBest) {
             IntArray(0)
         } else {
             val hits = ArrayList<Int>(4)
             for (i in armNodes.indices) {
-                if (armNodes[i].bestWinScore == maxScore && armNodes[i].bestSteps == minStepsAtMax) {
+                if (armNodes[i].bestScore == maxScore && armNodes[i].bestSteps == minStepsAtMax) {
                     hits.add(i)
                 }
             }
@@ -720,17 +799,7 @@ class OmniscientHintSearch(
                 val arm = armNodes[i]
                 arm.macroChoices = tape
                 if (armStates[i].isTerminal()) {
-                    arm.terminal = true
-                    arm.solved = true
-                    val sc = terminalHumanScore(armStates[i], humanSeat)
-                    arm.bestWinScore = sc
-                    arm.bestSteps = if (sc > 0) 1 else Int.MAX_VALUE
-                    arm.visits = 1
-                    arm.playouts = 1
-                    if (sc > 0) {
-                        arm.bestDetails = cloneDetails(Scoring.computeHandScoreDetails(armStates[i]))
-                        arm.bestWinningHand = captureWinningHand(armStates[i], humanSeat)
-                    }
+                    initTerminalNode(arm, armStates[i], humanSeat)
                 }
             }
         }
@@ -750,8 +819,11 @@ class OmniscientHintSearch(
 
         var visits: Int = 0
         var playouts: Int = 0
-        var bestWinScore: Int = 0
+        var bestScore: Int = NO_OUTCOME
         var bestSteps: Int = Int.MAX_VALUE
+        var bestWinnerSeat: Int = -1
+        var bestWinSourceSeat: Int = -1
+        var bestOpponentHandScore: Int = 0
         var bestDetails: HandScoreDetails? = null
         var bestWinningHand: OmniscientWinningHand? = null
         var sumReward: Double = 0.0
@@ -875,8 +947,8 @@ class OmniscientHintSearch(
             if (c.solved) continue
             val nc = max(1, c.visits).toDouble()
             val mean = c.sumReward / nc
-            val meanNorm = if (c.bestWinScore > 0) mean / scale else mean
-            val maxNorm = c.bestWinScore / scale
+            val meanNorm = mean / scale
+            val maxNorm = if (c.bestScore == NO_OUTCOME) 0.0 else c.bestScore / scale
             val variance = max(0.0, (c.sumRewardSq / nc) - mean * mean) / (scale * scale)
 
             val ucb = 0.50 * maxNorm +
@@ -1083,8 +1155,8 @@ class OmniscientHintSearch(
             if (isHumanDecision) steps++
             state.applyChoice(picked)
         }
-        val score = terminalHumanScore(state, humanSeat)
-        return packOutcome(score, if (score > 0) steps else Int.MAX_VALUE)
+        val outcome = terminalHumanOutcome(state, humanSeat)
+        return packOutcome(outcome, if (outcome != NO_OUTCOME) steps else Int.MAX_VALUE)
     }
 
     private fun pickDefaultHuman(
@@ -1366,9 +1438,48 @@ class OmniscientHintSearch(
         }
     }
 
-    private fun terminalHumanScore(state: GameState, humanSeat: Int): Int {
-        val winner = if (state.winnerSeat in 0 until NUM_PLAYERS) state.winnerSeat else state.currentPlayer
-        return if (state.handScore > 0 && winner == humanSeat) state.handScore else 0
+    private fun terminalWinnerSeat(state: GameState): Int {
+        if (state.handScore <= 0) return -1
+        return if (state.winnerSeat in 0 until NUM_PLAYERS) state.winnerSeat else state.currentPlayer
+    }
+
+    private fun terminalWinSourceSeat(state: GameState): Int {
+        if (state.handScore <= 0) return -1
+        return when {
+            state.winSource in 0 until NUM_PLAYERS -> state.winSource
+            state.decisionType == DecisionType.ReactToDiscard &&
+                state.lastDiscarder in 0 until NUM_PLAYERS -> state.lastDiscarder
+            else -> -1
+        }
+    }
+
+    /**
+     * Terminal outcome for [humanSeat]:
+     * - `> 0`: human win hand score,
+     * - `0`: exhaustive draw,
+     * - `< 0`: human loss (signed Zung Jung payment delta),
+     * - [NO_OUTCOME]: non-terminal state.
+     */
+    private fun terminalHumanOutcome(state: GameState, humanSeat: Int): Int {
+        if (!state.isTerminal()) return NO_OUTCOME
+        if (state.handScore <= 0) return 0
+        val winner = terminalWinnerSeat(state)
+        return if (winner == humanSeat) {
+            state.handScore
+        } else {
+            state.computeScoreDeltaForSeat(humanSeat)
+        }
+    }
+
+    private fun computePlayoutReward(
+        outcome: Int,
+        steps: Int,
+        terminalState: GameState,
+        humanSeat: Int,
+    ): Double = when {
+        outcome > 0 -> outcome.toDouble() + 0.01 / max(1, steps)
+        outcome == 0 || outcome == NO_OUTCOME -> computeShaping(terminalState, humanSeat)
+        else -> outcome.toDouble() + 0.5 * computeShaping(terminalState, humanSeat) + 0.01 / max(1, steps)
     }
 
     private fun isBetterOutcome(
@@ -1377,7 +1488,8 @@ class OmniscientHintSearch(
         curBestScore: Int,
         curBestSteps: Int,
     ): Boolean {
-        if (score <= 0) return false
+        if (score == NO_OUTCOME) return false
+        if (curBestScore == NO_OUTCOME) return true
         if (score != curBestScore) return score > curBestScore
         return steps < curBestSteps
     }
@@ -1400,14 +1512,14 @@ class OmniscientHintSearch(
         components = ArrayList(d.components),
     )
 
-    private fun captureWinningHand(state: GameState, humanSeat: Int): OmniscientWinningHand {
-        val ps = state.players[humanSeat]
+    private fun captureWinningHand(state: GameState, winnerSeat: Int): OmniscientWinningHand {
+        val ps = state.players[winnerSeat]
         val claimedWin =
             state.decisionType == DecisionType.ReactToDiscard &&
                 state.lastDiscarded in 0 until NUM_TILE_TYPES
         val winningTile = when {
             claimedWin -> state.lastDiscarded
-            state.lastDrawnPlayer == humanSeat &&
+            state.lastDrawnPlayer == winnerSeat &&
                 state.lastDrawnTile in 0 until NUM_TILE_TYPES &&
                 ps.concealed[state.lastDrawnTile] > 0 -> state.lastDrawnTile
             else -> -1
@@ -1498,6 +1610,7 @@ class OmniscientHintSearch(
     }
 
     companion object {
+        private const val NO_OUTCOME = Int.MIN_VALUE
         private const val MAX_STEPS = 512
         private const val JOIN_TIMEOUT_MS = 500L
         private const val PUBLISH_MIN_INTERVAL_NS = 1_000_000_000L

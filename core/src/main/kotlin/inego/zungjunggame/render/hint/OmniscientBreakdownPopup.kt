@@ -9,6 +9,7 @@ import inego.zungjunggame.hints.OmniscientWinningHand
 import inego.zungjunggame.i18n.L10n
 import inego.zungjunggame.render.assets.WhitePixel
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.render.seats.NameTone
 import inego.zungjunggame.render.seats.PlayerLabels
 import inego.zungjunggame.render.tiles.TileDrawer
 import inego.zungjunggame.render.ui.AppPalette
@@ -65,7 +66,10 @@ object OmniscientBreakdownPopup {
         val gapAboveAnchor = Fonts.px(8f)
 
         val details = arm.bestDetails
-        val hasWin = arm.bestScore > 0 && details != null
+        val hasWin = arm.hasOutcome && arm.bestScore > 0 && details != null
+        val hasLoss = arm.hasOutcome && arm.bestScore < 0
+        val hasScoredOutcome = hasWin || hasLoss
+        val hasDraw = arm.hasOutcome && arm.bestScore == 0
         val rows: List<Pair<String, String>> = if (hasWin) {
             details.components.map { comp ->
                 HandsTableText.componentName(comp) to comp.points.toString()
@@ -77,7 +81,7 @@ object OmniscientBreakdownPopup {
         val scoreText: String
         val scoreW: Float
         val scoreH: Float
-        if (hasWin) {
+        if (hasScoredOutcome) {
             scoreText = arm.bestScore.toString()
             var w = 0f
             var h = 0f
@@ -89,8 +93,8 @@ object OmniscientBreakdownPopup {
             scoreW = w
             scoreH = h
         } else {
-            scoreText = if (arm.playouts > 0 || arm.solved) {
-                L10n.get("hint.omniscient.no_win")
+            scoreText = if (hasDraw) {
+                L10n.get("hand.draw")
             } else {
                 L10n.get("hint.omniscient.searching")
             }
@@ -104,7 +108,7 @@ object OmniscientBreakdownPopup {
             scoreH = h
         }
 
-        val stepsNote = if (hasWin && arm.bestSteps > 0) {
+        val stepsNote = if (arm.hasOutcome && arm.bestSteps > 0) {
             L10n.format("hint.omniscient.steps", arm.bestSteps)
         } else {
             null
@@ -114,7 +118,25 @@ object OmniscientBreakdownPopup {
         } else {
             null
         }
-        val exactTag = if (hasWin && arm.solved) L10n.get("hint.omniscient.exact") else null
+        val exactTag = if (arm.hasOutcome && arm.solved) L10n.get("hint.omniscient.exact") else null
+        val winnerLine = if (hasLoss && arm.bestWinnerSeat in 0 until NUM_PLAYERS) {
+            PlayerLabels.winTitle(arm.bestWinnerSeat, humanSeat)
+        } else {
+            null
+        }
+        val lossSourceLine = if (hasLoss) {
+            PlayerLabels.winSourceTitle(
+                discarder = arm.bestWinSourceSeat.takeIf { it in 0 until NUM_PLAYERS },
+                humanSeat = humanSeat,
+            )
+        } else {
+            null
+        }
+        val winnerHandNote = if (hasLoss && arm.bestOpponentHandScore > 0) {
+            arm.bestOpponentHandScore.toString()
+        } else {
+            null
+        }
         val winningHand = if (hasWin) arm.bestWinningHand else null
         val hasWinTileRow = winningHand != null && winningHand.winningTile >= 0
         val winSourceText = if (hasWinTileRow) {
@@ -130,6 +152,11 @@ object OmniscientBreakdownPopup {
         var capW = 0f
         var exactW = 0f
         var winSourceW = 0f
+        var winnerLabelW = 0f
+        var winnerNameW = 0f
+        var winnerHandNoteW = 0f
+        var lossSourceLabelW = 0f
+        var lossSourceNameW = 0f
         var maxNameW = 0f
         var maxPtsW = 0f
         var rowH = 0f
@@ -142,6 +169,15 @@ object OmniscientBreakdownPopup {
             if (capNote != null) capW = Fonts.textWidth(rowFont, capNote)
             if (exactTag != null) exactW = Fonts.textWidth(rowFont, exactTag)
             if (winSourceText != null) winSourceW = Fonts.textWidth(rowFont, winSourceText)
+            if (winnerLine != null) {
+                if (winnerLine.label.isNotEmpty()) winnerLabelW = Fonts.textWidth(rowFont, winnerLine.label)
+                if (winnerLine.name.isNotEmpty()) winnerNameW = Fonts.textWidth(rowFont, winnerLine.name)
+            }
+            if (winnerHandNote != null) winnerHandNoteW = Fonts.textWidth(rowFont, winnerHandNote)
+            if (lossSourceLine != null) {
+                if (lossSourceLine.label.isNotEmpty()) lossSourceLabelW = Fonts.textWidth(rowFont, lossSourceLine.label)
+                if (lossSourceLine.name.isNotEmpty()) lossSourceNameW = Fonts.textWidth(rowFont, lossSourceLine.name)
+            }
             for ((name, pts) in rows) {
                 val nw = Fonts.textWidth(rowFont, name)
                 if (nw > maxNameW) maxNameW = nw
@@ -187,6 +223,32 @@ object OmniscientBreakdownPopup {
             else -> 0f
         }
 
+        val winnerLabelGap = Fonts.px(6f)
+        val lossHeaderGap = Fonts.px(8f)
+        val winnerLeftW = when {
+            winnerLine == null -> 0f
+            winnerLabelW > 0f && winnerNameW > 0f -> winnerLabelW + winnerLabelGap + winnerNameW
+            else -> winnerLabelW + winnerNameW
+        }
+        val winnerRowW = when {
+            winnerLine == null && winnerHandNote == null -> 0f
+            winnerLine != null && winnerHandNote != null -> winnerLeftW + colGap + winnerHandNoteW
+            winnerLine != null -> winnerLeftW
+            else -> winnerHandNoteW
+        }
+        val lossSourceRowW = when {
+            lossSourceLine == null -> 0f
+            lossSourceLabelW > 0f && lossSourceNameW > 0f -> lossSourceLabelW + winnerLabelGap + lossSourceNameW
+            else -> lossSourceLabelW + lossSourceNameW
+        }
+        val lossMetaW = max(winnerRowW, lossSourceRowW)
+        val hasWinnerRow = winnerLine != null || winnerHandNote != null
+        val lossMetaBlockH = when {
+            hasWinnerRow && lossSourceLine != null -> rowH + rowGap + rowH + lossHeaderGap
+            hasWinnerRow || lossSourceLine != null -> rowH + lossHeaderGap
+            else -> 0f
+        }
+
         val headerMetaGap = Fonts.px(8f)
         val leftHeaderW = when {
             stepsNote != null && exactTag != null -> stepsW + headerMetaGap + exactW
@@ -195,14 +257,14 @@ object OmniscientBreakdownPopup {
             else -> 0f
         }
         val rightHeaderW = scoreW + if (capNote != null) headerMetaGap + capW else 0f
-        val headerW = if (hasWin && leftHeaderW > 0f) {
+        val headerW = if ((hasScoredOutcome || hasDraw) && leftHeaderW > 0f) {
             leftHeaderW + colGap + rightHeaderW
         } else {
             rightHeaderW
         }
 
         val rowsW = if (rows.isNotEmpty()) maxNameW + colGap + maxPtsW else 0f
-        val innerW = max(max(winRowW, handRowW), max(headerW, rowsW))
+        val innerW = max(max(winRowW, handRowW), max(lossMetaW, max(headerW, rowsW)))
         val cardW = innerW + padX * 2f
 
         val rowsBlockH = if (rows.isNotEmpty()) {
@@ -210,7 +272,7 @@ object OmniscientBreakdownPopup {
         } else {
             0f
         }
-        val cardH = padY * 2f + handBlockH + scoreH + rowsBlockH
+        val cardH = padY * 2f + handBlockH + lossMetaBlockH + scoreH + rowsBlockH
 
         // Clamp within safe viewport bounds: keep a small horizontal margin,
         // but allow touching the top/bottom safe edges when vertically tight
@@ -293,12 +355,58 @@ object OmniscientBreakdownPopup {
             cursorTop -= tileH + handBottomGap
         }
 
+        if (hasWinnerRow) {
+            Fonts.withFaceScale(rowFont, ROW_SCALE) {
+                var x = contentLeft
+                if (winnerLine != null) {
+                    if (winnerLine.label.isNotEmpty()) {
+                        Fonts.drawText(batch, rowFont, winnerLine.label, x, cursorTop, META_INK)
+                        x += winnerLabelW + winnerLabelGap
+                    }
+                    if (winnerLine.name.isNotEmpty()) {
+                        Fonts.drawText(batch, rowFont, winnerLine.name, x, cursorTop, AppPalette.inkStrong)
+                    }
+                }
+                if (winnerHandNote != null) {
+                    Fonts.drawText(
+                        batch,
+                        rowFont,
+                        winnerHandNote,
+                        contentRight - winnerHandNoteW,
+                        cursorTop,
+                        AppPalette.inkStrong,
+                    )
+                }
+            }
+            cursorTop -= rowH + if (lossSourceLine != null) rowGap else lossHeaderGap
+        }
+
+        if (lossSourceLine != null) {
+            Fonts.withFaceScale(rowFont, ROW_SCALE) {
+                var x = contentLeft
+                if (lossSourceLine.label.isNotEmpty()) {
+                    Fonts.drawText(batch, rowFont, lossSourceLine.label, x, cursorTop, META_INK)
+                    x += lossSourceLabelW + winnerLabelGap
+                }
+                if (lossSourceLine.name.isNotEmpty()) {
+                    val nameInk = if (lossSourceLine.tone == NameTone.SelfDiscarded) {
+                        AppPalette.danger
+                    } else {
+                        AppPalette.inkStrong
+                    }
+                    Fonts.drawText(batch, rowFont, lossSourceLine.name, x, cursorTop, nameInk)
+                }
+            }
+            cursorTop -= rowH + lossHeaderGap
+        }
+
         val headerTop = cursorTop
 
-        if (hasWin) {
+        if (hasScoredOutcome) {
             val scoreX = contentRight - scoreW
+            val scoreInk = if (hasWin) AppPalette.accentBright else AppPalette.danger
             Fonts.withFaceScale(scoreFont, SCORE_SCALE) {
-                Fonts.drawText(batch, scoreFont, scoreText, scoreX, headerTop, AppPalette.accentBright)
+                Fonts.drawText(batch, scoreFont, scoreText, scoreX, headerTop, scoreInk)
             }
             Fonts.withFaceScale(rowFont, ROW_SCALE) {
                 val metaY = headerTop - (scoreH - metaCapH) * 0.5f
@@ -313,6 +421,19 @@ object OmniscientBreakdownPopup {
                 if (capNote != null) {
                     Fonts.drawText(batch, rowFont, capNote, scoreX - headerMetaGap - capW, metaY, META_INK)
                 }
+            }
+        } else if (hasDraw) {
+            Fonts.withFaceScale(rowFont, ROW_SCALE) {
+                var leftX = contentLeft
+                if (stepsNote != null) {
+                    Fonts.drawText(batch, rowFont, stepsNote, leftX, headerTop, META_INK)
+                    leftX += stepsW + headerMetaGap
+                }
+                if (exactTag != null) {
+                    Fonts.drawText(batch, rowFont, exactTag, leftX, headerTop, META_INK)
+                }
+                val drawX = if (leftHeaderW > 0f) contentRight - scoreW else contentLeft
+                Fonts.drawText(batch, rowFont, scoreText, drawX, headerTop, AppPalette.ink)
             }
         } else {
             Fonts.withFaceScale(rowFont, ROW_SCALE) {

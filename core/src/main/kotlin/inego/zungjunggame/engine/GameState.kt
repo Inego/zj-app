@@ -502,6 +502,26 @@ class GameState {
         )
     }
 
+    /** Zero-allocation Zung Jung payment delta for a single [seat] (only meaningful at terminal). */
+    fun computeScoreDeltaForSeat(seat: Int): Int {
+        if (handScore <= 0) return 0
+        val winner = if (winnerSeat in 0 until NUM_PLAYERS) winnerSeat else currentPlayer
+        val discarder =
+            if (winSource in 0 until NUM_PLAYERS) {
+                winSource
+            } else if (decisionType == DecisionType.ReactToDiscard) {
+                lastDiscarder
+            } else {
+                -1
+            }
+        return ZjSettlement.computeDeltaForSeat(
+            handValue = handScore,
+            winnerSeat = winner,
+            discarderSeat = discarder,
+            seat = seat,
+        )
+    }
+
     // --- private helpers -----------------------------------------------
 
     private fun clearPendingReactions() {
