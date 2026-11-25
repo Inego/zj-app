@@ -42,19 +42,22 @@ class ShadowRankedStarter(
 ) : Disposable {
     private var state: ShadowRankedStartState = ShadowRankedStartState.Idle
     private var lastConfig: GameConfig? = null
+    private var lastFastBots: Boolean = false
     private var generation = 0
 
     fun snapshot(): ShadowRankedStartState = state
 
-    fun start(config: GameConfig) {
+    fun start(config: GameConfig, fastBots: Boolean = false) {
         if (state is ShadowRankedStartState.Starting) return
         lastConfig = config
+        lastFastBots = fastBots
         val gen = ++generation
         state = ShadowRankedStartState.Starting
         client.start(
             token = token(),
             rounds = config.rounds.toChallengeRounds(),
             allowChicken = config.allowChickenHands,
+            fastBots = fastBots,
         ) { outcome ->
             if (gen != generation) return@start
             when (outcome) {
@@ -76,16 +79,17 @@ class ShadowRankedStarter(
     }
 
     /** Replay the remembered draft. Only a failure can be retried. */
-    fun retry() {
+    fun retry(fastBots: Boolean? = null) {
         if (state !is ShadowRankedStartState.Failed) return
         val config = lastConfig ?: return
-        start(config)
+        start(config, fastBots = fastBots ?: lastFastBots)
     }
 
     /** Log-out path: drop any in-flight start and the remembered draft. */
     fun reset() {
         generation++
         lastConfig = null
+        lastFastBots = false
         state = ShadowRankedStartState.Idle
     }
 

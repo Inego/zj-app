@@ -3,6 +3,7 @@ package inego.zungjunggame.render.ui
 import inego.zungjunggame.render.fonts.Fonts
 import inego.zungjunggame.ui.Rect
 import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Shared layout for modal cards built as a **form**: a title band, one or more
@@ -109,6 +110,21 @@ class OverlayForm {
     }
 
     /**
+     * Optional companion control attached to a [Section] (for example, a toggle
+     * belonging to that section's choices).
+     *
+     * In [Mode.Column], the form places it right-aligned on the section's
+     * heading line when the label and accessory fit side by side; in
+     * [Mode.SideBySide] (or when a narrow column cannot fit both on one line),
+     * the form places it directly below the section's framed group inside that
+     * section's column.
+     */
+    data class SectionAccessory(
+        val width: Float,
+        val belowHeight: Float,
+    )
+
+    /**
      * One group of rows, optionally under a heading.
      *
      * [contentWidth] is the width the section's widest row needs — the column
@@ -127,6 +143,7 @@ class OverlayForm {
         val rows: List<Float>,
         val groupPad: Float? = null,
         val rowGap: Float? = null,
+        val accessory: SectionAccessory? = null,
     )
 
     /** An unlabelled full-width block after the sections (a checkbox row). */
@@ -166,6 +183,7 @@ class OverlayForm {
         val label: Rect?,
         val group: Rect,
         val rows: List<Rect>,
+        val accessory: Rect? = null,
     )
 
     data class Result(
@@ -285,7 +303,13 @@ class OverlayForm {
         }
         val groupH = { s: Section -> s.groupPadOr(rhythm) * 2f + sectionInner(s) }
         val sectionH = { s: Section ->
-            (if (s.label != null) labelH + rhythm.sectionLabelGap else 0f) + groupH(s)
+            val colW = if (mode == Mode.SideBySide) sectionSplitWidth(s, rhythm) else rowWidth
+            val accessoryBelowH = if (s.accessory != null && !accessoryOnHeader(s, mode, colW, rhythm)) {
+                rhythm.rowGap + s.accessory.belowHeight
+            } else {
+                0f
+            }
+            (if (s.label != null) labelH + rhythm.sectionLabelGap else 0f) + groupH(s) + accessoryBelowH
         }
 
         val sectionsH = if (mode == Mode.SideBySide && sections.isNotEmpty()) {
@@ -410,8 +434,43 @@ class OverlayForm {
                 rows += Rect(column.left + section.groupPadOr(rhythm), rowTop - height, rowWidthOf(column, section, rhythm), height)
                 rowTop -= height + section.rowGapOr(rhythm)
             }
-            placed += SectionPlacement(labelRect, group, rows)
-            if (mode == Mode.Column) top = groupBottom - rhythm.blockGap
+            val accessory = section.accessory
+            val accessoryRect: Rect?
+            val sectionBottom: Float
+            if (accessory == null) {
+                accessoryRect = null
+                sectionBottom = groupBottom
+            } else if (accessoryOnHeader(section, mode, column.width, rhythm) && labelRect != null) {
+                val capH = Fonts.button.capHeight
+                val inkCenterY = labelRect.top - capH * 0.5f
+                val topClear = when {
+                    index > 0 -> rhythm.blockGap
+                    spec.chrome == Chrome.WholeCard -> rhythm.titleGap
+                    else -> 0f
+                }
+                val maxTopHalf = capH * 0.5f + (topClear - Fonts.px(2f)).coerceAtLeast(0f)
+                val maxBottomHalf =
+                    (labelH - capH * 0.5f) + (rhythm.sectionLabelGap - Fonts.px(2f)).coerceAtLeast(0f)
+                val halfH = min(rhythm.rowH * 0.5f, min(maxTopHalf, maxBottomHalf))
+                accessoryRect = Rect(
+                    left = column.left + column.width - accessory.width,
+                    bottom = inkCenterY - halfH,
+                    width = accessory.width,
+                    height = halfH * 2f,
+                )
+                sectionBottom = groupBottom
+            } else {
+                val accBottom = groupBottom - rhythm.rowGap - accessory.belowHeight
+                accessoryRect = Rect(
+                    left = column.left,
+                    bottom = accBottom,
+                    width = column.width,
+                    height = accessory.belowHeight,
+                )
+                sectionBottom = accBottom
+            }
+            placed += SectionPlacement(labelRect, group, rows, accessoryRect)
+            if (mode == Mode.Column) top = sectionBottom - rhythm.blockGap
         }
         if (mode == Mode.SideBySide && sections.isNotEmpty()) {
             top = rowsTop - sectionsH - rhythm.blockGap
@@ -444,16 +503,42 @@ class OverlayForm {
     private data class ColumnRect(val left: Float, val width: Float)
 
     private fun columnWidth(sections: List<Section>, rhythm: Rhythm): Float =
-        sections.maxOfOrNull {
-            max(it.contentWidth, labelWidth(it)) + it.groupPadOr(rhythm) * 2f
+        sections.maxOfOrNull { section ->
+            val groupW = max(section.contentWidth, labelWidth(section)) + section.groupPadOr(rhythm) * 2f
+            val accessory = section.accessory
+            val headerW = if (accessory != null) {
+                if (section.label != null) {
+                    labelWidth(section) + rhythm.columnGap + accessory.width
+                } else {
+                    accessory.width
+                }
+            } else {
+                0f
+            }
+            max(groupW, headerW)
         } ?: 0f
+
+    private fun sectionSplitWidth(section: Section, rhythm: Rhythm): Float {
+        val groupW = max(section.contentWidth, labelWidth(section)) + section.groupPadOr(rhythm) * 2f
+        val accessoryW = section.accessory?.width ?: 0f
+        return max(groupW, accessoryW)
+    }
 
     private fun splitWidth(sections: List<Section>, rhythm: Rhythm): Float {
         if (sections.isEmpty()) return 0f
-        val columns = sections.map {
-            max(it.contentWidth, labelWidth(it)) + it.groupPadOr(rhythm) * 2f
-        }.sum()
+        val columns = sections.map { sectionSplitWidth(it, rhythm) }.sum()
         return columns + rhythm.columnGap * (sections.size - 1)
+    }
+
+    private fun accessoryOnHeader(
+        section: Section,
+        mode: Mode,
+        columnWidth: Float,
+        rhythm: Rhythm,
+    ): Boolean {
+        val accessory = section.accessory ?: return false
+        if (mode != Mode.Column || section.label == null) return false
+        return labelWidth(section) + rhythm.columnGap + accessory.width <= columnWidth
     }
 
     private fun labelWidth(section: Section): Float =
@@ -465,9 +550,7 @@ class OverlayForm {
         panel: Rect,
         rowWidth: Float,
     ): List<ColumnRect> {
-        val widths = sections.map {
-            max(it.contentWidth, labelWidth(it)) + it.groupPadOr(rhythm) * 2f
-        }
+        val widths = sections.map { sectionSplitWidth(it, rhythm) }
         val total = widths.sum() + rhythm.columnGap * (sections.size - 1)
         var left = panel.left + rhythm.padX + (rowWidth - total) * 0.5f
         return widths.map { width ->

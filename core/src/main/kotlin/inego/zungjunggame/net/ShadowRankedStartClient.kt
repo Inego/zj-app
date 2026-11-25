@@ -37,13 +37,14 @@ class ShadowRankedStartClient(
         token: String?,
         rounds: ChallengeRounds,
         allowChicken: Boolean,
+        fastBots: Boolean = false,
         onDone: (ShadowRankedStartOutcome) -> Unit,
     ) {
         if (token.isNullOrBlank()) {
             onDone(ShadowRankedStartOutcome.Failed(ShadowRankedStartFailure.NoSession))
             return
         }
-        sender.start(token, rounds, allowChicken) { result ->
+        sender.start(token, rounds, allowChicken, fastBots) { result ->
             onDone(
                 result.fold(
                     onSuccess = { ShadowRankedStartOutcome.Started(it) },

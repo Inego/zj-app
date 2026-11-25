@@ -127,6 +127,7 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
         pointerWorldY: Float = Float.NaN,
         view: ShadowRankedView = ShadowRankedView(),
         draft: GameConfig? = null,
+        fastBots: Boolean = false,
     ) {
         Fonts.ensureCreated()
         val hoverX = body.hoverX(pointerWorldX)
@@ -139,7 +140,7 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
         // Rejoin, so the one plate that commits to a game reads as the action.
         val itemFont = Fonts.buttonBold
 
-        val model = bodyFor(view, draft, bodyRect.width)
+        val model = bodyFor(view, draft, fastBots, bodyRect.width)
         val m = model.m
         body.layout(
             viewport.left, viewport.bottom, viewport.width, viewport.height, contentHeight, scrollY,
@@ -176,8 +177,12 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
     }
 
     /** Height of the body's rows at [width]; the hub card hugs this. */
-    internal fun contentHeight(width: Float, view: ShadowRankedView, draft: GameConfig?): Float =
-        bodyFor(view, draft, width).rows.height
+    internal fun contentHeight(
+        width: Float,
+        view: ShadowRankedView,
+        draft: GameConfig?,
+        fastBots: Boolean = false,
+    ): Float = bodyFor(view, draft, fastBots, width).rows.height
 
     /** Everything one frame's body layout derives, before it is painted. */
     private class ShadowBody(
@@ -189,6 +194,7 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
     private fun bodyFor(
         view: ShadowRankedView,
         draft: GameConfig?,
+        fastBots: Boolean,
         gutterW: Float,
     ): ShadowBody {
         Fonts.ensureCreated()
@@ -253,9 +259,14 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
             )
         }
         startSection.add(
-            rows, m, view, draft,
-            { text -> HubDraw.measureWrapped(labelFont, text, textW) },
-            { label -> HubDraw.buttonWidth(itemFont, label, gutterW) },
+            rows = rows,
+            m = m,
+            view = view,
+            draft = draft,
+            fastBots = fastBots,
+            measure = { text -> HubDraw.measureWrapped(labelFont, text, textW) },
+            buttonW = { label -> HubDraw.buttonWidth(itemFont, label, gutterW) },
+            checkW = { label -> HubDraw.checkWidth(labelFont, label, gutterW) },
         )
         // The attempts are the account's, and the body above is the signed-in one.
         val link = L10n.get("shadowRanked.past_attempts")
@@ -309,6 +320,10 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
             )
             is ShadowActionRow -> regions.add(
                 Rect(rowLeft + (rowW - row.width) * 0.5f, p.bottom, row.width, row.height),
+                row.action,
+            )
+            is ShadowCheckRow -> regions.add(
+                Rect(rowLeft, p.bottom, row.width, row.height),
                 row.action,
             )
             is ShadowLinkRow -> regions.add(
@@ -381,6 +396,22 @@ class ShadowRankedTabPanel : Disposable, GestureSurface<HubVerdict> {
                 rowLeft + (rowW - row.width) * 0.5f, top - m.actionH, row.width, m.actionH, border,
                 pointerX = hoverX, pointerY = hoverY,
             )
+
+            is ShadowCheckRow -> {
+                val rect = Rect(rowLeft, top - row.height, row.width, row.height)
+                HubDraw.drawCheckRow(
+                    batch = batch,
+                    px = px,
+                    font = labelFont,
+                    label = row.label,
+                    checked = row.checked,
+                    left = rect.left,
+                    bottom = rect.bottom,
+                    w = rect.width,
+                    h = rect.height,
+                    hovered = hovered(rect),
+                )
+            }
 
             is ShadowDescriptionRow -> {
                 HubDraw.drawWrapped(
@@ -476,6 +507,13 @@ internal class ShadowActionRow(
     val width: Float,
     override val height: Float,
 ) : ShadowRow
+internal class ShadowCheckRow(
+    val label: String,
+    val checked: Boolean,
+    val action: HubVerdict,
+    val width: Float,
+    override val height: Float,
+) : ShadowRow
 internal class ShadowNoteRow(
     val text: String,
     val tone: ShadowTone,
@@ -506,14 +544,16 @@ internal class ShadowRankedStartSection {
         m: ShadowMetrics,
         view: ShadowRankedView,
         draft: GameConfig?,
+        fastBots: Boolean,
         measure: (String) -> Float,
         buttonW: (String) -> Float,
+        checkW: (String) -> Float,
     ) {
         // The start controls are the signed-in body's: `bodyFor` returns before
         // this for a signed-out one, so a draft that cannot be started is never
         // shown.
         val rounds = draft?.rounds
-        // Rounds and the patternless toggle are one control group: the tight
+        // Rounds, patternless, and fast bots are one control group: the tight
         // rhythm continues between them. The pool line is the group's last line.
         rows.add(
             ShadowChoicesRow(
@@ -530,6 +570,17 @@ internal class ShadowRankedStartSection {
                 label = PatternlessRule.caption(),
                 value = PatternlessRule.settingValue(draft?.allowChickenHands == true),
                 action = HubVerdict.ToggleChicken,
+                height = m.rowH,
+            ),
+            height = m.rowH,
+        )
+        val fastBotsLabel = L10n.get("setup.fast_bots")
+        rows.add(
+            ShadowCheckRow(
+                label = fastBotsLabel,
+                checked = fastBots,
+                action = HubVerdict.ToggleFastBots,
+                width = checkW(fastBotsLabel),
                 height = m.rowH,
             ),
             height = m.rowH,

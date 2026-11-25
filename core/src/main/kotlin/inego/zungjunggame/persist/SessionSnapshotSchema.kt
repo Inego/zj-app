@@ -51,8 +51,9 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
      * v7: the player's exposed melds became an ordered log (exposure order).
      * v8: bot level, the payload's tail field (v7 migrates as Standard).
      * v9: hint mode, the payload's tail field (v8 migrates as Standard bot).
+     * v10: fastBots flag, the payload's tail field (v9 migrates as false).
      */
-    override val version: Int = 9
+    override val version: Int = 10
 
     private const val MAGIC: Int = 0x5A4A5331 // "ZJS1"
 
@@ -70,8 +71,9 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
             writeScoreRows(d, value.scoreRows)
             writeGameState(d, value.game)
             d.writeUTF(value.botLevel.id)
-            // Tail field: this is what lets the v8→v9 migration be an append.
             d.writeUTF(value.hintMode.id)
+            // Tail field: this is what lets the v9→v10 migration be an append.
+            d.writeBoolean(value.fastBots)
         }
         return out.toByteArray()
     }
@@ -80,6 +82,7 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
      * Step migrations (`baseVersion = 7`):
      * - v7→v8 appends [BotLevel.DEFAULT] and updates the embedded version int to 8.
      * - v8→v9 appends [HintMode.DEFAULT] and updates the embedded version int to 9.
+     * - v9→v10 appends `fastBots = false` and updates the embedded version int to 10.
      */
     override val migrations: List<Migration> = listOf(
         Migration { fromVersion, bytes ->
@@ -96,12 +99,28 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
                 appendTailUtf(bytes, HintMode.DEFAULT.id, targetVersion = 9)
             }
         },
+        Migration { fromVersion, bytes ->
+            if (fromVersion != 9 || bytes.size < 8) {
+                MigrationResult.Drop
+            } else {
+                appendTailBoolean(bytes, value = false, targetVersion = 10)
+            }
+        },
     )
 
     private fun appendTailUtf(bytes: ByteArray, value: String, targetVersion: Int): MigrationResult {
         val out = ByteArrayOutputStream(bytes.size + 2 + value.length)
         out.write(bytes)
         DataOutputStream(out).use { it.writeUTF(value) }
+        val migrated = out.toByteArray()
+        ByteBuffer.wrap(migrated).putInt(4, targetVersion)
+        return MigrationResult.Migrated(migrated)
+    }
+
+    private fun appendTailBoolean(bytes: ByteArray, value: Boolean, targetVersion: Int): MigrationResult {
+        val out = ByteArrayOutputStream(bytes.size + 1)
+        out.write(bytes)
+        DataOutputStream(out).use { it.writeBoolean(value) }
         val migrated = out.toByteArray()
         ByteBuffer.wrap(migrated).putInt(4, targetVersion)
         return MigrationResult.Migrated(migrated)
@@ -129,6 +148,7 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
                 game.allowChickenHands = allowChickenHands
                 val botLevel = BotLevel.fromId(d.readUTF())
                 val hintMode = HintMode.fromId(d.readUTF())
+                val fastBots = d.readBoolean()
                 SessionSnapshot(
                     scoreRows = scoreRows,
                     game = game,
@@ -138,6 +158,7 @@ object SessionSnapshotSchema : Schema<SessionSnapshot> {
                     rounds = rounds,
                     botLevel = botLevel,
                     hintMode = hintMode,
+                    fastBots = fastBots,
                 )
             }
         } catch (_: EOFException) {

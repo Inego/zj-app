@@ -477,6 +477,7 @@ class AccountControllerTest {
                         token: String,
                         rounds: ChallengeRounds,
                         allowChicken: Boolean,
+                        fastBots: Boolean,
                         onDone: (Result<ChallengeStart>) -> Unit,
                     ) {}
                 },

@@ -17,18 +17,20 @@ import inego.zungjunggame.state.StateKey
  * v1: `rounds` (empty field = unlimited) then `allowChickenHands`.
  * v2: appends the bot level id (v1 migrates as [BotLevel.DEFAULT]).
  * v3: appends the hint mode id (v2 migrates as [HintMode.DEFAULT]).
+ * v4: appends the `fastBots` flag (v3 migrates as `false`).
  *
  * The stored value is the committed config, so a cold start without a board
  * still offers the last live game's rules. Cancel keeps an in-memory draft only.
  */
 object LocalGameConfigSchema : Schema<LocalGameConfig> {
-    override val version: Int = 3
+    override val version: Int = 4
 
     override fun encode(value: LocalGameConfig): ByteArray = RecordWriter()
         .field(value.rules.rounds?.toString().orEmpty())
         .boolean(value.rules.allowChickenHands)
         .field(value.botLevel.id)
         .field(value.hintMode.id)
+        .boolean(value.fastBots)
         .build()
 
     override fun decode(bytes: ByteArray): LocalGameConfig? = try {
@@ -38,12 +40,14 @@ object LocalGameConfigSchema : Schema<LocalGameConfig> {
         val chicken = reader.boolean()
         val botLevel = BotLevel.fromId(reader.field())
         val hintMode = HintMode.fromId(reader.field())
+        val fastBots = reader.boolean()
         if (!reader.atEnd()) return null
         if (rounds != null && rounds <= 0) return null
         LocalGameConfig(
             rules = GameConfig(rounds = rounds, allowChickenHands = chicken),
             botLevel = botLevel,
             hintMode = hintMode,
+            fastBots = fastBots,
         )
     } catch (_: IllegalArgumentException) {
         null
@@ -53,6 +57,7 @@ object LocalGameConfigSchema : Schema<LocalGameConfig> {
      * Step migrations (`baseVersion = 1`):
      * - v1→v2 appends [BotLevel.DEFAULT]
      * - v2→v3 appends [HintMode.DEFAULT]
+     * - v3→v4 appends `fastBots = false`
      */
     override val migrations: List<Migration> = listOf(
         Migration { fromVersion, bytes ->
@@ -70,6 +75,15 @@ object LocalGameConfigSchema : Schema<LocalGameConfig> {
             } else {
                 MigrationResult.Migrated(
                     bytes + RecordWriter().field(HintMode.DEFAULT.id).build(),
+                )
+            }
+        },
+        Migration { fromVersion, bytes ->
+            if (fromVersion != 3) {
+                MigrationResult.Drop
+            } else {
+                MigrationResult.Migrated(
+                    bytes + RecordWriter().boolean(false).build(),
                 )
             }
         },

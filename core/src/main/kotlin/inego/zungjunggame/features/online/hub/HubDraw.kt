@@ -7,8 +7,10 @@ import com.badlogic.gdx.graphics.g2d.GlyphLayout
 import com.badlogic.gdx.graphics.g2d.SpriteBatch
 import com.badlogic.gdx.utils.Align
 import inego.zungjunggame.render.fonts.Fonts
+import inego.zungjunggame.render.ui.FittedLabel
 import inego.zungjunggame.render.ui.Hyperlink
 import inego.zungjunggame.render.ui.OverlayChrome
+import inego.zungjunggame.render.ui.UiPlate
 import inego.zungjunggame.ui.Rect
 import kotlin.math.max
 import inego.zungjunggame.render.ui.AppPalette
@@ -126,6 +128,62 @@ internal object HubDraw {
 
     /** Air on each side of a hugging button's label, in design px. */
     private const val BUTTON_SIDE_PAD_PX = 24f
+
+    /** Natural width of a square checkbox + label, capped to [maxW]. */
+    fun checkWidth(font: BitmapFont, label: String, maxW: Float): Float {
+        glyph.setText(font, label)
+        val natural = Fonts.px(4f) + Fonts.px(22f) + Fonts.px(14f) + glyph.width + Fonts.px(8f)
+        return natural.coerceAtMost(maxW)
+    }
+
+    /**
+     * Flat square checkbox + label, matching [inego.zungjunggame.features.local.NewGameSetupOverlay]
+     * and [inego.zungjunggame.features.settings.SettingsOverlay].
+     */
+    fun drawCheckRow(
+        batch: SpriteBatch,
+        px: Texture,
+        font: BitmapFont,
+        label: String,
+        checked: Boolean,
+        left: Float,
+        bottom: Float,
+        w: Float,
+        h: Float,
+        hovered: Boolean,
+    ) {
+        if (hovered) {
+            batch.setColor(AppPalette.plateRaised)
+            batch.draw(px, left, bottom, w, h)
+            batch.setColor(Color.WHITE)
+        }
+        val box = Fonts.px(22f)
+        val boxLeft = left + Fonts.px(4f)
+        val boxBottom = bottom + (h - box) * 0.5f
+        val outline = max(1.5f, Fonts.px(2f))
+        UiPlate.drawFrame(
+            batch, px, boxLeft, boxBottom, box, box,
+            0.90f, 0.88f, 0.78f, 0.95f, outline,
+        )
+        if (checked) {
+            val inset = Fonts.px(5f)
+            batch.setColor(AppPalette.success)
+            batch.draw(px, boxLeft + inset, boxBottom + inset, box - inset * 2f, box - inset * 2f)
+        }
+        batch.setColor(Color.WHITE)
+        val textLeft = boxLeft + box + Fonts.px(14f)
+        val maxLabelW = (left + w - textLeft).coerceAtLeast(1f)
+        val ink = if (hovered) AppPalette.inkStrong else AppPalette.ink
+        FittedLabel.draw(
+            batch = batch,
+            font = font,
+            text = label,
+            left = textLeft,
+            centerY = bottom + h * 0.5f,
+            maxWidth = maxLabelW,
+            color = ink,
+        )
+    }
 
     /**
      * A labelled row whose value is a single cycled/toggled choice.

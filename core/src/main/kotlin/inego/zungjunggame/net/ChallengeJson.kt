@@ -8,8 +8,12 @@ import com.badlogic.gdx.utils.JsonValue
  * required (unit-testable). Wire name retained.
  */
 object ChallengeJson {
-    fun startRequestBody(rounds: ChallengeRounds, allowChicken: Boolean): String =
-        """{"rounds":${AuthJson.quote(rounds.wire)},"allow_chicken":$allowChicken}"""
+    fun startRequestBody(
+        rounds: ChallengeRounds,
+        allowChicken: Boolean,
+        fastBots: Boolean = false,
+    ): String =
+        """{"rounds":${AuthJson.quote(rounds.wire)},"allow_chicken":$allowChicken,"fast_bots":$fastBots}"""
 
     fun parseStart(body: String): ChallengeStart {
         val root = JsonReader().parse(body)

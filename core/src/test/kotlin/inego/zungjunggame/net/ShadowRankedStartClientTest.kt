@@ -13,6 +13,7 @@ class ShadowRankedStartClientTest {
             token: String,
             rounds: ChallengeRounds,
             allowChicken: Boolean,
+            fastBots: Boolean,
             onDone: (Result<ChallengeStart>) -> Unit,
         ) {
             calls += token to rounds

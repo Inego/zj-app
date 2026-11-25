@@ -179,6 +179,9 @@ interface OnlineEffects {
     /** Flip the draft's chicken toggle, store it and refresh the pool count. */
     fun toggleShadowRankedChicken()
 
+    /** Flip Shadow Ranked's fast-bots toggle; stored without refreshing the pool count. */
+    fun toggleShadowRankedFastBots()
+
     /** Reload the signed-in account's Shadow Ranked attempts. */
     fun shadowRankedRefreshAttempts()
 

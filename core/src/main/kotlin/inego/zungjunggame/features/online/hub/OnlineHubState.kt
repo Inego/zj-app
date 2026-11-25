@@ -18,6 +18,7 @@ data class OnlineHubState(
     val liveScroll: Float = 0f,
     val shadowScroll: Float = 0f,
     val draft: GameConfig? = null,
+    val shadowFastBots: Boolean = false,
 ) {
     /** How far down [tab]'s body the player had read. */
     fun scrollFor(tab: OnlineTab): Float = when (tab) {
@@ -40,13 +41,17 @@ val DEFAULT_ONLINE_HUB_STATE: OnlineHubState = OnlineHubState(OnlineTab.Live)
  *
  * v1: a version field, the tab name, the two scroll offsets, then a presence flag
  * and — when present — the Shadow Ranked draft's rounds (`empty` = unlimited) and
- * chicken flag. Unknown versions, unknown tabs, non-positive rounds, and malformed
- * text all decode to null, so an unreadable value opens the hub on its default tab.
+ * chicken flag.
+ * v2: appends `shadowFastBots` (v1 decodes as `false`).
+ * Unknown versions, unknown tabs, non-positive rounds, and malformed text all
+ * decode to null, so an unreadable value opens the hub on its default tab.
  */
 object OnlineHubCodec : RouteStateCodec<OnlineHubState> {
     override val type = "onlineHub"
 
-    const val VERSION: Int = 1
+    const val VERSION: Int = 2
+
+    private const val MIN_READABLE_VERSION: Int = 1
 
     override fun encode(value: OnlineHubState): String {
         val writer = RecordWriter()
@@ -59,13 +64,14 @@ object OnlineHubCodec : RouteStateCodec<OnlineHubState> {
             writer.field(draft.rounds?.toString().orEmpty())
             writer.boolean(draft.allowChickenHands)
         }
+        writer.boolean(value.shadowFastBots)
         return writer.build().toString(Charsets.UTF_8)
     }
 
     override fun decode(text: String): OnlineHubState? = try {
         val reader = RecordReader(text.toByteArray(Charsets.UTF_8))
         val version = reader.int()
-        if (version != VERSION) return null
+        if (version !in MIN_READABLE_VERSION..VERSION) return null
         val tabName = reader.field()
         val liveScroll = reader.float()
         val shadowScroll = reader.float()
@@ -77,6 +83,7 @@ object OnlineHubCodec : RouteStateCodec<OnlineHubState> {
         } else {
             null
         }
+        val shadowFastBots = if (version >= 2) reader.boolean() else false
         if (!reader.atEnd()) return null
         val tab = OnlineTab.entries.firstOrNull { it.name == tabName } ?: return null
         OnlineHubState(
@@ -84,6 +91,7 @@ object OnlineHubCodec : RouteStateCodec<OnlineHubState> {
             liveScroll = liveScroll.coerceAtLeast(0f),
             shadowScroll = shadowScroll.coerceAtLeast(0f),
             draft = draft,
+            shadowFastBots = shadowFastBots,
         )
     } catch (_: IllegalArgumentException) {
         null

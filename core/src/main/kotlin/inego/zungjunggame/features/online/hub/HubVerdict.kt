@@ -30,6 +30,7 @@ sealed interface HubVerdict {
     data object SetRoundsOne : HubVerdict
     data object SetRoundsTwo : HubVerdict
     data object ToggleChicken : HubVerdict
+    data object ToggleFastBots : HubVerdict
 
     /** The right-aligned link that opens the attempts card. */
     data object ViewAttempts : HubVerdict

@@ -31,6 +31,8 @@ class NonHumanTurnStepper(
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     /** Seat that is the local human; used so a claim panel is not held behind bot bids. */
     private val isHumanSeat: (Int) -> Boolean = { false },
+    /** When true, bots skip simulated think/dwell delays and wait only for animations. */
+    private val fastBots: () -> Boolean = { false },
 ) {
     private val idleGate = AnimationIdleGate()
     private val choicesBuf = ChoiceList()
@@ -163,6 +165,7 @@ class NonHumanTurnStepper(
 
     /** True when the seat the engine is on has finished its simulated reaction time. */
     private fun reactionDue(state: GameState): Boolean {
+        if (fastBots()) return true
         val window = reactionWindow ?: return true
         val dueAt = window.dueAtMs[state.currentPlayer]
         return dueAt == UNTIMED || nowMs() >= dueAt
@@ -179,6 +182,11 @@ class NonHumanTurnStepper(
      * and the local human are untimed and never hold the window.
      */
     private fun noteReactionWindow(state: GameState) {
+        if (fastBots()) {
+            clearDecision()
+            clearReactionWindow()
+            return
+        }
         val context = ReactionContext.fromState(state) ?: return
         if (reactionWindow?.context == context) return
         clearDecision()
@@ -226,6 +234,10 @@ class NonHumanTurnStepper(
     }
 
     private fun decisionElapsed(state: GameState): Boolean {
+        if (fastBots()) {
+            clearDecision()
+            return true
+        }
         val key = DecisionKey(state.currentPlayer, state.liveWallSize)
         if (key != decisionKey) {
             decisionKey = key

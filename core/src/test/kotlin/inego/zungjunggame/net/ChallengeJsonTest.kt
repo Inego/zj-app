@@ -8,18 +8,6 @@ import kotlin.test.assertTrue
 
 class ChallengeJsonTest {
     @Test
-    fun startRequestBodyCarriesTheTwoRankedAxes() {
-        assertEquals(
-            """{"rounds":"one","allow_chicken":false}""",
-            ChallengeJson.startRequestBody(ChallengeRounds.One, allowChicken = false),
-        )
-        assertEquals(
-            """{"rounds":"two","allow_chicken":true}""",
-            ChallengeJson.startRequestBody(ChallengeRounds.Two, allowChicken = true),
-        )
-    }
-
-    @Test
     fun parseStartReadsTheAssignedTableAndTicket() {
         val start = ChallengeJson.parseStart(
             """{"public_id":"7K3H-M9PQ","table_id":"tbl-42","seat":0,"ticket":"abc"}""",

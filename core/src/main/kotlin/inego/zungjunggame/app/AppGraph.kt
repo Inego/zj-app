@@ -526,6 +526,7 @@ class AppGraph(
             picker = EngineNonHumanPicker(board) { freePlayHost.botEngine() },
             timing = BotTiming(),
             isHumanSeat = { it == sessionRegistry.playHost.humanSeat },
+            fastBots = { sessionRegistry.kind == SessionKind.FreePlay && freePlayHost.session.gameConfig.fastBots },
         )
 
         freePlayHost = scope.own("freePlayHost") {

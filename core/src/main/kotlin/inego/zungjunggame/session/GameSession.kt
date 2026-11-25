@@ -222,6 +222,7 @@ class GameSession(
             rounds = gameConfig.rules.rounds,
             botLevel = gameConfig.botLevel,
             hintMode = gameConfig.hintMode,
+            fastBots = gameConfig.fastBots,
         )
     }
 

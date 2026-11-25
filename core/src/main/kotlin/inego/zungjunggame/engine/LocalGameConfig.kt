@@ -71,15 +71,16 @@ enum class HintMode(
 /**
  * Everything New Game setup decides for one local game.
  *
- * [rules] is the Zung Jung game configuration. [botLevel] and [hintMode] are
- * properties of the local table, not of the rules, so they stay out of
- * [GameConfig]: that type is also the online hub's matchmaking draft, where
- * local bot/hint settings would be meaningless.
+ * [rules] is the Zung Jung game configuration. [botLevel], [hintMode], and
+ * [fastBots] are properties of the local table, not of the rules, so they stay
+ * out of [GameConfig]: that type is also the online hub's matchmaking draft,
+ * where local bot/hint settings would be meaningless.
  */
 data class LocalGameConfig(
     val rules: GameConfig = DEFAULT_RULES,
     val botLevel: BotLevel = BotLevel.DEFAULT,
     val hintMode: HintMode = HintMode.DEFAULT,
+    val fastBots: Boolean = false,
 ) {
     companion object {
         /** Default rules for a new install's local New Game setup: 4 rounds (16 hands), patternless hands allowed. */

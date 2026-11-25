@@ -98,6 +98,7 @@ class AppOnlineEffectsTest {
             token: String,
             rounds: ChallengeRounds,
             allowChicken: Boolean,
+            fastBots: Boolean,
             onDone: (Result<ChallengeStart>) -> Unit,
         ) {
             starts += Triple(token, rounds, allowChicken)

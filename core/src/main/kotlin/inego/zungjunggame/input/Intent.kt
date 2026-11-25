@@ -137,6 +137,9 @@ sealed interface Intent {
     /** Flip the draft's chicken toggle; stores it and refreshes the pool count. */
     data object ToggleShadowRankedChicken : Intent
 
+    /** Flip Shadow Ranked's fast-bots toggle; stored on the hub without refreshing the pool. */
+    data object ToggleShadowRankedFastBots : Intent
+
     /** Reload the signed-in account's Shadow Ranked attempts. */
     data object RefreshShadowRankedAttempts : Intent
 

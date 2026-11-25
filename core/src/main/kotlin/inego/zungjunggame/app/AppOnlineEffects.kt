@@ -205,9 +205,9 @@ internal class AppOnlineEffects(
         if (accountController.token == null) return
         // The draft is read, not consumed: the hub stays up while the start is
         // pending, and a successful start must not clear the remembered config.
-        val draft = routeUi.read(hubRoute.key, OnlineHubCodec)?.draft
-            ?: DEFAULT_SHADOW_RANKED_DRAFT
-        shadowRankedStarter.start(draft)
+        val state = hubState()
+        val draft = state.draft ?: DEFAULT_SHADOW_RANKED_DRAFT
+        shadowRankedStarter.start(draft, fastBots = state.shadowFastBots)
     }
 
     override fun shadowRankedCancelStart() {
@@ -216,7 +216,7 @@ internal class AppOnlineEffects(
 
     override fun shadowRankedRetryStart() {
         if (accountController.token == null) return
-        shadowRankedStarter.retry()
+        shadowRankedStarter.retry(fastBots = hubState().shadowFastBots)
     }
 
     /**
@@ -235,6 +235,11 @@ internal class AppOnlineEffects(
         val current = hubState()
         val draft = current.draft ?: DEFAULT_SHADOW_RANKED_DRAFT
         storeDraft(current, draft.copy(allowChickenHands = !draft.allowChickenHands))
+    }
+
+    override fun toggleShadowRankedFastBots() {
+        val current = hubState()
+        storeHub(current.copy(shadowFastBots = !current.shadowFastBots))
     }
 
     /** Store [draft] on [current] and read the pool for it. */

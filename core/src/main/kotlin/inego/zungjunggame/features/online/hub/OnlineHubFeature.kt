@@ -129,6 +129,7 @@ object OnlineHubActions : RouteActions {
     const val SET_ROUNDS_ONE = "onlineHub.shadowRanked.roundsOne"
     const val SET_ROUNDS_TWO = "onlineHub.shadowRanked.roundsTwo"
     const val TOGGLE_CHICKEN = "onlineHub.shadowRanked.toggleChicken"
+    const val TOGGLE_FAST_BOTS = "onlineHub.shadowRanked.toggleFastBots"
 
     /**
      * The description's info control. Stable reference page id (`structure.json`,
@@ -173,6 +174,7 @@ object OnlineHubActions : RouteActions {
         HubVerdict.SetRoundsOne -> ComponentAction(SET_ROUNDS_ONE)
         HubVerdict.SetRoundsTwo -> ComponentAction(SET_ROUNDS_TWO)
         HubVerdict.ToggleChicken -> ComponentAction(TOGGLE_CHICKEN)
+        HubVerdict.ToggleFastBots -> ComponentAction(TOGGLE_FAST_BOTS)
         HubVerdict.None, is HubVerdict.BodyScroll -> null
     }
 
@@ -199,6 +201,7 @@ object OnlineHubActions : RouteActions {
         SET_ROUNDS_ONE -> Intent.SetShadowRankedRounds(1)
         SET_ROUNDS_TWO -> Intent.SetShadowRankedRounds(2)
         TOGGLE_CHICKEN -> Intent.ToggleShadowRankedChicken
+        TOGGLE_FAST_BOTS -> Intent.ToggleShadowRankedFastBots
         VIEW_ATTEMPTS -> Intent.ViewShadowRankedAttempts
         VIEW_REFERENCE -> Intent.OpenReference(SHADOW_RANKED_PAGE_ID)
         else -> null

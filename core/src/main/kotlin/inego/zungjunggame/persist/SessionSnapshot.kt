@@ -24,6 +24,8 @@ data class SessionSnapshot(
     val botLevel: BotLevel = BotLevel.DEFAULT,
     /** Hint assistance mode of this local game; a resumed game keeps the mode it started with. */
     val hintMode: HintMode = HintMode.DEFAULT,
+    /** Whether non-human turns skip simulated thinking delays; preserved across resume. */
+    val fastBots: Boolean = false,
 ) {
     val gameConfig: LocalGameConfig
         get() = LocalGameConfig(
@@ -33,5 +35,6 @@ data class SessionSnapshot(
             ),
             botLevel = botLevel,
             hintMode = hintMode,
+            fastBots = fastBots,
         )
 }

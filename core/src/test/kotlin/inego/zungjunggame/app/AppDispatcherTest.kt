@@ -228,6 +228,7 @@ class AppDispatcherTest {
         override fun hubSelectTab(tab: OnlineTab) { hubTabs += tab }
         override fun hubLeave() { hubLeaves++ }
         override fun shadowRankedStart() { shadowStarts++ }
+        override fun toggleShadowRankedFastBots() {}
         override fun shadowRankedCancelStart() { shadowCancels++ }
         override fun shadowRankedRetryStart() { shadowRetries++ }
         // The draft edits are supplied for the interface the dispatcher maps;

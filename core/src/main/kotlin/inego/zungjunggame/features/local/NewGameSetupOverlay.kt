@@ -43,6 +43,7 @@ data class NewGameSetupGeometry(
     val hints: List<NewGameSetupHintGeometry> = emptyList(),
     val chickenToggle: Rect?,
     val chickenInfo: Rect?,
+    val fastBotsToggle: Rect? = null,
     val start: Rect?,
     val cancel: Rect?,
 )
@@ -128,6 +129,7 @@ class NewGameSetupOverlay(
         /** Hint mode stored in [Hit.hintMode]. */
         HintChoice,
         ChickenToggle,
+        FastBotsToggle,
         Start,
         Cancel,
     }
@@ -216,6 +218,7 @@ class NewGameSetupOverlay(
             hints = hints,
             chickenToggle = rectOf(HitKind.ChickenToggle),
             chickenInfo = chickenInfoRect,
+            fastBotsToggle = rectOf(HitKind.FastBotsToggle),
             start = rectOf(HitKind.Start),
             cancel = rectOf(HitKind.Cancel),
         )
@@ -279,6 +282,9 @@ class NewGameSetupOverlay(
         }
         geometry.chickenToggle?.let {
             hits.add(Hit(HitKind.ChickenToggle, it.left, it.bottom, it.width, it.height))
+        }
+        geometry.fastBotsToggle?.let {
+            hits.add(Hit(HitKind.FastBotsToggle, it.left, it.bottom, it.width, it.height))
         }
         geometry.start?.let {
             hits.add(Hit(HitKind.Start, it.left, it.bottom, it.width, it.height))
@@ -398,6 +404,9 @@ class NewGameSetupOverlay(
                         ),
                     )
 
+                HitKind.FastBotsToggle ->
+                    PointerResult.Draft(draft.copy(fastBots = !draft.fastBots))
+
                 HitKind.BotChoice ->
                     hit.botLevel?.let { PointerResult.Draft(draft.copy(botLevel = it)) }
 
@@ -445,6 +454,7 @@ class NewGameSetupOverlay(
         val sectionBots = L10n.get("setup.bots")
         val sectionHints = L10n.get("setup.hints")
         val labelChicken = L10n.get("setup.chicken")
+        val labelFastBots = L10n.get("setup.fast_bots")
         val startLabel = L10n.get("setup.start")
         val cancelLabel = L10n.get("setup.cancel")
         val infoSide = InfoButton.defaultSide()
@@ -465,6 +475,7 @@ class NewGameSetupOverlay(
         } ?: 0f
         val checkInset = Fonts.px(4f) + Fonts.px(22f) + Fonts.px(14f)
         val chickenW = checkInset + Fonts.textWidth(sectionFont, labelChicken) + infoGap + infoSide
+        val fastBotsW = checkInset + Fonts.textWidth(sectionFont, labelFastBots) + Fonts.px(4f)
         val btnGap = Fonts.px(12f)
         val startW = max(Fonts.px(100f), Fonts.textWidth(sectionFont, startLabel) + Fonts.px(40f))
         val cancelW = max(Fonts.px(100f), Fonts.textWidth(sectionFont, cancelLabel) + Fonts.px(40f))
@@ -475,7 +486,7 @@ class NewGameSetupOverlay(
             actions = OverlayForm.Actions.Footer,
             actionWidth = startW + cancelW + btnGap,
             tailWidth = chickenW,
-            sections = { rhythm, _ ->
+            sections = { rhythm, rowWidth ->
                 buildList {
                     add(
                         OverlayForm.Section(
@@ -489,6 +500,10 @@ class NewGameSetupOverlay(
                             label = sectionBots,
                             contentWidth = botsW,
                             rows = List(botOptions.size) { rhythm.rowH },
+                            accessory = OverlayForm.SectionAccessory(
+                                width = fastBotsW,
+                                belowHeight = checkRowHeight(rhythm, rowWidth, labelFastBots, checkInset),
+                            ),
                         ),
                     )
                     if (hintOptions.isNotEmpty()) {
@@ -590,6 +605,21 @@ class NewGameSetupOverlay(
                     pointerWorldX = hoverX,
                     pointerWorldY = hoverY,
                 )
+                placement.accessory?.let { acc ->
+                    drawCheckRow(
+                        batch = batch,
+                        px = px,
+                        label = labelFastBots,
+                        checked = draft.fastBots,
+                        left = acc.left,
+                        bottom = acc.bottom,
+                        w = acc.width,
+                        h = acc.height,
+                        kind = HitKind.FastBotsToggle,
+                        pointerX = hoverX,
+                        pointerY = hoverY,
+                    )
+                }
             }
 
             val chicken = geometry.tail.firstOrNull() ?: return@drawBody
@@ -651,6 +681,17 @@ class NewGameSetupOverlay(
         infoGap: Float,
     ): Float {
         val labelW = (rowWidth - infoSide - infoGap - checkInset).coerceAtLeast(1f)
+        glyphLayout.setText(Fonts.button, label, Color.WHITE, labelW, Align.left, true)
+        return max(rhythm.rowH, glyphLayout.height + Fonts.px(18f))
+    }
+
+    private fun checkRowHeight(
+        rhythm: OverlayForm.Rhythm,
+        rowWidth: Float,
+        label: String,
+        checkInset: Float,
+    ): Float {
+        val labelW = (rowWidth - checkInset).coerceAtLeast(1f)
         glyphLayout.setText(Fonts.button, label, Color.WHITE, labelW, Align.left, true)
         return max(rhythm.rowH, glyphLayout.height + Fonts.px(18f))
     }

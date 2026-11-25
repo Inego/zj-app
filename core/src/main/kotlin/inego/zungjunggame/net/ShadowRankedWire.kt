@@ -61,6 +61,7 @@ interface ShadowRankedStartWire {
         token: String,
         rounds: ChallengeRounds,
         allowChicken: Boolean,
+        fastBots: Boolean = false,
         onDone: (Result<ChallengeStart>) -> Unit,
     )
 }
@@ -129,6 +130,7 @@ object ShadowRankedWire :
         token: String,
         rounds: ChallengeRounds,
         allowChicken: Boolean,
+        fastBots: Boolean,
         onDone: (Result<ChallengeStart>) -> Unit,
     ) {
         val sentAtMs = TimeUtils.millis()
@@ -138,7 +140,7 @@ object ShadowRankedWire :
             setHeader("Content-Type", "application/json")
             setHeader("Accept", "application/json")
             setHeader("Authorization", "Bearer $token")
-            content = ChallengeJson.startRequestBody(rounds, allowChicken)
+            content = ChallengeJson.startRequestBody(rounds, allowChicken, fastBots)
         }
         Gdx.net.sendHttpRequest(request, object : HttpResponseListener {
             override fun handleHttpResponse(httpResponse: HttpResponse) {

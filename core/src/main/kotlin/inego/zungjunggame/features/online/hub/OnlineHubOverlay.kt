@@ -235,6 +235,7 @@ class OnlineHubOverlay(
                 pointerWorldY = pointerWorldY,
                 view = shadowView,
                 draft = state.draft,
+                fastBots = state.shadowFastBots,
             )
         }
     }
@@ -352,7 +353,7 @@ class OnlineHubOverlay(
         // The offset, though, belongs to the tab on screen — its own content is
         // what the card can scroll through.
         val liveH = livePanel.contentHeight(bodyW, view)
-        val shadowH = shadowPanel.contentHeight(bodyW, shadowView, state.draft)
+        val shadowH = shadowPanel.contentHeight(bodyW, shadowView, state.draft, state.shadowFastBots)
         val activeH = if (state.tab == OnlineTab.Live) liveH else shadowH
         return measure(
             screenW, screenH, state, view.searching,
